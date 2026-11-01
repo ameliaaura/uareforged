@@ -8,6 +8,11 @@
 #include "utils.h"
 #include "log.h"
 #include "gui/widget.h"
+#ifdef UA_VR_ENABLED
+#include <cmath>
+#include "vr/vr.h"
+#include "vr/vr_grip.h"
+#endif
 
 std::map<int16_t, int16_t> NC_STACK_winp::KBDMapping;
 
@@ -333,8 +338,25 @@ void NC_STACK_winp::JoyCloseDevice()
 // call was a no-op and the pad stayed silent. SDL_GameControllerRumble drives
 // the two ERM motors directly instead; Input::INPEngine maps the legacy
 // effects onto it.
+bool NC_STACK_winp::HasRumble()
+{
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+        return true;
+#endif
+    return _gameCtrl != NULL;
+}
+
 bool NC_STACK_winp::Rumble(uint16_t lowFreq, uint16_t highFreq, uint32_t ms)
 {
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+    {
+        // Camera shake never moves the VR view; it arrives here and goes to the hands.
+        VR::Rumble(lowFreq / 65535.0f, highFreq / 65535.0f, ms);
+        return true;
+    }
+#endif
     if ( !_gameCtrl )
         return false;
 
@@ -909,7 +931,7 @@ int NC_STACK_winp::GameCtrlAxisVal(SDL_GameControllerAxis axis)
 //   left stick   -> JOYX/JOYY        (steer + pitch / drive)
 //   right stick X-> JOYRUDDER        (extra steer authority, also merged into steering)
 //   right stick  -> JOYHATX/JOYHATY  (POV hat: tank gun elevation), D-pad as fallback
-//   R1/L1        -> JOYTHROTTLE      (momentary throttle fwd/rev, like keyboard accel keys)
+// R1/level 1 -> JOYTHROTTLE (momentary throttle fwd/rev, like keyboard accel keys)
 //   RT/LT        -> JOYB0/JOYB1      (fire weapon / fire machine gun)
 //   Triangle     -> JOYB2            (missile cam)   Cross -> JOYB3 (brake)
 //   Circle/Square/L3/R3 -> JOYB4..7  (free, bindable in the in-game input menu)
@@ -978,16 +1000,296 @@ void NC_STACK_winp::CheckGameController(uint32_t *btnState)
     }
 }
 
+#ifdef UA_VR_ENABLED
+// Touch controllers -> the engine's virtual joystick + hotkeys (vr-proof-plan.md, vehicle table):
+//   left stick   -> JOYX/JOYY        drive: forward/back + turn
+//   right stick  -> JOYRUDDER + JOYHATX/JOYHATY  turn the vehicle / gun (nose) up-down
+//   RT / LT      -> JOYB0 / JOYB1    fire weapon / fire machine gun
+// grips -> flyers: JOYTHROTTLE climb (right) / descend (left); tank / car (
+//                   Settings "GRIPS"): DRIVE = right forward, left brake-then-reverse;
+// BRAKE = right JOYB3 brake; OFF. Other ground viewers: right = brake.
+//   right click  -> JOYB2            missile camera
+//   A            -> hotkey 22        cycle through units (next unit in the squad)
+//   B (hold 0.5 s) -> hotkey 21      jump to host station
+//   X            -> hotkey 8         map on/off (command view placeholder)
+//   Y            -> hotkey 9         squadron manager (squad wheel placeholder)
+//   left click   -> hotkey 25        HUD on/off
+//   menu         -> Esc              pause / options
+// Laser pointer (VR::GetPointer: theatre screens, and in the cockpit while the map /
+// squad manager / exit menu / confirm box is open or in the host station): the right
+// aim ray moves the mouse on the 2D panel; R trigger = left button, R grip or B = right
+// button. While it is on, those three do not fire / brake / climb / call the host station.
+// in a vehicle (pointer only over windows) the R grip always drives / climbs /
+// brakes and only B is the right button (a resting hand points at the tool bar).
+// Hotkeys go through the key currently bound to them in the profile (GetHotKey), so a
+// rebinding in the input menu keeps working.
+static bool s_vrPtrL = false, s_vrPtrR = false, s_vrTrigUsed = false, s_vrGripUsed = false;
+static int s_vrPtrMode = 0;
+static Common::Point s_vrPtrPos(-1, -1);
+// double-click: a left press within kVRDblMs of the previous one and within
+// kVRDblPx of it is the second click of a double-click (SDL clicks = 2, which
+// the game turns into FLAG_DBL_CLICK: "take control" on a unit). For that window
+// the pointer is held at the first press point while the ray stays within
+// kVRDblPx, so hand jitter does not break the game's 4-pixel test.
+static const uint32_t kVRDblMs = 400;
+static const int kVRDblPx = 10;
+static uint32_t s_vrLDownT = 0;
+static Common::Point s_vrLDownPos(-1000, -1000);
+static int s_vrLClicks = 1;
+
+void NC_STACK_winp::VRPointerButton(bool &state, bool down, int sdlBtn)
+{
+    state = down;
+    const Common::Point pos = s_vrPtrPos;
+    int clicks = 1;
+    if ( sdlBtn == SDL_BUTTON_LEFT )
+    {
+        if ( down )
+        {
+            const uint32_t now = SDL_GetTicks();
+            const bool dbl = s_vrLClicks == 1 && now - s_vrLDownT <= kVRDblMs
+                             && std::abs(pos.x - s_vrLDownPos.x) <= kVRDblPx && std::abs(pos.y - s_vrLDownPos.y) <= kVRDblPx;
+            s_vrLClicks = dbl ? 2 : 1;
+            s_vrLDownT = now;
+            s_vrLDownPos = pos;
+        }
+        clicks = s_vrLClicks;
+    }
+    bool gui;
+    if ( down )
+    {
+        gui = Gui::Root::Instance.MouseDown(pos, sdlBtn, clicks);
+        if ( !gui )
+            OnMouseDown(pos, sdlBtn, clicks);
+    }
+    else
+    {
+        gui = Gui::Root::Instance.MouseUp(pos, sdlBtn, clicks);
+        if ( !gui )
+            OnMouseUp(pos, sdlBtn, clicks);
+    }
+    static int ptrLog = -1;
+    if ( ptrLog < 0 )
+        ptrLog = getenv("UA_VR_AIM_LOG") ? 1 : 0;
+    if ( ptrLog )
+        printf("UAVR pointer: button %d %s at %d,%d%s%s\n", sdlBtn, down ? "down" : "up", pos.x, pos.y, gui ? " (gui)" : "", clicks == 2 ? " (double-click)" : "");
+}
+
+void NC_STACK_winp::ReleaseVRPointer()
+{
+    if ( s_vrPtrL ) VRPointerButton(s_vrPtrL, false, SDL_BUTTON_LEFT);
+    if ( s_vrPtrR ) VRPointerButton(s_vrPtrR, false, SDL_BUTTON_RIGHT);
+}
+
+void NC_STACK_winp::CheckVRControllers(uint32_t *btnState)
+{
+    VR::ControllerState c[2];
+    if ( !VR::GetControllers(c) )
+    {
+        ReleaseVRPointer(); // controllers inactive / session lost while a pointer button was held
+        return;
+    }
+    const VR::ControllerState &L = c[0], &R = c[1];
+
+    auto axis = [](float v) -> int
+    {
+        if ( std::fabs(v) < 0.15f )   // stick dead zone
+            return 0;
+        int t = (int)(v * 300.0f);
+        return t > 300 ? 300 : (t < -300 ? -300 : t);
+    };
+
+    _joyXYpos.x = axis(L.stickX);
+    _joyXYpos.y = -axis(L.stickY);    // engine: stick forward = negative (SDL convention)
+    _joyZRZpos.y = axis(R.stickX);
+    _joyPov.x = axis(R.stickX);
+    _joyPov.y = axis(R.stickY);       // hat up = +300
+
+    // Laser pointer -> mouse. A pointer button is latched to the physical button: one
+    // down when it is pressed while the pointer is on, one up on physical release (or when
+    // the controllers / panel mode go away). While held, the position keeps following the
+    // ray anywhere on the panel (drags do not break at window edges).
+    int ppx = 0, ppy = 0;
+    const bool ptr = VR::GetPointer(&ppx, &ppy);
+    // in a vehicle (UI pointer mode 2) the right grip always drives / climbs /
+    // brakes; a right click while pointing comes from B (vr_grip.h VehicleOwnsGrip).
+    const bool flyer = VR::ViewerIsFlyer();
+    const bool drives = !flyer && VR::ViewerDrives();
+    const int gripMode = VR::GroundGripMode();
+    const int uiPtrMode = VR::UiPointerMode();
+    const bool vehGrip = VR::Grip::VehicleOwnsGrip(uiPtrMode, flyer || (drives && gripMode != VR::GRIP_OFF));
+    const bool bDown = (R.buttons & VR::BTN_B) != 0;
+    static bool s_vrGripDrive = false; // squeeze owned by the vehicle until released
+    s_vrGripDrive = VR::Grip::UpdateGripDrive(s_vrGripDrive, vehGrip, R.grip);
+    {
+        int rx = 0, ry = 0, mode = 0;
+        const bool raw = VR::GetPointerRaw(&rx, &ry, &mode);
+        const bool held = s_vrPtrL || s_vrPtrR;
+        if ( held && mode != s_vrPtrMode )
+            ReleaseVRPointer(); // theatre <-> cockpit switch while holding
+        if ( ptr || (held && raw) )
+        {
+            Common::Point pos = GFX::GFXEngine::Instance.ConvertPosTo2DStuff( ptr ? Common::Point(ppx, ppy) : Common::Point(rx, ry) );
+            // hold still around a fresh left press (double-click window), see kVRDblMs
+            if ( SDL_GetTicks() - s_vrLDownT <= kVRDblMs + 150
+                 && std::abs(pos.x - s_vrLDownPos.x) <= kVRDblPx && std::abs(pos.y - s_vrLDownPos.y) <= kVRDblPx )
+                pos = s_vrLDownPos;
+            if ( pos != s_vrPtrPos )
+            {
+                Common::Point rel = (s_vrPtrPos.x < 0) ? Common::Point() : pos - s_vrPtrPos;
+                if ( !Gui::Root::Instance.MouseMove(pos, rel) )
+                    OnMouseMove(pos, rel);
+                s_vrPtrPos = pos;
+            }
+        }
+        const bool physL = s_vrPtrL ? R.trigger > 0.35f : R.trigger > 0.6f;
+        const bool physR = VR::Grip::PhysRight(vehGrip, s_vrPtrR, R.grip, bDown, s_vrGripDrive);
+        // press only while the pointer is on; release only on physical release
+        const bool wantL = s_vrPtrL ? physL : (ptr && physL && !s_vrTrigUsed);
+        const bool wantR = s_vrPtrR ? physR : (ptr && physR && !s_vrGripUsed);
+        if ( wantL != s_vrPtrL ) VRPointerButton(s_vrPtrL, wantL, SDL_BUTTON_LEFT);
+        if ( wantR != s_vrPtrR ) VRPointerButton(s_vrPtrR, wantR, SDL_BUTTON_RIGHT);
+        if ( s_vrPtrL || s_vrPtrR )
+            s_vrPtrMode = mode;
+        // a squeeze that started as a weapon / brake press never turns into a click
+        s_vrTrigUsed = R.trigger > 0.2f && !s_vrPtrL && (s_vrTrigUsed || !ptr);
+        s_vrGripUsed = VR::Grip::RightUsed(s_vrGripUsed, vehGrip, ptr, s_vrPtrR, R.grip, bDown, s_vrGripDrive);
+    }
+    // A button pressed while pointing stays a mouse button until it is released
+    // (closing the map with a click must not fire the gun).
+    static bool trigLatch = false;
+    static VR::Grip::Latch gripLatch;
+    if ( (ptr || s_vrPtrL) && R.trigger > 0.25f ) trigLatch = true;
+    if ( R.trigger < 0.2f ) trigLatch = false;
+    VR::Grip::UpdateLatch(gripLatch, vehGrip, ptr || s_vrPtrR, R.grip, bDown, s_vrGripDrive);
+    const bool rTrigFree = !ptr && !trigLatch && !s_vrPtrL;
+    const bool rGripFree = VR::Grip::RGripFree(gripLatch, vehGrip, ptr, s_vrPtrR);
+    const bool bFree = VR::Grip::BFree(gripLatch, vehGrip, ptr, s_vrPtrR);
+
+    int thr = 0;
+    if ( flyer )
+    {
+        if ( R.grip > 0.5f && rGripFree ) thr -= 300; // GetSlider() negates: "ahead"/climb is -300 here
+        if ( L.grip > 0.5f ) thr += 300;
+    }
+    _joyZRZpos.x = thr;
+
+    // ground grips (tank / car). DRIVE: the grips act as the left stick's forward /
+    // back (analog: a light squeeze is a slow drive) while the stick's Y is idle, so the
+    // stick keeps working and wins when used. L grip = car-game brake: while the vehicle
+    // still rolls forward it brakes (JOYB3, which beats any thrust in User_layer); once
+    // stopped, holding it reverses. BRAKE: the mapping, R grip = brake.
+    bool gripBrake = false;
+    if ( drives && gripMode == VR::GRIP_DRIVE )
+    {
+        auto gripAxis = [](float g) -> int
+        {
+            if ( g < 0.35f )
+                return 0;
+            const float v = 0.35f + (g - 0.35f) / 0.5f * 0.65f; // past the game's 0.3 brake band
+            return (int)(300.0f * (v > 1.0f ? 1.0f : v));
+        };
+        const int fwd = rGripFree ? gripAxis(R.grip) : 0;
+        const int back = gripAxis(L.grip);
+        const bool stickIdle = std::abs(_joyXYpos.y) < 90; // the game brakes below 0.3
+        // brake while rolling forward, hold the stop 300 ms, then reverse
+        static VR::Grip::LState lState;
+        const VR::Grip::LAction la = VR::Grip::LeftGrip(lState, back != 0, VR::ViewerForwardSpeed(), SDL_GetTicks());
+        if ( la == VR::Grip::L_BRAKE )
+            gripBrake = stickIdle;         // still rolling forward / stop pause: brake (an active stick wins)
+        else if ( la == VR::Grip::L_REVERSE && stickIdle )
+            _joyXYpos.y = back;            // stopped / reversing: reverse
+        else if ( !back && fwd && stickIdle )
+            _joyXYpos.y = -fwd;            // engine: forward = negative
+        static int gripLog = -1;
+        if ( gripLog < 0 )
+            gripLog = getenv("UA_VR_GRIP_LOG") ? 1 : 0;
+        static int lastState = 0;
+        static bool lastB = false;
+        const int state = gripBrake ? (lState.stopped ? 4 : 3) : (la == VR::Grip::L_REVERSE && stickIdle ? 2 : (!back && fwd && stickIdle ? 1 : (!stickIdle ? 5 : 0)));
+        static int gripPolls = 0;
+        gripPolls++;
+        if ( gripLog && (state != lastState || ((state || R.grip > 0.35f || L.grip > 0.35f) && gripPolls % 30 == 0) || bDown != lastB) )
+            fprintf(stderr, "UAVR grips: %s (fwd speed %.2f, joy y %d) R %.2f L %.2f ptr %d ui %d veh %d latch %d/%d ptrR %d B %d t %u%s\n",
+                    state == 5 ? "L stick DRIVE" : state == 4 ? "L grip BRAKE (stop pause)" : state == 3 ? "L grip BRAKE" : state == 2 ? "L grip REVERSE" : state == 1 ? "R grip FORWARD" : "released",
+                    VR::ViewerForwardSpeed(), _joyXYpos.y, R.grip, L.grip, ptr ? 1 : 0, uiPtrMode, vehGrip ? 1 : 0,
+                    gripLatch.grip ? 1 : 0, gripLatch.b ? 1 : 0, s_vrPtrR ? 1 : 0, bDown ? 1 : 0, SDL_GetTicks(), (R.grip > 0.35f && !fwd) ? " R GRIP BLOCKED" : "");
+        lastState = state;
+        lastB = bDown;
+    }
+    else if ( !flyer && !(drives && gripMode == VR::GRIP_OFF) )
+        gripBrake = R.grip > 0.5f && rGripFree; // BRAKE mode, and stations / guns as before
+
+    if ( R.trigger > 0.25f && rTrigFree )        *btnState |= 1 << 0;
+    if ( L.trigger > 0.25f )                     *btnState |= 1 << 1;
+    if ( R.buttons & VR::BTN_STICK_CLICK )       *btnState |= 1 << 2;
+    if ( gripBrake )                             *btnState |= 1 << 3;
+
+    struct Edge { bool held = false; };
+    static Edge eA, eX, eY, eLc, eMenu;
+    static uint32_t bDownAt = 0;
+    static bool bFired = false;
+
+    auto hotkey = [](Edge &e, bool down, int hotkeyId)
+    {
+        int16_t kc = (hotkeyId >= 0) ? Input::Engine.GetHotKey(hotkeyId) : Input::KC_ESCAPE;
+        if ( down && !e.held && kc != Input::KC_NONE )
+            KeyDown(kc);
+        else if ( !down && e.held && kc != Input::KC_NONE )
+            KeyUp(kc);
+        e.held = down;
+    };
+    hotkey(eA, (R.buttons & VR::BTN_A) != 0, 22);
+    hotkey(eX, (L.buttons & VR::BTN_X) != 0, 8);
+    hotkey(eY, (L.buttons & VR::BTN_Y) != 0, 9);
+    hotkey(eLc, (L.buttons & VR::BTN_STICK_CLICK) != 0, 25);
+    hotkey(eMenu, (L.buttons & VR::BTN_MENU) != 0, -1);
+
+    const bool b = bDown && bFree; // B is a right click while pointing
+    const int16_t kcHost = Input::Engine.GetHotKey(21);
+    if ( b && !bDownAt )
+    {
+        bDownAt = SDL_GetTicks();
+        bFired = false;
+    }
+    if ( b && !bFired && SDL_GetTicks() - bDownAt >= 500 && kcHost != Input::KC_NONE )
+    {
+        KeyDown(kcHost);
+        bFired = true;
+    }
+    if ( !b )
+    {
+        if ( bFired && kcHost != Input::KC_NONE )
+            KeyUp(kcHost);
+        bDownAt = 0;
+        bFired = false;
+    }
+}
+#endif
+
 void NC_STACK_winp::CheckJoy()
 {
-    if ( _joyEnable )
+    bool vrPad = false;
+#ifdef UA_VR_ENABLED
+    VR::ControllerState vc[2];
+    vrPad = VR::GetControllers(vc);
+    if ( !vrPad && VR::Active() )
+        ReleaseVRPointer(); // no controllers: never leave a laser click held
+#endif
+    if ( _joyEnable || vrPad )
     {
         uint32_t prevBtnState = _joyButtonStates;
         uint32_t newBtnState = 0;
         _joyXYpos = Common::Point();
         _joyZRZpos = Common::Point();
 
-        if ( _gameCtrl )
+        if ( vrPad )
+        {
+#ifdef UA_VR_ENABLED
+            CheckVRControllers(&newBtnState);
+#endif
+        }
+        else if ( _gameCtrl )
         {
             CheckGameController(&newBtnState);
         }

@@ -14,6 +14,13 @@ struct area_arg_65;
 namespace World
 {
 
+#ifdef UA_VR_ENABLED
+// VR diorama: uniform scale of the view (room units per world unit) while the
+// miniature is collected. Particle billboards are sized in view space, so they are
+// scaled with it. 1 = the normal world view (Classic and every other frame).
+extern float ParticleViewScale;
+#endif
+
 class ParticleSystem
 {
 public:
@@ -40,6 +47,8 @@ public:
     void AddParticle(NC_STACK_particle *base, const vec3d& pos, const vec3d& vec, int32_t age = 0);
     
     void UpdateRender(area_arg_65 *rndrParams, int32_t delta);
+    void Update(int32_t delta);                  // simulation only, once per tick
+    void QueueRender(area_arg_65 *rndrParams);   // read-only: queue billboards for this view
     
     void Clear();
     

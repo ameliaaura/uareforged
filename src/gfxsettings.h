@@ -48,7 +48,8 @@ enum
     PRESET_MEDIUM,
     PRESET_HIGH,
     PRESET_ULTRA,
-    PRESET_VR,          // VR standalone (Quest line); documented, selectable for tests
+    PRESET_VR,          // VR standalone (Quest line): the VR app's default
+    PRESET_VRCLASSIC,   // the original VR look (HD units + V2, no New Look feature); the New Look app's LOOK: ORIGINAL
     PRESET_COUNT
 };
 
@@ -88,6 +89,12 @@ int GetSkies();
 void SetSkies(int s);
 int SkiesFor(int preset, int skyOverride, int skies); // effective SKY level for a menu conf copy
 int Sky3dFor(int preset, int sky3dOverride, int skies); // effective SKY3D level for a menu conf copy
+// VR (stereo) caps: called by the VR layer when a headset session is active. Features whose pass is not
+// per eye are held at the cap whatever the preset/override/env says (GLOW: one screen-space post pass on the
+// default framebuffer, never on the eye targets -> 0; ATMOS 3 = weather particles drawn once after the raster ->
+// at most 2). No effect when never called (flat game).
+void SetStereo(bool on);
+bool Stereo();
 bool EnvLocked(int f);               // env/legacy forces it (menu shows it, can't change)
 bool Save();
 
@@ -104,6 +111,7 @@ int ViewSectors(int iniSectors);
 // then reloads the set so hd models / textures follow the new levels).
 void OnLevelLoad(NC_STACK_ypaworld *yw);
 bool TakeSetReload();
+int AppliedPreset();                 // the preset in force at the last level load (PRESET_NONE before the first)
 
 // First-launch benchmark (see gfxsettings.cpp).
 int BenchLevelId();                  // >0: autostart this level for the bench

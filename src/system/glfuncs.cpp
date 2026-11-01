@@ -74,18 +74,36 @@ PFNGLBINDBUFFERBASEPROC Glext::GLBindBufferBase = NULL;
 template<typename T>
 inline void SetGLFunc(T &pFunc, const char *name)
 {
-    pFunc = (T)SDL_GL_GetProcAddress(name);
+    pFunc = (T)UA_GL_GetProcAddress(name);
     
     if (!pFunc) 
         throw std::runtime_error(std::string("Can't get GL extension address for ") + std::string(name));
+}
+
+// Entry points that are desktop-only (glMapBuffer, glGetBufferSubData) or ES 3.2
+// only (glFramebufferTexture) and never called on GLES: left NULL when absent.
+template<typename T>
+inline void SetGLFuncOptional(T &pFunc, const char *name)
+{
+#ifdef UA_GLES
+    pFunc = (T)UA_GL_GetProcAddress(name);
+#else
+    SetGLFunc(pFunc, name);
+#endif
 }
 
 
 bool Glext::init()
 {
     int major = 0, minor = 0;
+#if defined(UA_GLES) && defined(__ANDROID__)
+    // No SDL video on Android: the shell's EGL context is current.
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
+#else
     SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &major);
     SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &minor);
+#endif
     
     if (major < 2)
         return false;
@@ -97,7 +115,7 @@ bool Glext::init()
     SetGLFunc(GLBindFramebuffer, "glBindFramebuffer");
     SetGLFunc(GLGenRenderbuffers, "glGenRenderbuffers");
     SetGLFunc(GLBindRenderbuffer, "glBindRenderbuffer");
-    SetGLFunc(GLFrameBufferTexture, "glFramebufferTexture");
+    SetGLFuncOptional(GLFrameBufferTexture, "glFramebufferTexture");
     SetGLFunc(GLFrameBufferTexture2D, "glFramebufferTexture2D");
     SetGLFunc(GLRenderbufferStorage, "glRenderbufferStorage");
     SetGLFunc(GLFramebufferRenderbuffer, "glFramebufferRenderbuffer");
@@ -149,8 +167,8 @@ bool Glext::init()
     SetGLFunc(GLIsBuffer, "glIsBuffer");
     SetGLFunc(GLBufferData, "glBufferData");
     SetGLFunc(GLBufferSubData, "glBufferSubData");
-    SetGLFunc(GLGetBufferSubData, "glGetBufferSubData");
-    SetGLFunc(GLMapBuffer, "glMapBuffer");
+    SetGLFuncOptional(GLGetBufferSubData, "glGetBufferSubData");
+    SetGLFuncOptional(GLMapBuffer, "glMapBuffer");
     SetGLFunc(GLMapBufferRange, "glMapBufferRange");
     SetGLFunc(GLUnmapBuffer, "glUnmapBuffer");
     SetGLFunc(GLGetBufferParameteriv, "glGetBufferParameteriv");

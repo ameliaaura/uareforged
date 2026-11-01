@@ -1,6 +1,8 @@
 #include <SDL2/SDL_timer.h>
 
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 #include <queue>
 #include <atomic>
@@ -192,6 +194,21 @@ bool UnqueueAll(ALuint source, const std::vector<ALuint> &own)
 }
 }
 
+// UA_MUTE=1 (Quest: property debug.uavr.mute=1, see platform/quest): no sound
+// output at all for automated runs. OpenAL Soft is pointed at its null backend
+// before the device opens, and the listener gain is pinned to 0 as a second
+// guard (the only thing that applies on Apple's OpenAL). Unset = unchanged.
+static bool AudioMuted()
+{
+    static int muted = -1;
+    if (muted < 0)
+    {
+        const char *v = getenv("UA_MUTE");
+        muted = (v && v[0] && strcmp(v, "0") != 0) ? 1 : 0;
+    }
+    return muted == 1;
+}
+
 waldev::waldev()
 {
     _inited = false;
@@ -202,6 +219,14 @@ waldev::waldev()
     g_statsLast = NowUs();
 
     ALfloat ListenerOri[] = { 0.0, 0.0, 1.0,  0.0, 1.0, 0.0 };
+
+    if (AudioMuted())
+    {
+#if !(defined(__APPLE__) && defined(__MACH__))
+        setenv("ALSOFT_DRIVERS", "null", 1);
+#endif
+        printf("OpenAL: UA_MUTE set - null output, gain 0\n");
+    }
 
     dev = alcOpenDevice(NULL);
 
@@ -216,6 +241,8 @@ waldev::waldev()
             alCheck(alListener3f(AL_POSITION, 0.0, 0.0, 0.0));
             alCheck(alListener3f(AL_VELOCITY, 0.0, 0.0, 0.0));
             alCheck(alListenerfv(AL_ORIENTATION, ListenerOri));
+            if (AudioMuted())
+                alCheck(alListenerf(AL_GAIN, 0.0f));
 
             _inited = true;
             ende = false;
@@ -320,7 +347,7 @@ void waldev::deleteSample(CTsmpl *smpl)
 
 void waldev::master_volume(int vol)
 {
-    alCheck(alListenerf(AL_GAIN, (float)vol / 127.0 ));
+    alCheck(alListenerf(AL_GAIN, AudioMuted() ? 0.0f : (float)vol / 127.0 ));
 }
 
 bool waldev::update()

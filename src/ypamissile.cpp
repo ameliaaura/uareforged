@@ -1,3 +1,6 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -808,6 +811,10 @@ void NC_STACK_ypamissile::ResetViewing()
 
 void NC_STACK_ypamissile::Impact()
 {
+#ifdef UA_VR_ENABLED
+    if ( _mislEmitter && (_mislEmitter->_oflags & BACT_OFLAG_USERINPT) )
+        VR::NoteUserImpact(this, _position.x, _position.y, _position.z); // UA_VR_AIM_LOG
+#endif
     bact_arg83 arg83;
     arg83.energ = _energy;
     arg83.pos = _position;

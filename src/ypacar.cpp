@@ -1,3 +1,6 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -420,6 +423,13 @@ void NC_STACK_ypacar::User_layer(update_msg *arg)
             arg79.tgType = BACT_TGT_TYPE_UNIT;
             arg79.target.pbact = arg106.ret_bact;
         }
+
+#ifdef UA_VR_ENABLED
+        {
+            vec3d vrDir = _rotation.AxisZ() - _rotation.AxisY() * _gun_angle_user * corH; // = arg79.direction below
+            VR::NoteUserAim(_world, this, vrDir.x, vrDir.y, vrDir.z, 0.0, _fire_pos.y, _fire_pos.z);
+        }
+#endif
 
         if ( arg->inpt->Buttons.IsAny({0, 1}) )
         {

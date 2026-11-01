@@ -895,8 +895,19 @@ ResBitmap *NC_STACK_Obj3D::LoadMap(const std::string &mtlDir, const std::string 
     {
         size_t slash = path.rfind('/');
         size_t dot = path.rfind('.');
-        std::string dds = ((dot != std::string::npos && dot > slash) ? path.substr(0, dot) : path) + ".dds";
+        std::string stemPath = (dot != std::string::npos && dot > slash) ? path.substr(0, dot) : path;
+        std::string dds = stemPath + ".dds";
         struct stat st;
+        // Quest data set: ASTC in KTX beside the map (absent on desktop data).
+        std::string ktx = stemPath + ".ktx";
+        if (stat(ktx.c_str(), &st) == 0)
+        {
+            if (ResBitmap *b = GFX::Engine.LoadKtxTexture(ktx, srgb))
+            {
+                printf("obj3d: '%s' <- compressed '%s'\n", path.c_str(), ktx.c_str());
+                return remember(b);
+            }
+        }
         if (stat(dds.c_str(), &st) == 0)
         {
             if (ResBitmap *b = GFX::Engine.LoadDdsTexture(dds, srgb))

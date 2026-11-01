@@ -46,6 +46,9 @@ void ApplyHdLegos(NC_STACK_base *legoRoot);
 // same distance, and slots without a .far.obj keep the original lego as far.
 // Returns `near` itself when no far mesh applies.
 NC_STACK_base *LegoLod(NC_STACK_base *near, const vec3d &pos);
+#ifdef UA_VR_ENABLED
+NC_STACK_base *LegoFarFor(NC_STACK_base *near); // war-table miniature: the far mesh when there is one
+#endif
 
 // Called at the top of every menu (shell) frame. Returns true when a tool mode
 // has finished and the engine should quit.

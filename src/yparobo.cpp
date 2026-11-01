@@ -1,3 +1,7 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr_radio.h"
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -694,6 +698,9 @@ void NC_STACK_yparobo::sb_0x4a7010__sub1(NC_STACK_ypabact *unit, robo_t1 *rbt)
 void NC_STACK_yparobo::doBeamUpdate(int a2)
 {
     _roboBeamTimePre -= a2;
+#ifdef UA_VR_ENABLED
+    VR::StationBeamTick(_gid, _roboBeamTimePre); // world fade before the jump is rendered
+#endif
 
     if ( _roboBeamTimePre > 0 )
     {
@@ -3388,6 +3395,9 @@ void NC_STACK_yparobo::searchEnemyRobo()
                     v12.field_C = 0;
                     v12.field_10 = 0;
 
+#ifdef UA_VR_ENABLED
+                    VRRadio::SetNextEventPos(unit->_position, 6); // the enemy host, not the reporter
+#endif
                     placeMessage(&v12);
                 }
             }
@@ -4981,6 +4991,9 @@ void NC_STACK_yparobo::Die()
             arg134.unit = _killer;
             arg134.field_14 = 50;
 
+#ifdef UA_VR_ENABLED
+            VRRadio::SetNextEventPos(_position, 11); // the destroyed host, not the killer
+#endif
             placeMessage(&arg134);
         }
 

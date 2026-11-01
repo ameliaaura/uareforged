@@ -1,3 +1,6 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -633,6 +636,10 @@ void NC_STACK_ypaufo::User_layer(update_msg *arg)
             arg79.target.pbact = arg106.ret_bact;
             arg79.tgType = BACT_TGT_TYPE_UNIT;
         }
+
+#ifdef UA_VR_ENABLED
+        VR::NoteUserAim(_world, this, _rotation.m20, _rotation.m21, _rotation.m22, 0.0, _fire_pos.y, _fire_pos.z); // = _rotation.AxisZ()
+#endif
 
         if ( arg->inpt->Buttons.IsAny({0, 1}) )
         {

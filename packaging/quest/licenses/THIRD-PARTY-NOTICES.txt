@@ -1,0 +1,44 @@
+UA Reforged VR (Meta Quest app) - third-party components and their licences
+===========================================================================
+
+The app itself (the engine, the OpenXR platform layer and the start screens) is free software under the
+GNU General Public License version 2: LICENSE-GPL-2.0.txt. Credits: CREDITS.md. Source: SOURCE.txt.
+
+Linked into libuavr.so (static libraries, built from the pinned upstream releases listed in
+packaging/quest/deps/fetch_deps.sh):
+
+  SDL2 2.32.10 ............ zlib licence ............ LICENSE-zlib-SDL2.txt
+  SDL2_image 2.8.12 ....... zlib licence ............ LICENSE-zlib-SDL2_image.txt
+      (includes stb_image, public domain / MIT, by Sean Barrett and contributors)
+  SDL2_ttf 2.24.0 ......... zlib licence ............ LICENSE-zlib-SDL2_ttf.txt
+      (includes FreeType, used under the FreeType License: LICENSE-FreeType-FTL.txt;
+       portions of this software are copyright (C) The FreeType Project (www.freetype.org). All rights reserved.)
+  SDL2_net 2.4.0 .......... zlib licence ............ LICENSE-zlib-SDL2_net.txt
+  OpenAL Soft 1.25.2 ...... GNU LGPL 2.1 or later ... LICENSE-LGPL-2.1-OpenAL-Soft.txt
+      (includes PFFFT, BSD-like licence: LICENSE-pffft-OpenAL-Soft.txt). The complete source of this build,
+       including OpenAL Soft and how it is linked, is available (SOURCE.txt), so you can rebuild the app
+       with a modified OpenAL Soft.
+  libogg 1.3.6 ............ BSD 3-clause ............ LICENSE-BSD-libogg.txt
+  libvorbis 1.3.7 ......... BSD 3-clause ............ LICENSE-BSD-libvorbis.txt
+  Lua 5.5.1 ............... MIT licence ............. LICENSE-MIT-Lua.txt
+  zlib .................... the system's libz.so (Android), not shipped in the app
+  LLVM libc++ (Android NDK 27.2 (27.2.12479018), static) ... Apache 2.0 with LLVM exception (no notice required for binaries)
+
+Shipped as its own library:
+
+  libopenxr_loader.so, Khronos OpenXR loader for Android 1.1.63 (prebuilt release from
+  github.com/KhronosGroup/OpenXR-SDK-Source) ... Apache License 2.0 ... LICENSE-Apache-2.0-OpenXR-loader.txt
+
+Fonts (in assets/ua/fonts, each with its own licence file next to it):
+  Liberation Sans/Mono/Serif (SIL OFL 1.1), Xolonium (SIL OFL 1.1), Press Start 2P (SIL OFL 1.1),
+  Textar (IPA Font License 1.0).
+
+Not part of the Quest app:
+  * FFmpeg: video playback is not built for the headset (the desktop builds carry FFmpeg and its LGPL notice).
+  * No Meta (Oculus) SDK component is included. The app talks to the headset through the standard OpenXR API
+    (Khronos loader above); the com.oculus.* lines in its manifest are feature and permission names that the
+    headset's system reads, not code.
+  * No game data: Urban Assault (1998) is Microsoft's. The app downloads the community OpenUA Standalone Package
+    from the Metropolis Dawn community's own server onto the headset when the player asks for it, or the player
+    copies their own game files. The Reforge pack has its own licence (reforge-pack-docs/LICENSE.txt on the
+    headset after the download).

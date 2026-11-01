@@ -1,3 +1,6 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -863,6 +866,10 @@ void NC_STACK_ypaflyer::User_layer(update_msg *arg)
             arg79.tgType = BACT_TGT_TYPE_UNIT;
             arg79.target.pbact = arg106.ret_bact;
         }
+
+#ifdef UA_VR_ENABLED
+        VR::NoteUserAim(_world, this, 0.0, 0.0, 0.0, 0.0, _fire_pos.y, _fire_pos.z); // direction 0 = forward axis (LaunchMissile)
+#endif
 
         if ( arg->inpt->Buttons.IsAny({0, 1}) )
         {

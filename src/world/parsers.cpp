@@ -1,4 +1,9 @@
 #include "parsers.h"
+#include <strings.h>
+#ifdef UA_VR_ENABLED
+#include "../vr/vr.h"
+extern int yw_vrProfileCfgVer; // yw_save.cpp (profile version)
+#endif
 #include "../fmtlib/core.h"
 #include "../fmtlib/printf.h"
 #include "../yw.h"
@@ -47,6 +52,10 @@ bool UserParser::IsScope(ScriptParser::Parser &parser, const std::string &word, 
     }
     return true;
 }
+
+#ifdef UA_VR_ENABLED
+static int StrNCaseCmpVrPanel(const std::string &k) { return strncasecmp(k.c_str(), "vr_panel_", 9); }
+#endif
 
 int UserParser::Handle(ScriptParser::Parser &parser, const std::string &p1, const std::string &p2)
 {
@@ -169,6 +178,13 @@ bool InputParser::IsScope(ScriptParser::Parser &parser, const std::string &word,
         // whichever profile was loaded before it.
         _o._preferences &= ~World::PREF_ENGINERUMBLE;
         Input::Engine.SetEngineRumble(false);
+#ifdef UA_VR_ENABLED
+        // the keys never leak from the previously loaded profile:
+        // PANELS FIXED, no moved layout, QUICK STATION follows the mode, unless the
+        // profile being loaded says otherwise.
+        VR::PanelsProfileReset();
+        VR::SetModeExtraRaw( 5, -1 );
+#endif
 
         // "Modernised Videos" has no such reason to start off: a profile saved
         // before the setting existed should get whatever nucleus.ini's
@@ -194,6 +210,28 @@ bool InputParser::IsScope(ScriptParser::Parser &parser, const std::string &word,
         // default to fall back on: restoring retouched-out pixels is opt-in.
         _o._preferences &= ~World::PREF_WALLSIG;
         HDTex::SetSignaturesEnabled(false);
+
+#ifdef UA_VR_ENABLED
+        // VR comfort vignette: back to the default (Low) unless the profile says otherwise.
+        VR::SetComfortVignettePercent(50);
+        VR::SetCockpitShellsOn(true);
+        // controls: defaults unless the profile says otherwise
+        VR::SetGroundGripMode(VR::GRIP_DRIVE);
+        VR::SetCrosshairColour(VR::XHAIR_YELLOW); // default
+        VR::SetMapBoardOn(true);
+        VR::SetStationSnapTurn(!(getenv("UA_VR_STATION_TURN") && !strcmp(getenv("UA_VR_STATION_TURN"), "smooth")));
+        VR::SetCockpitFrame(VR::FRAME_OPEN_RIM); // open + rim (open)
+#ifdef UA_VR_NEWLOOK
+        VR::SetDisplayRateSetting(90);  // the release default (90 Hz) unless the profile says otherwise
+#else
+        VR::SetDisplayRateSetting(0);   // auto
+#endif
+        VR::SetFpsCounterOn(false);     // menu: FPS counter off
+        VR::SetStationSnapDeg(30);      // snap angle
+        VR::SetControlsCardAuto(true);  // first-entry controls card
+        VR::ResetModeToDefault();       // VR MODE build default, extras follow the mode
+        yw_vrProfileCfgVer = 0;         // no ";#!vr_cfgver" = written before
+#endif
 
         return true;
     }
@@ -293,6 +331,66 @@ int InputParser::Handle(ScriptParser::Parser &parser, const std::string &p1, con
 
         HDTex::SetSignaturesEnabled( (_o._preferences & World::PREF_WALLSIG) != 0 );
     }
+#ifdef UA_VR_ENABLED
+    else if ( !StriCmp(p1, "vr_vignette") )
+    {
+        VR::SetComfortVignettePercent( parser.stoi(p2) );
+    }
+    else if ( !StriCmp(p1, "vr_cockpit") )
+    {
+        VR::SetCockpitShellsOn( parser.stoi(p2) != 0 );
+    }
+    else if ( !StriCmp(p1, "vr_grips") )
+        VR::SetGroundGripMode( parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_crosshair") )
+        VR::SetCrosshairColour( parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_board") )
+        VR::SetMapBoardOn( parser.stoi(p2) != 0 );
+    else if ( !StriCmp(p1, "vr_snapturn") )
+        VR::SetStationSnapTurn( parser.stoi(p2) != 0 );
+    else if ( !StriCmp(p1, "vr_frame") )
+        VR::SetCockpitFrame( VR::CockpitFrameFromProfile(parser.stoi(p2)) );
+    else if ( !StriCmp(p1, "vr_hz") )
+        VR::SetDisplayRateSetting( parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_fps") )
+        VR::SetFpsCounterOn( parser.stoi(p2) != 0 );
+    else if ( !StriCmp(p1, "vr_snapdeg") )
+        VR::SetStationSnapDeg( parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_card") )
+        VR::SetControlsCardAuto( parser.stoi(p2) != 0 );
+    else if ( !StriCmp(p1, "vr_mode") )
+        VR::SetCommandDeck( parser.stoi(p2) != 0 );
+    else if ( !StriCmp(p1, "vr_fieldorders") )
+        VR::SetModeExtraRaw( 0, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_wristsq") )
+        VR::SetModeExtraRaw( 1, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_sqwheel") )
+        VR::SetModeExtraRaw( 2, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_mapsize") )
+        VR::SetModeExtraRaw( 3, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_dirradio") )
+        VR::SetModeExtraRaw( 4, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_quickstation") ) //
+        VR::SetModeExtraRaw( 5, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_panels") ) //
+        VR::SetPanelsFree( parser.stoi(p2) != 0 );
+    else if ( !StrNCaseCmpVrPanel(p1) ) // vr_panel_* layout (prefix first: stoi only on our keys)
+        VR::PanelProfileKey( p1.c_str(), parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_tokentable") ) // hidden, 1 = the token table
+        VR::SetTokenTable( parser.stoi(p2) != 0 );
+    else if ( !StriCmp(p1, "vr_dio_x") ) // diorama placement
+        VR::SetDioramaPoseKey( 0, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_dio_y") )
+        VR::SetDioramaPoseKey( 1, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_dio_z") )
+        VR::SetDioramaPoseKey( 2, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_dio_yaw") )
+        VR::SetDioramaPoseKey( 3, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_dio_scale") )
+        VR::SetDioramaPoseKey( 4, parser.stoi(p2) );
+    else if ( !StriCmp(p1, "vr_cfgver") )
+        yw_vrProfileCfgVer = parser.stoi(p2) > 0 ? parser.stoi(p2) : 0;
+#endif
     else
     {
         std::string buf;

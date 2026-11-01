@@ -2,7 +2,12 @@
 #define ENGINE_GFX_H_INCLUDED
 
 #include <array>
+#include <functional>
 #include <deque>
+#include <string>
+#include <unordered_map>
+#include <map>
+#include <tuple>
 #include <math.h>
 #include <inttypes.h>
 
@@ -174,6 +179,7 @@ enum RFLAGS
     RFLAGS_IGNORE_FALLOFF = (1 << 8),
     RFLAGS_COMPUTED_COLOR = (1 << 9),
     RFLAGS_DISABLE_ZWRITE = (1 << 10),
+    RFLAGS_VR_NOCLIP = (1 << 15), // VR: not cut by the diorama slab clip (a unit in the hand)
     RFLAGS_FX_ALPHA  =      (1 << 11), // reforge fx (UA_FX pack): alpha-blended sprite, only set by reforge_fx
     RFLAGS_SHADOW_HOST =    (1 << 12), // reforge shadows: host station / its guns = lighter caster; only set when shadows are on
 };    
@@ -666,6 +672,14 @@ public:
 
     bool LoadPalette(const std::string &palette_ilbm);
     SDL_Cursor *LoadCursor(const std::string &name);
+
+    // VR (src/vr): the decoded cursor images are kept so the VR laser pointer can
+    // draw the current cursor into the 2D panel (no OS cursor in a headset).
+    struct CursorImage { SDL_Surface *surf = NULL; int hotX = 0, hotY = 0; };
+    const CursorImage *CurrentCursorImage() const
+    {
+        return (CurrentCursorID >= 1 && CurrentCursorID <= 11 && cursorImages[CurrentCursorID - 1].surf) ? &cursorImages[CurrentCursorID - 1] : NULL;
+    }
     
     
     static SDL_PixelFormat *GetPixelFormat() { return _pixfmt; };
@@ -785,6 +799,7 @@ public:
     virtual void setW3D_texFilt(int arg);
 
     void draw2DandFlush();
+    void TimedEndFrame2D();
     
     void DrawVtxQuad(const std::array<GFX::TVertex, 4> &vtx);
 
@@ -812,6 +827,43 @@ public:
     void RenderingMesh(TRenderNode *mesh);
     void RenderNode(TRenderNode *node);
     void Rasterize(uint32_t RasterEtapes = RASTER_ALL);
+    // VR: draw the queued render lists `passes` times (once per eye) without
+    // re-queueing; before(i)/after(i) bind targets and set the per-pass
+    // projection. Lists are sorted once and cleared at the end.
+    void RasterizePasses(int passes, const std::function<void(int)> &before, const std::function<void(int)> &after);
+
+    // VR (src/vr): when on, "the screen" is the backend's offscreen panel
+    // (defaultFbo()), the colour-effects FBO path is disabled, and blending
+    // writes destination alpha as premultiplied coverage (blendSep) so the
+    // panel can be composited over the eyes. Off = every path unchanged.
+    void SetVRMode(bool on, uint32_t (*defaultFbo)(), void (*blendSep)(GLenum, GLenum, GLenum, GLenum));
+#ifdef UA_VR_ENABLED
+    // VR diorama: four view-space clip planes (a, b, c, d: keep a x + b y + c z + d >= 0)
+    // for the world shaders; NULL = off (all zero).
+    void SetVRClipPlanes(const float *planes16);
+private:
+    void VRClipUniforms(uint32_t prog, const float *planes16);
+    float _vrClip[16] = {0};
+    bool _vrClipOn = false;
+public:
+    // VR diorama static batching (yw_game.cpp): while a capture list is set,
+    // QueueRenderMesh copies each node there instead of queueing it; while
+    // drop is on, it discards the node (an emit-only pass). Both off = unchanged.
+    void VRSetCapture(std::vector<TRenderNode> *list) { _vrCapture = list; }
+    void VRSetDropQueue(bool drop) { _vrDropQueue = drop; }
+    bool VBOEnabled() const { return _vbo; }
+    uint32_t VRQueuedCount() const { return _vrQueued; } // nodes queued so far (window budget)
+private:
+    uint32_t _vrQueued = 0;
+    std::vector<TRenderNode> *_vrCapture = NULL;
+    bool _vrDropQueue = false;
+public:
+#endif
+    // perf (VR only): end of an XR frame. Fences the UBO ring segment this
+    // frame wrote and moves to the next one (see CommitUBOParameters).
+    void VRFrameBoundary();
+    bool VRMode() const { return _vrMode; }
+    uint32_t DefaultFBO() const { return _vrDefaultFbo ? _vrDefaultFbo() : 0; }
     
     void QueueRenderMesh(TRenderNode *mesh);
     TRenderNode &AllocRenderNode() { return _renderNodesCache.GetNext(); };
@@ -842,6 +894,9 @@ public:
     // file is malformed or the GL lacks the format - the caller falls back to
     // the PNG.
     ResBitmap *LoadDdsTexture(const std::string &path, bool srgb);
+    // KTX 1.1 with a pre-built mip chain of ASTC LDR blocks (Quest data set,
+    // tools/vr/quest_texconv.py). NULL when the GL has no ASTC.
+    ResBitmap *LoadKtxTexture(const std::string &path, bool srgb);
     // Compressed-format support detected at GL init (log line "texcomp: ...").
     struct TexCompCaps { bool s3tc = false, s3tcSrgb = false, rgtc = false, bptc = false; };
     const TexCompCaps &GetTexCompCaps();
@@ -894,6 +949,7 @@ public:
 private:
     std::vector<GfxMode> graphicsModes;
     std::array<SDL_Cursor *, 11> cursors;
+    std::array<CursorImage, 11> cursorImages;
     int CurrentCursorID = -1;
     GfxMode GfxSelectedMode;
     
@@ -1169,6 +1225,79 @@ protected:
     vec3d _invClr;
     
     int32_t _colorEffects = 0;
+
+    bool _vrMode = false;
+    std::vector<uint64_t> _screenRowHash;   // VR dirty-row upload of ScreenSurface
+    bool _screenHashValid = false;          // _screenRowHash describes the uploaded texture
+    // perf: rows [_screenNzFirst, _screenNzLast] held the only non-zero pixels at
+    // the last scan (nothing writes the surface between that scan and BeginFrame),
+    // so BeginFrame clears just that band. _screenNzValid=false -> full clear.
+    bool _screenNzValid = false;
+    int _screenNzFirst = 0, _screenNzLast = -1;
+    // perf: per row, one bit per 64-byte block that held a non-zero pixel at the
+    // last scan (kScreenMaskWords x 64 blocks = up to 4096 px wide). BeginFrame /
+    // the async clear zero only those blocks.
+public:
+    static constexpr int kScreenMaskWords = 4;
+protected:
+    std::vector<uint64_t> _screenRowMask;
+    void ScreenClearMasked(int y0, int y1);
+    // perf (VR only): colour-keyed tile fills from the draw-sequence
+    // interpreter are queued and executed at the next Screen() access (or the
+    // 2D upload) in parallel row bands. Every pixel still sees the same writes in
+    // the same order, so the result is identical. UA_VR_2D_DEFER=0 turns it off.
+public:
+    struct QueuedFill { SDL_Surface *src; Common::Rect s, d; uint32_t key; };
+    // perf: per source tile, one class per source row (0 mixed, 1 no key pixel,
+    // 2 all key pixels), so FillRows can memcpy / skip whole rows. Built lazily,
+    // dropped in FreeTexture. UA_VR_2D_FILL_ROWCLASS=0: off.
+    const uint8_t *FillRowClass(const QueuedFill &f);
+    std::map<std::tuple<const void *, const void *, int, int, int, int, uint32_t>, std::vector<uint8_t>> _fillRowClass;
+    int _fillRowClassOn = -1;
+protected:
+    std::vector<QueuedFill> _fills;
+    int _fillDefer = -1;
+    // perf (VR only): hi-res text strips, already scaled to their footprint, so a
+    // repeated string costs one fast alpha blit instead of TTF render + SDL_Blit_Slow.
+    struct HiTextStrip { SDL_Surface *surf; uint32_t lastUse; };
+    std::unordered_map<std::string, HiTextStrip> _hiTextCache;
+    uint32_t _hiTextFrame = 0;
+    int _hiTextCacheOn = -1;
+    SDL_Surface *HiTextStripFor(const std::string &text, const SDL_Color &clr, int w, int h, uint32_t fmt);
+    void ClearHiTextCache();
+    void QueueFill(SDL_Surface *src, const Common::Rect &sRect, const Common::Rect &dRect);
+public:
+    void FlushFills();
+    uint32_t _statFills = 0;
+    uint32_t _statFlushes = 0; // perf: FlushFills runs
+protected:
+    void ScreenAsyncWait();
+public:
+    uint64_t _screenRowsUploaded = 0, _screenUploads = 0; // for the UAVR log
+    // perf counters (VR only, reset by the UAVR log): draws, UBO uploads,
+    // program switches and texture binds issued by the 3D pass.
+    uint32_t _statDraws = 0, _statUbo = 0, _statProg = 0, _statTex = 0;
+    uint32_t _statUboOverflow = 0;
+    double _statClearMs = 0, _statScanMs = 0, _statUploadMs = 0; // VR 2D surface phases (summed)
+protected:
+    // perf: per-draw uniform block through a ring buffer instead of two
+    // glBufferData calls per draw (orphan + upload). VR only; flat untouched.
+    int _uboRingMode = -1;          // -1 not set up, 0 off, 1 map unsynchronized, 2 persistent map
+    uint32_t _uboRing = 0;
+    uint8_t *_uboRingPtr = NULL;    // persistent mapping (mode 2)
+    int32_t _uboRingStride = 256;   // block size rounded to GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT
+    static constexpr int kUboRingSegs = 3;
+    static constexpr int32_t kUboRingSegSize = 2 << 20;
+    int _uboRingSeg = 0;
+    int32_t _uboRingOff = 0;
+    void *_uboRingFence[kUboRingSegs] = {NULL, NULL, NULL};
+    bool _uboRingBound = false;     // indexed binding 0 currently points into the ring
+    void UboRingSetup();
+public:
+protected:
+    void UploadScreenSurfaceDirty();
+    uint32_t (*_vrDefaultFbo)() = NULL;
+    void (*_vrBlendSep)(GLenum, GLenum, GLenum, GLenum) = NULL;
     
     uint32_t _fbo = 0;
     uint32_t _fbod = 0;

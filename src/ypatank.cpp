@@ -1,3 +1,6 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -916,6 +919,10 @@ void NC_STACK_ypatank::User_layer(update_msg *arg)
             arg79.target.pbact = arg106.ret_bact;
             arg79.tgType = BACT_TGT_TYPE_UNIT;
         }
+
+#ifdef UA_VR_ENABLED
+        VR::NoteUserAim(_world, this, v67.x, v67.y, v67.z, 0.0, _fire_pos.y, _fire_pos.z); // world-space reticle on the real gun ray
+#endif
 
         if ( arg->inpt->Buttons.IsAny({0, 1}) )
         {

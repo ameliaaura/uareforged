@@ -5,11 +5,7 @@
 #include <inttypes.h>
 #include <SDL2/SDL.h>
 
-#if defined(__APPLE__) && defined(__MACH__)
-#include <OpenGL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
+#include "../system/glapi.h"
 
 #include "common/common.h"
 

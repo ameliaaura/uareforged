@@ -3,18 +3,25 @@
 #include "../reforge_trails.h"
 #include "../gfxsettings.h"
 #include "../fmtlib/printf.h"
-#include <SDL2/SDL_opengl.h>
+#include "glapi.h"
+#ifdef UA_VR_ENABLED
+#include "../vr/vr.h" // perf sub-timers
+#endif
 #include <SDL2/SDL_image.h>
 
 #if defined(__APPLE__) && defined(__MACH__)
-#include <OpenGL/glext.h>
 #include <stack>
 #include <algorithm>
 #else
-#include <GL/glext.h>
 #include <queue>
+#include <stack>
+#include <algorithm>
 #endif
 
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 #include "gfx.h"
 #include "gfx_glow.h"
 #include "atmos.h"
@@ -102,6 +109,16 @@ void GFXEngine::StaticInit()
 
     _staticInited = true;
     
+#ifdef UA_GLES
+    // GLES has no BGRA upload format in core: keep every SDL surface in RGBA
+    // byte order (ABGR8888 on little endian) and upload as GL_RGBA. Android has
+    // no SDL video subsystem to ask for the display format anyway.
+    _pixfmt = SDL_AllocFormat( SDL_PIXELFORMAT_ABGR8888 );
+    _glPixfmt = GL_RGBA;
+    _glPixtype = GL_UNSIGNED_BYTE;
+    return;
+#endif
+
     SDL_DisplayMode curr;
     SDL_GetCurrentDisplayMode(0, &curr);
     
@@ -331,6 +348,23 @@ void GFXEngine::DrawTextEntry(const ScreenText *txt)
                             clr.b = _font.b;
                         }
 
+                        if ( _vrMode )
+                        {
+                            // perf: cached strip, pre-scaled to the same footprint.
+                            const int lx = p1 + (pass ? 1 : 2);
+                            const int ly = v10 + (pass ? 0 : 1);
+                            SDL_Rect dst;
+                            dst.x = (int)(lx * sx + 0.5);
+                            dst.y = (int)(ly * sy + 0.5);
+                            dst.w = (int)((lx + w1) * sx + 0.5) - dst.x;
+                            dst.h = (int)((ly + h1) * sy + 0.5) - dst.y;
+                            if ( SDL_Surface *strip = HiTextStripFor(txt->string, clr, dst.w, dst.h, hiDst->format->format) )
+                            {
+                                SDL_BlitSurface(strip, NULL, hiDst, &dst);
+                                continue;
+                            }
+                        }
+
                         SDL_Surface *hi = TTF_RenderUTF8_Blended(_font.ttfFontHi, txt->string.c_str(), clr);
                         if (!hi)
                             continue;
@@ -433,6 +467,77 @@ void GFXEngine::DrawTextEntry(const ScreenText *txt)
     }
 }
 
+// perf (VR only): TTF_RenderUTF8_Blended + a scaled, blended SDL_BlitScaled runs
+// SDL's generic per-pixel SDL_Blit_Slow (~3.5 ms/frame for the VR controls card on
+// the Quest). The strip is rendered and nearest-scaled to (w, h) once (a plain copy,
+// no blending), then blitted unscaled with alpha blending, the optimised SDL path.
+// Same footprint and glyph raster; sampling/blend rounding may differ by 1 LSB / px.
+// Entries unused for 120 frames are dropped once the cache holds 512 strings.
+// UA_VR_TEXT_CACHE=0: off (A/B).
+void GFXEngine::ClearHiTextCache()
+{
+    for (auto &e : _hiTextCache)
+        SDL_FreeSurface(e.second.surf);
+    _hiTextCache.clear();
+}
+
+SDL_Surface *GFXEngine::HiTextStripFor(const std::string &text, const SDL_Color &clr, int w, int h, uint32_t fmt)
+{
+    if ( _hiTextCacheOn < 0 )
+    {
+        const char *v = getenv("UA_VR_TEXT_CACHE");
+        _hiTextCacheOn = (v && v[0] == '0') ? 0 : 1;
+    }
+    if ( !_hiTextCacheOn || w <= 0 || h <= 0 || w > 8192 || h > 1024 )
+        return NULL;
+
+    char head[64];
+    snprintf(head, sizeof(head), "%p|%02x%02x%02x|%d|%d|%x|", (void *)_font.ttfFontHi, clr.r, clr.g, clr.b, w, h, fmt);
+    std::string key(head);
+    key += text;
+
+    auto it = _hiTextCache.find(key);
+    if ( it != _hiTextCache.end() )
+    {
+        it->second.lastUse = _hiTextFrame;
+        return it->second.surf;
+    }
+
+    if ( _hiTextCache.size() >= 512 )
+    {
+        for (auto e = _hiTextCache.begin(); e != _hiTextCache.end();)
+        {
+            if ( _hiTextFrame - e->second.lastUse > 120 )
+            {
+                SDL_FreeSurface(e->second.surf);
+                e = _hiTextCache.erase(e);
+            }
+            else
+                ++e;
+        }
+        if ( _hiTextCache.size() >= 2048 )
+            return NULL; // pathological churn: draw uncached
+    }
+
+    SDL_Surface *hi = TTF_RenderUTF8_Blended(_font.ttfFontHi, text.c_str(), clr);
+    if ( !hi )
+        return NULL;
+    // In the destination's pixel format: the per-frame blend is then SDL's same-format
+    // ARGB path instead of a converting one.
+    SDL_Surface *strip = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_BITSPERPIXEL(fmt) == 32 ? fmt : hi->format->format);
+    if ( !strip )
+    {
+        SDL_FreeSurface(hi);
+        return NULL;
+    }
+    SDL_SetSurfaceBlendMode(hi, SDL_BLENDMODE_NONE);
+    SDL_BlitScaled(hi, NULL, strip, NULL);
+    SDL_FreeSurface(hi);
+    SDL_SetSurfaceBlendMode(strip, SDL_BLENDMODE_BLEND);
+    _hiTextCache[key] = HiTextStrip{strip, _hiTextFrame};
+    return strip;
+}
+
 void GFXEngine::AddScreenText(const std::string &string, int p1, int p2, int p3, int p4, int flag)
 {
     ScreenText *v8 = new ScreenText;
@@ -470,7 +575,9 @@ void GFXEngine::initPolyEngine()
 
     glEnable(GL_CULL_FACE);
 
+#ifndef UA_GLES
     glEnable(GL_MULTISAMPLE); // harmless without an MSAA framebuffer
+#endif
 
     if (_dither)
         glEnable(GL_DITHER);
@@ -518,6 +625,7 @@ int GFXEngine::LoadFontByDescr(const std::string &fontname)
     {
         TTF_CloseFont(_font.ttfFontHi);
         _font.ttfFontHi = NULL;
+        ClearHiTextCache();
     }
     _font.hiHeight = 0;
 
@@ -708,6 +816,51 @@ void GFXEngine::DrawLineUI(const Common::Line &line, uint8_t r, uint8_t g, uint8
         return;
     }
 
+    // perf (VR only): the n x n shifted Bresenham lines are the same pixel
+    // pattern translated (DrawLine depends only on the deltas), so their union is
+    // one Bresenham walk stamping an n x n block per point: same pixels, one walk
+    // instead of n*n. Taken only when every shifted copy would pass DrawLine's
+    // bounds test (else the classic loop decides per copy).
+    SDL_Surface *scr = Screen();
+    if ( _vrMode && scr && scr->format->BytesPerPixel == 4 && !(line.Width() == 0 && line.Height() == 0) )
+    {
+        const int x1 = line.x1 * n, y1 = line.y1 * n, x2 = line.x2 * n, y2 = line.y2 * n;
+        if ( x1 >= 0 && y1 >= 0 && x2 >= 0 && y2 >= 0 && x1 + n - 1 < scr->w && x2 + n - 1 < scr->w &&
+             y1 + n - 1 < scr->h && y2 + n - 1 < scr->h )
+        {
+            const uint32_t color = SDL_MapRGBA(scr->format, r, g, b, 255);
+            const int xc = std::abs(x2 - x1), yc = std::abs(y2 - y1);
+            const int sx = x2 <= x1 ? -1 : 1, sy = y2 <= y1 ? -1 : 1;
+            const bool yMajor = xc <= yc;
+            const int steps = yMajor ? yc : xc, sub = yMajor ? xc : yc;
+            const int incr1 = 2 * sub, incr2 = 2 * (sub - steps);
+            int t = 2 * sub - steps;
+            int x = x1, y = y1;
+            const int pitch = scr->pitch;
+            SDL_LockSurface(scr);
+            uint8_t *px = (uint8_t *)scr->pixels;
+            for (int i = 0; i <= steps; i++)
+            {
+                for (int dy = 0; dy < n; dy++)
+                {
+                    uint32_t *row = (uint32_t *)(px + (size_t)(y + dy) * pitch) + x;
+                    for (int dx = 0; dx < n; dx++)
+                        row[dx] = color;
+                }
+                if ( t > 0 )
+                {
+                    t += incr2;
+                    if ( yMajor ) x += sx; else y += sy;
+                }
+                else
+                    t += incr1;
+                if ( yMajor ) y += sy; else x += sx;
+            }
+            SDL_UnlockSurface(scr);
+            return;
+        }
+    }
+
     MarkScreen(std::min(line.x1, line.x2) * n, std::min(line.y1, line.y2) * n,
                (std::abs(line.x2 - line.x1) + 1) * n, (std::abs(line.y2 - line.y1) + 1) * n);
     for (int dy = 0; dy < n; dy++)
@@ -759,6 +912,69 @@ static bool uiRectOpaque(SDL_Surface *s, const SDL_Rect *r)
     return opaque;
 }
 
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+static bool uiStretchCached(SDL_Surface *src, SDL_Rect *srcR, SDL_Surface *dst, SDL_Rect *dstR)
+{
+    static int on = -1;
+    if ( on < 0 )
+    {
+        const char *v = getenv("UA_VR_BKG_CACHE");
+        on = (v && v[0] == '0') ? 0 : 1;
+    }
+    if ( !on || src->format->BytesPerPixel != 4 || dstR->w <= 0 || dstR->h <= 0 || dstR->w > 8192 || dstR->h > 8192 )
+        return false;
+
+    static SDL_Surface *cache = NULL;
+    static const void *cSrc = NULL;
+    static SDL_Rect cSrcR, cDstSz;
+    static uint32_t cFmt = 0;
+    static uint64_t cHash = 0;
+
+    if ( SDL_LockSurface(src) != 0 )
+        return false;
+    uint64_t hash = 1469598103934665603ull;
+    for (int y = srcR->y; y < srcR->y + srcR->h; y++)
+    {
+        const uint32_t *p = (const uint32_t *)((const uint8_t *)src->pixels + (size_t)y * src->pitch) + srcR->x;
+        uint64_t hr = 0;
+        for (int x = 0; x < srcR->w; x++)
+            hr = hr * 31 + p[x];
+        hash = (hash ^ hr) * 1099511628211ull;
+    }
+    SDL_UnlockSurface(src);
+
+    const bool hit = cache && cSrc == (const void *)src && cFmt == dst->format->format && cHash == hash &&
+                     cSrcR.x == srcR->x && cSrcR.y == srcR->y && cSrcR.w == srcR->w && cSrcR.h == srcR->h &&
+                     cDstSz.w == dstR->w && cDstSz.h == dstR->h;
+    if ( !hit )
+    {
+        if ( !cache || cache->w != dstR->w || cache->h != dstR->h || cache->format->format != dst->format->format )
+        {
+            if ( cache )
+                SDL_FreeSurface(cache);
+            cache = SDL_CreateRGBSurfaceWithFormat(0, dstR->w, dstR->h, 32, dst->format->format);
+            if ( !cache )
+                return false;
+            SDL_SetSurfaceBlendMode(cache, SDL_BLENDMODE_NONE);
+        }
+        SDL_Rect full = {0, 0, dstR->w, dstR->h};
+        SDL_Rect sr = *srcR;
+        if ( SDL_SoftStretchLinear(src, &sr, cache, &full) != 0 )
+        {
+            cSrc = NULL;
+            return false;
+        }
+        cSrc = src;
+        cSrcR = *srcR;
+        cDstSz = full;
+        cFmt = dst->format->format;
+        cHash = hash;
+    }
+    SDL_Rect d = *dstR;
+    return SDL_BlitSurface(cache, NULL, dst, &d) == 0;
+}
+#endif
+
 static void uiBlitScaled(SDL_Surface *src, SDL_Rect *srcR, SDL_Surface *dst, SDL_Rect *dstR, int uiN)
 {
 #if SDL_VERSION_ATLEAST(2, 0, 16)
@@ -786,9 +1002,17 @@ static void uiBlitScaled(SDL_Surface *src, SDL_Rect *srcR, SDL_Surface *dst, SDL
     if ( magnifying && sameFmt && noKey && noMod && blendOk &&
          srcR->x >= 0 && srcR->y >= 0 &&
          srcR->x + srcR->w <= src->w && srcR->y + srcR->h <= src->h &&
-         uiRectOpaque(src, srcR) &&
-         SDL_SoftStretchLinear(src, srcR, dst, dstR) == 0 )
-        return;
+         uiRectOpaque(src, srcR) )
+    {
+        // perf (VR only): the shell repaints its 640x480 background art with a
+        // linear stretch to the 3x surface EVERY frame (~6.7 ms on the Quest). Keep
+        // the last stretched result, keyed by source, rects and a content hash of the
+        // source rect, and copy it. UA_VR_BKG_CACHE=0: off.
+        if ( GFX::Engine.VRMode() && uiStretchCached(src, srcR, dst, dstR) )
+            return;
+        if ( SDL_SoftStretchLinear(src, srcR, dst, dstR) == 0 )
+            return;
+    }
 #endif
 
     SDL_BlitScaled(src, srcR, dst, dstR);
@@ -1094,6 +1318,7 @@ void GFXEngine::SetRenderStates(int setAll)
             }
             
             Glext::GLUseProgram(newStates->Prog.ID);
+            _statProg++;
             
             forceSetShader = true;
             
@@ -1134,6 +1359,7 @@ void GFXEngine::SetRenderStates(int setAll)
                     Glext::GLEnableVertexAttribArray(newStates->Prog.UVLoc);
                 
                 glBindTexture(GL_TEXTURE_2D, newStates->Tex);
+                _statTex++;
 
                 _vboStatesBlock.Textured = 1;
             }
@@ -1209,6 +1435,7 @@ void GFXEngine::SetRenderStates(int setAll)
             _vboStatesChanged = true;
         }
     }
+#ifndef UA_GLES // fixed-function state: does not exist in GLES (the VBO path is forced there)
     else
     {
         if (setAll || (newStates->Stipple != _lastStates.Stipple))
@@ -1276,6 +1503,7 @@ void GFXEngine::SetRenderStates(int setAll)
             }
         }
     }
+#endif
     
     if (setAll || (newStates->DepthTest != _lastStates.DepthTest))
     {
@@ -1320,9 +1548,13 @@ void GFXEngine::SetRenderStates(int setAll)
     if (setAll || (newStates->SrcBlend != _lastStates.SrcBlend)
                    || (newStates->DstBlend != _lastStates.DstBlend))
     {
-        glBlendFunc(newStates->SrcBlend, newStates->DstBlend);
+        if (_vrBlendSep)
+            _vrBlendSep(newStates->SrcBlend, newStates->DstBlend, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        else
+            glBlendFunc(newStates->SrcBlend, newStates->DstBlend);
     }
 
+#ifndef UA_GLES // texture environment is fixed-function only (a no-op error on desktop core too)
     if (setAll || (newStates->TexBlend != _lastStates.TexBlend))
     {
         if (newStates->TexBlend == 0)
@@ -1336,6 +1568,7 @@ void GFXEngine::SetRenderStates(int setAll)
         else if (newStates->TexBlend == 2)
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
     }
+#endif
 
     if (setAll || (newStates->AlphaBlend != _lastStates.AlphaBlend))
     {
@@ -1359,6 +1592,7 @@ void GFXEngine::SetRenderStates(int setAll)
 
 void GFXEngine::RenderingMeshOld(TRenderNode *nod)
 {
+#ifndef UA_GLES // legacy client-array path; GLES always takes the VBO path
     if ( !_sceneBeginned )
         return;
     
@@ -1544,6 +1778,7 @@ void GFXEngine::RenderingMeshOld(TRenderNode *nod)
     }
     
     glDrawElements(GL_TRIANGLES, mesh->Indixes.size(), GLINDEXTYPE, mesh->Indixes.data());
+#endif
 }
 
 void GFXEngine::RenderingMesh(TRenderNode *nod)
@@ -1738,7 +1973,18 @@ void GFXEngine::RenderingMesh(TRenderNode *nod)
     }
     
     CommitUBOParameters();    
+#ifdef UA_VR_ENABLED
+    if ( (flags & RFLAGS_VR_NOCLIP) && _vrClipOn ) // VR: a unit in the hand, outside the slab
+    {
+        static const float zero[16] = {0};
+        VRClipUniforms(_lastStates.Prog.ID, zero);
+        glDrawElements(GL_TRIANGLES, mesh->Indixes.size(), GLINDEXTYPE, NULL);
+        VRClipUniforms(_lastStates.Prog.ID, _vrClip);
+    }
+    else
+#endif
     glDrawElements(GL_TRIANGLES, mesh->Indixes.size(), GLINDEXTYPE, NULL);
+    _statDraws++;
 }
 
 void GFXEngine::RenderNode(TRenderNode *node)
@@ -1777,6 +2023,26 @@ void GFXEngine::QueueRenderMesh(TRenderNode *nod)
     TMesh *mesh = nod->Mesh;    
     if (!mesh)
         return;
+#ifdef UA_VR_ENABLED
+    if (_vrCapture) // VR: diorama batch build (the node's mesh is copied by the caller)
+    {
+        _vrCapture->emplace_back(TRenderNode::TYPE_MESH);
+        TRenderNode &c = _vrCapture->back();
+        c.Mesh = nod->Mesh == &nod->LocalMesh ? NULL : nod->Mesh; // local copies are not batched
+        c.coordsID = nod->coordsID;
+        c.Tex = nod->Tex;
+        c.Pbr = nod->Pbr;
+        c.Flags = nod->Flags;
+        c.Color = nod->Color;
+        c.TForm = nod->TForm;
+        c.FogStart = nod->FogStart;
+        c.FogLength = nod->FogLength;
+        return;
+    }
+    if (_vrDropQueue)
+        return;
+    _vrQueued++;
+#endif
     
     uint32_t flags = nod->Flags;
     
@@ -1842,6 +2108,92 @@ void GFXEngine::Rasterize(uint32_t RasterEtapes)
 }
 
 
+void GFXEngine::RasterizePasses(int passes, const std::function<void(int)> &before, const std::function<void(int)> &after)
+{
+    _renderSkyBoxList.sort(TRenderNode::CompareSolid);
+    _renderSolidList.sort(TRenderNode::CompareSolid);
+    _renderZeroTracyList.sort(TRenderNode::CompareSolid);
+    _renderLumaTracyList.sort(TRenderNode::CompareTransparent);
+
+    // reforge shadows - one shadow map per frame for both eyes. Rasterize() runs this before its solid
+    // list; the map is view-independent (camera-relative world, the centre eye's pose: the eye offset only
+    // lives in the per-eye projection), so both eyes sample the same cascades. Off unless SHADOWS > 0.
+    if (_shadowWorld)
+        ShadowPass();
+
+    for (int pass = 0; pass < passes; pass++)
+    {
+        if (before)
+            before(pass);
+
+        for (TRenderNode *n : _renderSkyBoxList)
+            RenderNode(n);
+        for (TRenderNode *n : _renderSolidList)
+            RenderNode(n);
+        for (TRenderNode *n : _renderZeroTracyList)
+            RenderNode(n);
+        for (TRenderNode *n : _renderLumaTracyList)
+            RenderNode(n);
+
+        if (after)
+            after(pass);
+    }
+
+    _renderSkyBoxList.clear();
+    _renderSolidList.clear();
+    _renderZeroTracyList.clear();
+    _renderLumaTracyList.clear();
+}
+
+void GFXEngine::SetVRMode(bool on, uint32_t (*defaultFbo)(), void (*blendSep)(GLenum, GLenum, GLenum, GLenum))
+{
+    _vrMode = on;
+    _vrDefaultFbo = on ? defaultFbo : NULL;
+    _vrBlendSep = on ? blendSep : NULL;
+    if (on && _uboRingMode == 0 && !_uboRing)
+        _uboRingMode = -1; // (re)try the UBO ring now that VR is on
+    if (on)
+        _colorEffects = 0; // the eyes are the post-process targets in VR
+    if (on)
+        _scrTiled = false; // the UI tiled 2D surface is a flat-only path (VR has its own)
+    SetRenderStates(2); // re-apply the cached state through the new blend path
+}
+
+#ifdef UA_VR_ENABLED
+// the program must be bound
+void GFXEngine::VRClipUniforms(uint32_t prog, const float *p)
+{
+    static const char *names[4] = {"DioClip[0]", "DioClip[1]", "DioClip[2]", "DioClip[3]"};
+    for (int i = 0; i < 4; i++)
+    {
+        const GLint loc = Glext::GLGetUniformLocation(prog, names[i]);
+        if (loc >= 0)
+            Glext::GLUniform4f(loc, p[i * 4], p[i * 4 + 1], p[i * 4 + 2], p[i * 4 + 3]);
+    }
+}
+
+void GFXEngine::SetVRClipPlanes(const float *planes16)
+{
+    static const float zero[16] = {0};
+    const float *p = planes16 ? planes16 : zero;
+    for (int i = 0; i < 16; i++)
+        _vrClip[i] = p[i];
+    _vrClipOn = planes16 != NULL;
+    const uint32_t progs[2] = {_stdShaderProg.ID, _v2ShaderProg.ID};
+    bool any = false;
+    for (uint32_t id : progs)
+    {
+        if (!id || Glext::GLGetUniformLocation(id, "DioClip[0]") < 0)
+            continue;
+        Glext::GLUseProgram(id);
+        VRClipUniforms(id, p);
+        any = true;
+    }
+    if (any)
+        Glext::GLUseProgram(_lastStates.Prog.ID);
+}
+#endif
+
 void GFXEngine::raster_func207(int id, TileMap *t)
 {
     _tiles[id] = t;
@@ -1875,7 +2227,7 @@ void GFXEngine::ProcessDrawSeq(const CmdStream &drawSeq, const CmdIncludes *incl
     
     int v11;
 
-    int bytesPerColor = Screen()->format->BytesPerPixel;
+    int bytesPerColor = ScreenSurface->format->BytesPerPixel; // metadata only: no FlushFills()
 
     int32_t curPos = 0;
     const CmdStream *curStream = &drawSeq;
@@ -1883,7 +2235,7 @@ void GFXEngine::ProcessDrawSeq(const CmdStream &drawSeq, const CmdIncludes *incl
     // Everything in this interpreter stays in LOGICAL pixels - including the
     // negative-x wrap below, hence the divide.
     const int uiN = UiScale();
-    int w_pixels = Screen()->pitch / bytesPerColor / uiN;
+    int w_pixels = ScreenSurface->pitch / bytesPerColor / uiN;
     TileMap *tile = NULL;
 
     int x_out = 0;
@@ -1955,15 +2307,14 @@ void GFXEngine::ProcessDrawSeq(const CmdStream &drawSeq, const CmdIncludes *incl
             if ( sheet )
             {
                 MarkScreen(dstR.left * uiN, dstR.top * uiN, (dstR.right - dstR.left) * uiN, (dstR.bottom - dstR.top) * uiN);
-                DrawFill(sheet,
-                         Common::Rect(srcR.left * uiN, srcR.top * uiN, srcR.right * uiN, srcR.bottom * uiN),
-                         Screen(),
-                         Common::Rect(dstR.left * uiN, dstR.top * uiN, dstR.right * uiN, dstR.bottom * uiN));
+                QueueFill(sheet,
+                          Common::Rect(srcR.left * uiN, srcR.top * uiN, srcR.right * uiN, srcR.bottom * uiN),
+                          Common::Rect(dstR.left * uiN, dstR.top * uiN, dstR.right * uiN, dstR.bottom * uiN));
             }
             else
             {
                 MarkScreen(dstR.left, dstR.top, dstR.right - dstR.left, dstR.bottom - dstR.top);
-                DrawFill(tile->img->GetSwTex(), srcR, Screen(), dstR);
+                QueueFill(tile->img->GetSwTex(), srcR, dstR);
             }
 
 
@@ -2370,7 +2721,30 @@ void GFXEngine::raster_func221(const Common::Rect &arg)
 
 void GFXEngine::BeginFrame()
 {
-    ClearScreenSurface();
+    // perf (VR only): the last scan (UploadScreenSurfaceDirty) recorded which
+    // 64-byte blocks of each row held non-zero pixels; everything else is already
+    // 0, so only those blocks are cleared, split across the 2D worker threads.
+    // UA_VR_2D_FULLCLEAR=1 restores the full clear for A/B.
+    static int fullClear = -1;
+    if (fullClear < 0)
+    {
+        const char *v = getenv("UA_VR_2D_FULLCLEAR");
+        fullClear = (v && v[0] && v[0] != '0') ? 1 : 0;
+    }
+    ScreenAsyncWait();
+    if (_vrMode)
+        _hiTextFrame++; // perf text strip cache age
+    const uint64_t tClear0 = _vrMode ? SDL_GetPerformanceCounter() : 0;
+    if (_vrMode && _screenNzValid && !fullClear && Screen() &&
+        _screenRowMask.size() == (size_t)Screen()->h * kScreenMaskWords)
+    {
+        ScreenClearMasked(0, Screen()->h);
+    }
+    else
+        ClearScreenSurface(); // = the full clear unless the UI tiled surface is on (never in VR)
+    _screenNzValid = false;
+    if (_vrMode)
+        _statClearMs += (SDL_GetPerformanceCounter() - tClear0) * 1000.0 / SDL_GetPerformanceFrequency();
 
     ClearTextLayer();
     
@@ -2384,7 +2758,7 @@ void GFXEngine::BeginFrame()
     
     if (_colorEffects)
     {
-        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, 0);
+        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, DefaultFBO());
     
         glClearColor(0, 0, 0, 0);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -2398,33 +2772,58 @@ void GFXEngine::BeginFrame()
     _states.Zwrite = saved;
     SetRenderStates(0);
     
+#ifndef UA_GLES
     if (!_vbo)
     {
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_COLOR_ARRAY);
     }
+#endif
     
     _states.Prog = _stdShaderProg;
+}
+
+// The 2D tail of EndFrame / draw2DandFlush. perf: sub-timed when VR is active
+// (VR::HudT0 is 0 otherwise, so the flat build runs the same four calls untimed).
+void GFXEngine::TimedEndFrame2D()
+{
+#ifdef UA_VR_ENABLED
+    VR::TimingMark(VR::MARK_END_FRAME);
+    double t = VR::HudT0();
+    Gui::Root::Instance.Draw(Screen());
+    VR::HudAdd(VR::HUD_GUIROOT, t);
+    t = VR::HudT0();
+    DrawScreenSurface();
+    VR::HudAdd(VR::HUD_SURFACE, t);
+    t = VR::HudT0();
+    DrawTextLayer();
+    VR::HudAdd(VR::HUD_TEXT, t);
+    t = VR::HudT0();
+    Gui::Root::Instance.HwCompose();
+    VR::HudAdd(VR::HUD_COMPOSE, t);
+#else
+    Gui::Root::Instance.Draw(Screen());
+    DrawScreenSurface();
+    DrawTextLayer();
+    Gui::Root::Instance.HwCompose();
+#endif
 }
 
 void GFXEngine::EndFrame()
 {       
     if (_colorEffects > 1)
     {
-        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, 0);   
+        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, DefaultFBO());   
         DrawFBO();
     }    
 
     if ( _scrTiled && Gui::Root::Instance.SoftDrawsAnything() )
         MarkScreen(0, 0, ScreenSurface->w, ScreenSurface->h);   // software widgets: whole surface
-    Gui::Root::Instance.Draw(Screen());
-    DrawScreenSurface();
-    DrawTextLayer();
-    Gui::Root::Instance.HwCompose();
+    TimedEndFrame2D();
     
     if (_colorEffects == 1)
     {
-        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, 0);
+        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, DefaultFBO());
         DrawFBO();
     }
 
@@ -2613,6 +3012,8 @@ void GFXEngine::ForgetBuffer(uint32_t buf)
 
 void GFXEngine::FreeTexture(ResBitmap *bitm)
 {
+    FlushFills(); // a queued fill may read this bitmap's surface
+    _fillRowClass.clear(); // perf: its row classes may name this surface
     if ( bitm->hwTex )
     {
         // Level teardown frees every bitmap of the level that just ended; this
@@ -2851,14 +3252,11 @@ UA_PALETTE *GFXEngine::GetPalette()
 void GFXEngine::draw2DandFlush()
 {
     if (_colorEffects)
-        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, 0);
+        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, DefaultFBO());
     
     if ( _scrTiled && Gui::Root::Instance.SoftDrawsAnything() )
         MarkScreen(0, 0, ScreenSurface->w, ScreenSurface->h);   // software widgets: whole surface
-    Gui::Root::Instance.Draw(Screen());
-    DrawScreenSurface();
-    DrawTextLayer();
-    Gui::Root::Instance.HwCompose();
+    TimedEndFrame2D();
 
     MaybeSaveShot();
 
@@ -3368,7 +3766,21 @@ SDL_Cursor *GFXEngine::LoadCursor(const std::string &name)
 
     SDL_Cursor* cursor = SDL_CreateColorCursor(cursr, hotX, hotY);
 
-    SDL_FreeSurface(cursr);
+    // Keep the image for the VR pointer (CurrentCursorImage), by load order slot.
+    static const char *kNames[11] = {"Pointer", "Cancel", "Select", "Attack", "Goto", "Disk", "New", "Add", "Control", "Beam", "Build"};
+    bool kept = false;
+    for (int i = 0; i < 11; i++)
+        if (name == kNames[i])
+        {
+            if (cursorImages[i].surf)
+                SDL_FreeSurface(cursorImages[i].surf);
+            cursorImages[i].surf = cursr;
+            cursorImages[i].hotX = hotX;
+            cursorImages[i].hotY = hotY;
+            kept = true;
+        }
+    if (!kept)
+        SDL_FreeSurface(cursr);
 
     return cursor;
 }
@@ -3393,6 +3805,15 @@ void GFXEngine::Init()
         _colorEffects = 0;
         _vbo = false;
     }
+
+#ifdef UA_GLES
+    // GLES has only the shader path. Colour effects need an RGBA32F FBO
+    // (EXT_color_buffer_float) and are off in VR anyway.
+    if (!_glext)
+        printf("gfx: GLES entry points missing - nothing will render\n");
+    _vbo = true;
+    _colorEffects = 0;
+#endif
 
     _mipMaps = System::IniConf::GfxMipmaps.Get<bool>();
 
@@ -3595,7 +4016,7 @@ void GFXEngine::Init()
 
         Glext::GLBindRenderbuffer(GL_RENDERBUFFER, 0);
         glBindTexture(GL_TEXTURE_2D, 0);
-        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, 0);
+        Glext::GLBindFramebuffer(GL_FRAMEBUFFER, DefaultFBO());
 
         if (_vbo)
         {
@@ -3715,6 +4136,7 @@ void GFXEngine::Deinit()
     {
         TTF_CloseFont(_font.ttfFontHi);
         _font.ttfFontHi = NULL;
+        ClearHiTextCache();
     }
     _font.hiHeight = 0;
 
@@ -4071,9 +4493,26 @@ uint8_t *GFXEngine::MakeScreenCopy(int *ow, int *oh)
 
     uint8_t *buf = (uint8_t *)malloc(res.x * res.y * 3);
 
+#ifdef UA_GLES
+    // No front buffer and no GL_RGB read-back in GLES: read the bound
+    // framebuffer (the VR panel / eye FBO) as RGBA and pack it to RGB.
+    {
+        uint8_t *rgba = (uint8_t *)malloc(res.x * res.y * 4);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        glReadPixels(0, 0, res.x, res.y, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        for (int i = 0; i < res.x * res.y; i++)
+        {
+            buf[i * 3 + 0] = rgba[i * 4 + 0];
+            buf[i * 3 + 1] = rgba[i * 4 + 1];
+            buf[i * 3 + 2] = rgba[i * 4 + 2];
+        }
+        free(rgba);
+    }
+#else
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glReadBuffer(GL_FRONT);
     glReadPixels(0, 0, res.x, res.y, GL_RGB, GL_UNSIGNED_BYTE, buf);
+#endif
 
     *ow = res.x;
     *oh = res.y;
@@ -4090,9 +4529,13 @@ uint8_t *GFXEngine::MakeDepthScreenCopy(int *ow, int *oh)
 
     uint8_t *buf = (uint8_t *)malloc(res.x * res.y);
 
+#ifdef UA_GLES
+    memset(buf, 0, res.x * res.y); // depth read-back does not exist in GLES
+#else
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glReadBuffer(GL_FRONT);
     glReadPixels(0, 0, res.x, res.y, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, buf);
+#endif
 
     *ow = res.x;
     *oh = res.y;
@@ -4103,6 +4546,8 @@ uint8_t *GFXEngine::MakeDepthScreenCopy(int *ow, int *oh)
 
 SDL_Surface *GFXEngine::Screen()
 {
+    if (!_fills.empty())
+        FlushFills(); // anyone touching the surface sees all queued tile fills first
     return ScreenSurface;
 }
 
@@ -5030,12 +5475,15 @@ void GFXEngine::AttachUiSheet(TileMap *tileset, const std::string &sheetName)
 
 void GFXEngine::RecreateScreenSurface()
 {
+    FlushFills();
     if ( ScreenSurface )
         SDL_FreeSurface(ScreenSurface);
 
     ResolveUiScale();
 
     ScreenSurface = SDL_CreateRGBSurface(0, _resolution.x * _uiScale, _resolution.y * _uiScale, _pixfmt->BitsPerPixel, _pixfmt->Rmask, _pixfmt->Gmask, _pixfmt->Bmask, _pixfmt->Amask);
+    _screenHashValid = false;
+    _screenNzValid = false;
 
     if ( !screenTex )
         glGenTextures(1, &screenTex);
@@ -5054,7 +5502,8 @@ void GFXEngine::RecreateScreenSurface()
     // Tiled upload only for the hi-density UI (UI pack on); the classic 1x path
     // (preset Original) keeps the full clear + upload exactly as before.
     const char *tv = getenv("UA_UI_TILED");
-    _scrTiled = _uiScale > 1 && ScreenSurface && ScreenSurface->format->BytesPerPixel == 4 &&
+    // VR: never tiled - the VR 2D path has its own dirty-row clear/upload (perf).
+    _scrTiled = !_vrMode && _uiScale > 1 && ScreenSurface && ScreenSurface->format->BytesPerPixel == 4 &&
                 !(tv && tv[0] == '0');
     _scrVerify = (_scrTiled && tv && tv[0] == '2') ? 1 : 0;
     if ( _scrTiled )
@@ -5300,6 +5749,7 @@ bool GFXEngine::EnsureHiFont(int targetH)
     {
         TTF_CloseFont(_font.ttfFontHi);
         _font.ttfFontHi = NULL;
+        ClearHiTextCache();
     }
 
     _font.ttfFontHi = System::LoadFont(_font.face, want);
@@ -5329,6 +5779,7 @@ void GFXEngine::RecreateTextSurface()
     {
         TTF_CloseFont(_font.ttfFontHi);
         _font.ttfFontHi = NULL;
+        ClearHiTextCache();
     }
     _font.hiHeight = 0;
 
@@ -5527,6 +5978,7 @@ void GFXEngine::DrawVtxQuad(const std::array<GFX::TVertex, 4> &vtx)
         CommitUBOParameters();    
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, NULL);
     }
+#ifndef UA_GLES
     else
     {
         glVertexPointer(3, GL_FLOAT, sizeof(TVertex), &vtx[0].Pos);
@@ -5535,6 +5987,571 @@ void GFXEngine::DrawVtxQuad(const std::array<GFX::TVertex, 4> &vtx)
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, &indexes);
     }
+#endif
+}
+
+// VR only (perf item): the 2D software surface used to be re-uploaded whole
+// every frame (1920x1440 = 11 MB, 2.9 ms CPU on the M4). Hash every row, upload
+// only the band between the first and last changed row, nothing when the frame's
+// 2D is identical to the last one. Desktop (VR off) keeps the full upload,
+// byte-identical. UA_VR_2D_FULL=1 restores the full upload in VR (A/B).
+//
+// perf: the row hash was one serial 64-bit multiply chain per row (latency
+// bound: ~19 % of the main thread on the M4, ~3 ms on the Quest's A78). It is now
+// 8 independent 32-bit words the compiler vectorises (NEON / SSE), so the scan
+// runs at memory speed. Every word step (h ^ w) * odd is a bijection of w, and the
+// words are folded with another bijective step, so any single changed pixel always
+// changes the row hash. The same pass ORs each 64-byte block to find the non-zero
+// blocks, which lets BeginFrame clear only those (see _screenRowMask).
+namespace
+{
+// One row: 8 independent 32-bit words (vectorised by the compiler), and one
+// "non-zero" bit per 64-byte block (16 pixels) into mask[].
+inline uint64_t ScreenRowHash(const uint32_t *p, size_t n, uint64_t *mask)
+{
+    uint32_t h[8] = {0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu,
+                     0x165667B1u, 0xD3A2646Cu, 0xFD7046C5u, 0xB55A4F09u};
+    size_t i = 0;
+    int blk = 0;
+    for (; i + 16 <= n; i += 16, blk++)
+    {
+        uint32_t o[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        for (int k = 0; k < 8; k++)
+        {
+            const uint32_t w = p[i + k];
+            o[k] |= w;
+            h[k] = (h[k] ^ w) * 0x01000193u;
+        }
+        for (int k = 0; k < 8; k++)
+        {
+            const uint32_t w = p[i + 8 + k];
+            o[k] |= w;
+            h[k] = (h[k] ^ w) * 0x01000193u;
+        }
+        const uint32_t any = (o[0] | o[1] | o[2] | o[3]) | (o[4] | o[5] | o[6] | o[7]);
+        if (any && blk < 64 * GFXEngine::kScreenMaskWords)
+            mask[blk >> 6] |= 1ull << (blk & 63);
+    }
+    uint32_t tail = 0;
+    for (; i < n; i++)
+    {
+        tail |= p[i];
+        h[0] = (h[0] ^ p[i]) * 0x01000193u;
+    }
+    if (tail && blk < 64 * GFXEngine::kScreenMaskWords)
+        mask[blk >> 6] |= 1ull << (blk & 63);
+    uint64_t r = 0xCBF29CE484222325ull;
+    for (int k = 0; k < 8; k++)
+        r = (r ^ h[k]) * 0x100000001B3ull;
+    return r;
+}
+
+// perf: tiny worker pool for the 2D surface passes (row ranges). Workers
+// spin-free: they sleep on a condition variable between jobs.
+class RowPool
+{
+public:
+    typedef void (*Fn)(void *ctx, int part, int parts);
+    explicit RowPool(int workers) : _n(workers)
+    {
+        for (int i = 0; i < _n; i++)
+            _t.emplace_back([this, i] { Loop(i); });
+    }
+    ~RowPool()
+    {
+        {
+            std::lock_guard<std::mutex> l(_m);
+            _quit = true;
+        }
+        _cv.notify_all();
+        for (std::thread &t : _t)
+            t.join();
+    }
+    int Workers() const { return _n; }
+    // Runs fn on the workers (parts 1.._n when the caller takes part 0, else 0.._n-1).
+    void Start(Fn fn, void *ctx, bool callerHelps)
+    {
+        std::lock_guard<std::mutex> l(_m);
+        _fn = fn;
+        _ctx = ctx;
+        _parts = _n + (callerHelps ? 1 : 0);
+        _first = callerHelps ? 1 : 0;
+        _pending = _n;
+        _gen++;
+        _busy.store(true, std::memory_order_release);
+        _cv.notify_all();
+    }
+    bool Busy() const { return _busy.load(std::memory_order_acquire); }
+    void Wait()
+    {
+        if (!Busy())
+            return;
+        std::unique_lock<std::mutex> l(_m);
+        _done.wait(l, [this] { return _pending == 0; });
+    }
+    int Parts() const { return _parts; }
+
+private:
+    void Loop(int i)
+    {
+        uint64_t seen = 0;
+        for (;;)
+        {
+            Fn fn;
+            void *ctx;
+            int part, parts;
+            {
+                std::unique_lock<std::mutex> l(_m);
+                _cv.wait(l, [&] { return _quit || _gen != seen; });
+                if (_quit)
+                    return;
+                seen = _gen;
+                fn = _fn;
+                ctx = _ctx;
+                part = _first + i;
+                parts = _parts;
+            }
+            fn(ctx, part, parts);
+            {
+                std::lock_guard<std::mutex> l(_m);
+                if (--_pending == 0)
+                {
+                    _busy.store(false, std::memory_order_release);
+                    _done.notify_all();
+                }
+            }
+        }
+    }
+    int _n;
+    std::vector<std::thread> _t;
+    std::mutex _m;
+    std::condition_variable _cv, _done;
+    Fn _fn = NULL;
+    void *_ctx = NULL;
+    int _parts = 1, _first = 0, _pending = 0;
+    uint64_t _gen = 0;
+    bool _quit = false;
+    std::atomic<bool> _busy{false};
+};
+
+RowPool *g_rowPool = NULL;
+int g_rowThreads = -1;
+
+RowPool *Pool()
+{
+    if (g_rowThreads < 0)
+    {
+        const char *v = getenv("UA_VR_2D_THREADS");
+        g_rowThreads = (v && v[0]) ? std::max(0, std::min(7, atoi(v))) : 3;
+        if (g_rowThreads > 0)
+            g_rowPool = new RowPool(g_rowThreads);
+        printf("gfx: VR 2D surface passes on %d worker thread(s) + main\n", g_rowThreads);
+    }
+    return g_rowPool;
+}
+
+struct ScanJob
+{
+    const uint8_t *pixels;
+    int pitch, h;
+    size_t words;
+    uint64_t *rowHash;
+    uint64_t *rowMask;
+    bool hashValid;
+    int first[8], last[8];
+};
+
+void ScanPart(void *ctx, int part, int parts)
+{
+    ScanJob &j = *(ScanJob *)ctx;
+    const int y0 = j.h * part / parts, y1 = j.h * (part + 1) / parts;
+    int first = -1, last = -1;
+    for (int y = y0; y < y1; y++)
+    {
+        const uint32_t *row = (const uint32_t *)(j.pixels + (size_t)y * j.pitch);
+        uint64_t *mask = j.rowMask + (size_t)y * GFXEngine::kScreenMaskWords;
+        for (int k = 0; k < GFXEngine::kScreenMaskWords; k++)
+            mask[k] = 0;
+        const uint64_t hsh = ScreenRowHash(row, j.words, mask);
+        if (!j.hashValid || hsh != j.rowHash[y])
+        {
+            j.rowHash[y] = hsh;
+            if (first < 0)
+                first = y;
+            last = y;
+        }
+    }
+    j.first[part] = first;
+    j.last[part] = last;
+}
+
+struct ClearJob
+{
+    uint8_t *pixels;
+    int pitch, h, rowBytes;
+    const uint64_t *rowMask;
+};
+
+void ClearRows(const ClearJob &j, int y0, int y1)
+{
+    for (int y = y0; y < y1; y++)
+    {
+        const uint64_t *mask = j.rowMask + (size_t)y * GFXEngine::kScreenMaskWords;
+        uint8_t *row = j.pixels + (size_t)y * j.pitch;
+        for (int k = 0; k < GFXEngine::kScreenMaskWords; k++)
+        {
+            uint64_t m = mask[k];
+            while (m)
+            {
+                // one run of consecutive set bits = one memset
+                const int b0 = __builtin_ctzll(m);
+                const uint64_t shifted = m >> b0;
+                const int run = (~shifted == 0) ? 64 - b0 : __builtin_ctzll(~shifted);
+                const int x0 = (k * 64 + b0) * 64;
+                const int x1 = std::min(j.rowBytes, (k * 64 + b0 + run) * 64);
+                if (x1 > x0)
+                    memset(row + x0, 0, x1 - x0);
+                m = (b0 + run >= 64) ? 0 : (m & ~(((1ull << run) - 1) << b0));
+            }
+        }
+    }
+}
+
+ClearJob g_clearJob;
+
+void ClearPart(void *ctx, int part, int parts)
+{
+    const ClearJob &j = *(const ClearJob *)ctx;
+    ClearRows(j, j.h * part / parts, j.h * (part + 1) / parts);
+}
+}
+
+void GFXEngine::ScreenAsyncWait()
+{
+    if (g_rowPool && g_rowPool->Busy())
+        g_rowPool->Wait();
+}
+
+// deferred colour-keyed tile fills ----------------------------------
+namespace
+{
+struct FillJob
+{
+    const GFXEngine::QueuedFill *f;
+    size_t n;
+    uint8_t *pixels;
+    int pitch, h;
+    int band[17]; // perf: part p fills rows [band[p], band[p+1]); band[0] < 0 = equal bands
+    const uint8_t *const *rowClass; // perf: per fill, NULL or GFXEngine::FillRowClass
+};
+
+// Rows [y0, y1) of every queued fill, in queue order. Same per-pixel rule as
+// DrawFillIntCKey<uint32_t>: dest (x, y) <- src (left + x % sw, top + y % sh)
+// unless that source pixel is the colour key.
+void FillRows(const FillJob &j, int y0, int y1)
+{
+    for (size_t i = 0; i < j.n; i++)
+    {
+        const GFXEngine::QueuedFill &f = j.f[i];
+        const int sw = f.s.Width(), sh = f.s.Height(), dw = f.d.Width();
+        const int a = std::max(y0, f.d.top), b = std::min(y1, f.d.bottom);
+        if (a >= b || sw <= 0 || sh <= 0 || dw <= 0)
+            continue;
+        const uint32_t key = f.key;
+        const int nit = dw / sw, nit2 = dw % sw;
+        const uint8_t *cls = j.rowClass ? j.rowClass[i] : NULL;
+        for (int y = a; y < b; y++)
+        {
+            const int sy = (y - f.d.top) % sh;
+            const uint32_t *s = (const uint32_t *)((const uint8_t *)f.src->pixels +
+                                                   (size_t)(f.s.top + sy) * f.src->pitch) + f.s.left;
+            uint32_t *d = (uint32_t *)(j.pixels + (size_t)y * j.pitch) + f.d.left;
+            if (cls && cls[sy] == 2)
+                continue; // every source pixel is the key: nothing to write
+            if (cls && cls[sy] == 1)
+            {
+                // no key pixel in this source row: plain copies
+                for (int n = 0; n < nit; n++, d += sw)
+                    memcpy(d, s, (size_t)sw * 4);
+                if (nit2)
+                    memcpy(d, s, (size_t)nit2 * 4);
+                continue;
+            }
+            for (int n = 0; n < nit; n++, d += sw)
+                for (int x = 0; x < sw; x++)
+                    if (s[x] != key)
+                        d[x] = s[x];
+            for (int x = 0; x < nit2; x++)
+                if (s[x] != key)
+                    d[x] = s[x];
+        }
+    }
+}
+
+void FillPart(void *ctx, int part, int parts)
+{
+    const FillJob &j = *(const FillJob *)ctx;
+    if (j.band[0] >= 0)
+        FillRows(j, j.band[part], j.band[part + 1]);
+    else
+        FillRows(j, j.h * part / parts, j.h * (part + 1) / parts);
+}
+
+// perf: the queued fills cluster in a few screen bands (bar, status windows), so
+// equal row bands left one thread with ~2x the average work. Split at quantiles of
+// the per-row pixel count instead (each row still belongs to exactly one thread and
+// runs the queue in order, so the result is unchanged). UA_VR_2D_FILL_BALANCE=0: off.
+int64_t BalanceFillBands(FillJob &j, int parts)
+{
+    static int on = -1;
+    if (on < 0)
+    {
+        const char *v = getenv("UA_VR_2D_FILL_BALANCE");
+        on = (v && v[0] == '0') ? 0 : 1;
+    }
+    j.band[0] = -1;
+    if (!on || parts < 2 || parts > 16 || j.h <= 0)
+        return -1;
+    static std::vector<int64_t> diff;
+    diff.assign((size_t)j.h + 1, 0);
+    int64_t total = 0;
+    for (size_t i = 0; i < j.n; i++)
+    {
+        const GFXEngine::QueuedFill &f = j.f[i];
+        const int a = std::max(0, f.d.top), b = std::min(j.h, f.d.bottom);
+        const int w = f.d.Width();
+        if (a >= b || w <= 0)
+            continue;
+        diff[a] += w;
+        diff[b] -= w;
+        total += (int64_t)w * (b - a);
+    }
+    if (total <= 0)
+        return 0;
+    j.band[0] = 0;
+    int64_t run = 0, perRow = 0;
+    int p = 1;
+    for (int y = 0; y < j.h && p < parts; y++)
+    {
+        perRow += diff[y];
+        run += perRow;
+        while (p < parts && run * parts >= total * p)
+            j.band[p++] = y + 1;
+    }
+    for (; p <= parts; p++)
+        j.band[p] = j.h;
+    return total;
+}
+}
+
+void GFXEngine::QueueFill(SDL_Surface *src, const Common::Rect &sRect, const Common::Rect &dRect)
+{
+    if (_fillDefer < 0)
+    {
+        const char *v = getenv("UA_VR_2D_DEFER");
+        _fillDefer = (v && v[0]) ? (atoi(v) != 0) : 1;
+    }
+    SDL_Surface *dst = ScreenSurface;
+    uint32_t key = 0;
+    if (!_vrMode || !_fillDefer || !src || !dst || sRect.IsEmpty() || dRect.IsEmpty() ||
+        src->format->format != dst->format->format || src->format->BytesPerPixel != 4 ||
+        SDL_GetColorKey(src, &key) != 0 || SDL_MUSTLOCK(src) || SDL_MUSTLOCK(dst))
+    {
+        FlushFills();
+        DrawFill(src, sRect, dst, dRect);
+        return;
+    }
+    _fills.push_back({src, sRect, dRect, key});
+}
+
+const uint8_t *GFXEngine::FillRowClass(const QueuedFill &f)
+{
+    const int sw = f.s.Width(), sh = f.s.Height();
+    if (sw <= 0 || sh <= 0 || f.s.left < 0 || f.s.top < 0 || f.s.left + sw > f.src->w || f.s.top + sh > f.src->h)
+        return NULL;
+    auto k = std::make_tuple((const void *)f.src, (const void *)f.src->pixels, f.s.left, f.s.top, sw, sh, f.key);
+    auto it = _fillRowClass.find(k);
+    if (it != _fillRowClass.end())
+        return it->second.data();
+    // (eviction happens in FlushFills before a batch collects pointers, never here:
+    // earlier entries of the same batch are still referenced)
+    std::vector<uint8_t> &c = _fillRowClass[k];
+    c.resize(sh);
+    for (int y = 0; y < sh; y++)
+    {
+        const uint32_t *s = (const uint32_t *)((const uint8_t *)f.src->pixels + (size_t)(f.s.top + y) * f.src->pitch) + f.s.left;
+        int keys = 0;
+        for (int x = 0; x < sw; x++)
+            keys += (s[x] == f.key);
+        c[y] = keys == 0 ? 1 : (keys == sw ? 2 : 0);
+    }
+    return c.data();
+}
+
+void GFXEngine::FlushFills()
+{
+    if (_fills.empty())
+        return;
+    SDL_Surface *dst = ScreenSurface;
+    _statFills += (uint32_t)_fills.size();
+#ifdef UA_VR_ENABLED
+    const double tFlush = VR::HudT0();
+#endif
+    // UA_VR_2D_DEFER_VERIFY=1 (dev check): also run the queue through the original
+    // sequential DrawFill on a copy and compare the bytes.
+    static int verify = -1;
+    if (verify < 0)
+        verify = getenv("UA_VR_2D_DEFER_VERIFY") ? 1 : 0;
+    std::vector<uint8_t> ref;
+    if (verify)
+    {
+        const size_t bytes = (size_t)dst->pitch * dst->h;
+        std::vector<uint8_t> before((uint8_t *)dst->pixels, (uint8_t *)dst->pixels + bytes);
+        for (const QueuedFill &f : _fills)
+            DrawFill(f.src, f.s, dst, f.d);
+        ref.assign((uint8_t *)dst->pixels, (uint8_t *)dst->pixels + bytes);
+        memcpy(dst->pixels, before.data(), bytes);
+    }
+    FillJob j = {_fills.data(), _fills.size(), (uint8_t *)dst->pixels, dst->pitch, dst->h, {-1}, NULL};
+    static std::vector<const uint8_t *> rowClass;
+    if (_fillRowClassOn < 0)
+    {
+        const char *v = getenv("UA_VR_2D_FILL_ROWCLASS");
+        _fillRowClassOn = (v && v[0] == '0') ? 0 : 1;
+    }
+    if (_fillRowClassOn)
+    {
+        rowClass.resize(_fills.size());
+        // evict only between batches; map nodes are stable, so the
+        // pointers collected below stay valid until this batch is drawn.
+        if (_fillRowClass.size() + _fills.size() > 20000)
+            _fillRowClass.clear();
+        for (size_t i = 0; i < _fills.size(); i++)
+            rowClass[i] = FillRowClass(_fills[i]);
+        j.rowClass = rowClass.data();
+    }
+    _statFlushes++;
+    // perf: a small queue (lines and text force flushes between window draws)
+    // is cheaper on this thread than waking the workers. UA_VR_2D_FILL_MT_MIN=<px>.
+    static int64_t mtMin = -1;
+    if (mtMin < 0)
+    {
+        const char *v = getenv("UA_VR_2D_FILL_MT_MIN");
+        mtMin = (v && v[0]) ? atoll(v) : 40000;
+    }
+    RowPool *pool = Pool();
+    int64_t px = -1;
+    if (pool)
+        px = BalanceFillBands(j, pool->Workers() + 1);
+    if (pool && (px < 0 || px >= mtMin))
+    {
+        pool->Start(FillPart, &j, true);
+        FillPart(&j, 0, pool->Parts());
+        pool->Wait();
+    }
+    else
+        FillRows(j, 0, dst->h);
+    if (verify)
+    {
+        static int checks = 0, bad = 0;
+        checks++;
+        if (memcmp(ref.data(), dst->pixels, ref.size()) != 0)
+            bad++;
+        if (checks % 500 == 0 || (bad && bad < 5))
+            fprintf(stderr, "UAVR 2D defer verify: %d flushes, %d mismatched\n", checks, bad);
+    }
+    _fills.clear();
+#ifdef UA_VR_ENABLED
+    VR::HudAdd(VR::HUD_FLUSH, tFlush);
+#endif
+}
+
+// Zero the blocks the last scan saw non-zero, rows [y0, y1), on the 2D workers.
+void GFXEngine::ScreenClearMasked(int y0, int y1)
+{
+    SDL_Surface *s = ScreenSurface;
+    g_clearJob = {(uint8_t *)s->pixels + (size_t)y0 * s->pitch, s->pitch, y1 - y0,
+                  s->w * s->format->BytesPerPixel, _screenRowMask.data() + (size_t)y0 * kScreenMaskWords};
+    if (RowPool *pool = Pool())
+    {
+        pool->Start(ClearPart, &g_clearJob, true);
+        ClearPart(&g_clearJob, 0, pool->Parts());
+        pool->Wait();
+    }
+    else
+        ClearRows(g_clearJob, 0, g_clearJob.h);
+}
+
+void GFXEngine::UploadScreenSurfaceDirty()
+{
+    static int full = -1;
+    if (full < 0)
+    {
+        const char *v = getenv("UA_VR_2D_FULL");
+        full = (v && v[0] && v[0] != '0') ? 1 : 0;
+    }
+    ScreenAsyncWait();
+    FlushFills();
+    SDL_Surface *s = ScreenSurface;
+    const int h = s->h;
+    if (full)
+    {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->w, h, _glPixfmt, _glPixtype, s->pixels);
+        _screenHashValid = false;
+        _screenNzValid = false;
+        return;
+    }
+    if ((int)_screenRowHash.size() != h)
+    {
+        _screenRowHash.assign(h, 0);
+        _screenHashValid = false;
+    }
+    _screenRowMask.resize((size_t)h * kScreenMaskWords);
+
+    const uint64_t tScan0 = SDL_GetPerformanceCounter();
+    ScanJob job;
+    job.pixels = (const uint8_t *)s->pixels;
+    job.pitch = s->pitch;
+    job.h = h;
+    job.words = ((size_t)s->w * s->format->BytesPerPixel + 3) / 4; // 4-byte pixels in practice
+    job.rowHash = _screenRowHash.data();
+    job.rowMask = _screenRowMask.data();
+    job.hashValid = _screenHashValid;
+    int parts = 1;
+    if (RowPool *pool = Pool())
+    {
+        pool->Start(ScanPart, &job, true);
+        parts = pool->Parts();
+        ScanPart(&job, 0, parts);
+        pool->Wait();
+    }
+    else
+        ScanPart(&job, 0, 1);
+    int first = -1, last = -1;
+    for (int p = 0; p < parts; p++)
+    {
+        if (job.first[p] < 0)
+            continue;
+        if (first < 0)
+            first = job.first[p];
+        last = job.last[p];
+    }
+    _screenHashValid = true;
+    // The block mask covers 64 * kScreenMaskWords blocks of 16 px: wider surfaces
+    // (high logical modes x the 3x UI pack) keep the full clear.
+    _screenNzValid = s->w <= 64 * kScreenMaskWords * 16;
+    _screenRowsUploaded += (first < 0) ? 0 : (last - first + 1);
+    _screenUploads++;
+    const uint64_t tScan1 = SDL_GetPerformanceCounter();
+    _statScanMs += (tScan1 - tScan0) * 1000.0 / SDL_GetPerformanceFrequency();
+    if (first >= 0)
+    {
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, s->pitch / s->format->BytesPerPixel);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, first, s->w, last - first + 1, _glPixfmt, _glPixtype,
+                        (const uint8_t *)s->pixels + (size_t)first * s->pitch);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    }
+    _statUploadMs += (SDL_GetPerformanceCounter() - tScan1) * 1000.0 / SDL_GetPerformanceFrequency();
 }
 
 void GFXEngine::DrawScreenSurface()
@@ -5591,7 +6608,9 @@ void GFXEngine::DrawScreenSurface()
     SetRenderStates(0);
     
     // Will be binded with SetRenderStates
-    if ( !_scrTiled )
+    if (_vrMode)
+        UploadScreenSurfaceDirty(); // perf (VR): dirty-row upload; _scrTiled is never on in VR
+    else if ( !_scrTiled )
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, ScreenSurface->w, ScreenSurface->h, _glPixfmt, _glPixtype, ScreenSurface->pixels);
     else
     {
@@ -5664,13 +6683,82 @@ void GFXEngine::DrawScreenSurface()
     _states = save;
 }
 
+#ifdef UA_GLES
+// The engine's shaders are written as GLSL 4.10 core. GLSL ES 3.x is the same
+// language for everything they use (std140 UBO, flat varyings, inverse(),
+// determinant(), bit ops) except: the version line, default precision, and
+// textureQueryLod (no GLSL ES equivalent), which becomes an explicit LOD from
+// the UV derivatives. "320 es" on the Quest (Adreno); "300 es" where the
+// context only offers ES 3.0 (the Mac ANGLE test build).
+static std::string TranslateShaderForGLES(int32_t type, const std::string &src)
+{
+    static std::string version;
+    if (version.empty())
+    {
+        const char *slv = (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION);
+        int maj = 0, min = 0;
+        const char *p = slv ? strstr(slv, "ES ") : NULL; // (note: finds 'ES GLSL..' on the Quest -> 300 es, as shipped)
+        if (p)
+            sscanf(p + 3, "%d.%d", &maj, &min);
+        version = (maj > 3 || (maj == 3 && min >= 20)) ? "320 es" : "300 es";
+        printf("gfx: GLES shaders as #version %s (GL_SHADING_LANGUAGE_VERSION '%s')\n", version.c_str(), slv ? slv : "?");
+    }
+
+    std::string body = src;
+    size_t vpos = body.find("#version");
+    if (vpos != std::string::npos)
+    {
+        size_t eol = body.find('\n', vpos);
+        body.erase(vpos, eol == std::string::npos ? std::string::npos : eol - vpos + 1);
+    }
+
+    std::string head = "#version " + version + "\n"
+                       "precision highp float;\n"
+                       "precision highp int;\n"
+                       "precision mediump sampler2D;\n"
+                       "precision mediump sampler2DArray;\n"   // floor detail arrays (no default in ES)
+                       "precision mediump sampler2DShadow;\n";  // reforge shadows
+
+    // textureQueryLod(<sampler>, <uv>).y -> uaTextureLod(<sampler>, <uv>) for every call (the floor shader
+    // has its own call, on texSample/uv). Same quantity textureQueryLod().y reports (the LOD the hardware would
+    // compute, before clamping), isotropic: log2 of the longer screen-space footprint in texels.
+    bool tqlUsed = false;
+    for (size_t q = body.find("textureQueryLod("); q != std::string::npos; q = body.find("textureQueryLod(", q))
+    {
+        size_t close = body.find(')', q);
+        if (close == std::string::npos || body.compare(close + 1, 2, ".y") != 0)
+        {
+            q += 16;
+            continue;
+        }
+        const std::string args = body.substr(q + 16, close - (q + 16));
+        body.replace(q, close + 3 - q, "uaTextureLod(" + args + ")");
+        tqlUsed = true;
+    }
+    if (tqlUsed)
+        head += "float uaTextureLod(sampler2D s, vec2 uv)\n"
+                "{\n"
+                "    vec2 t = uv * vec2(textureSize(s, 0));\n"
+                "    vec2 dx = dFdx(t), dy = dFdy(t);\n"
+                "    return 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));\n"
+                "}\n";
+    (void)type;
+    return head + body;
+}
+#endif
+
 uint32_t GFXEngine::CompileShader(int32_t type, const std::string &string)
 {
     GLuint sh = Glext::GLCreateShader(type);
     if (!sh)
         return 0;
     
+#ifdef UA_GLES
+    const std::string translated = TranslateShaderForGLES(type, string);
+    const GLchar *source = (const GLchar *)translated.c_str();
+#else
     const GLchar *source = (const GLchar *)string.c_str();
+#endif
     
     Glext::GLShaderSource(sh, 1, &source, 0);
     {
@@ -6068,11 +7156,187 @@ void GFXEngine::BindVBOParameters(TShaderProg &shader)
     }
 }
 
+namespace
+{
+// perf: entry points the UBO ring needs (GLES 3.0 / GL 3.2 core, plus
+// GL_EXT_buffer_storage for the persistent mapping), loaded on first use.
+typedef void (APIENTRY *PfnBindBufferRange)(GLenum, GLuint, GLuint, GLintptr, GLsizeiptr);
+typedef void *(APIENTRY *PfnFenceSync)(GLenum, GLbitfield);
+typedef GLenum (APIENTRY *PfnClientWaitSync)(void *, GLbitfield, uint64_t);
+typedef void (APIENTRY *PfnDeleteSync)(void *);
+typedef void (APIENTRY *PfnBufferStorage)(GLenum, GLsizeiptr, const void *, GLbitfield);
+typedef GLboolean (APIENTRY *PfnUnmapBuffer)(GLenum);
+struct UboRingGL
+{
+    PfnBindBufferRange BindBufferRange = NULL;
+    PfnFenceSync FenceSync = NULL;
+    PfnClientWaitSync ClientWaitSync = NULL;
+    PfnDeleteSync DeleteSync = NULL;
+    PfnBufferStorage BufferStorage = NULL;
+    PfnUnmapBuffer UnmapBuffer = NULL;
+} g_ring;
+
+bool HasGLExtension(const char *name)
+{
+    typedef const GLubyte *(APIENTRY *PfnGetStringi)(GLenum, GLuint);
+    PfnGetStringi getStringi = (PfnGetStringi)UA_GL_GetProcAddress("glGetStringi");
+    if (!getStringi)
+        return false;
+    GLint n = 0;
+    glGetIntegerv(0x821D /* GL_NUM_EXTENSIONS */, &n);
+    for (GLint i = 0; i < n; i++)
+    {
+        const char *e = (const char *)getStringi(GL_EXTENSIONS, i);
+        if (e && !strcmp(e, name))
+            return true;
+    }
+    return false;
+}
+}
+
+void GFXEngine::UboRingSetup()
+{
+    _uboRingMode = 0;
+    if (!_vbo || !_vrMode)
+        return;
+    int want = 2;
+    if (const char *v = getenv("UA_VR_UBO_RING"))
+        want = atoi(v);
+    if (want <= 0)
+    {
+        printf("gfx: VR UBO ring off (UA_VR_UBO_RING=0): per-draw glBufferData\n");
+        return;
+    }
+    g_ring.BindBufferRange = (PfnBindBufferRange)UA_GL_GetProcAddress("glBindBufferRange");
+    g_ring.FenceSync = (PfnFenceSync)UA_GL_GetProcAddress("glFenceSync");
+    g_ring.ClientWaitSync = (PfnClientWaitSync)UA_GL_GetProcAddress("glClientWaitSync");
+    g_ring.DeleteSync = (PfnDeleteSync)UA_GL_GetProcAddress("glDeleteSync");
+    g_ring.UnmapBuffer = (PfnUnmapBuffer)UA_GL_GetProcAddress("glUnmapBuffer");
+    if (!g_ring.BindBufferRange || !g_ring.FenceSync || !g_ring.ClientWaitSync || !g_ring.DeleteSync ||
+        !g_ring.UnmapBuffer || !Glext::GLMapBufferRange)
+    {
+        printf("gfx: VR UBO ring unavailable (entry points missing)\n");
+        return;
+    }
+    if (want >= 2)
+    {
+        if (HasGLExtension("GL_EXT_buffer_storage"))
+            g_ring.BufferStorage = (PfnBufferStorage)UA_GL_GetProcAddress("glBufferStorageEXT");
+        else if (HasGLExtension("GL_ARB_buffer_storage"))
+            g_ring.BufferStorage = (PfnBufferStorage)UA_GL_GetProcAddress("glBufferStorage");
+    }
+
+    GLint align = 256;
+    glGetIntegerv(0x8A34 /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT */, &align);
+    if (align <= 0)
+        align = 256;
+    _uboRingStride = ((_vboParamsSize + align - 1) / align) * align;
+
+    const GLsizeiptr total = (GLsizeiptr)kUboRingSegs * kUboRingSegSize;
+    Glext::GLGenBuffers(1, &_uboRing);
+    Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _uboRing);
+    while (glGetError() != GL_NO_ERROR) {}
+    if (g_ring.BufferStorage)
+    {
+        const GLbitfield fl = 0x0002 /* MAP_WRITE */ | 0x0040 /* PERSISTENT */ | 0x0080 /* COHERENT */;
+        g_ring.BufferStorage(GL_UNIFORM_BUFFER, total, NULL, fl);
+        if (glGetError() == GL_NO_ERROR)
+            _uboRingPtr = (uint8_t *)Glext::GLMapBufferRange(GL_UNIFORM_BUFFER, 0, total, fl);
+        if (_uboRingPtr)
+            _uboRingMode = 2;
+        else
+        {   // immutable storage cannot be re-specified: start over with a new buffer
+            Glext::GLDeleteBuffers(1, &_uboRing);
+            Glext::GLGenBuffers(1, &_uboRing);
+            Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _uboRing);
+        }
+    }
+    if (_uboRingMode != 2)
+    {
+        Glext::GLBufferData(GL_UNIFORM_BUFFER, total, NULL, GL_DYNAMIC_DRAW);
+        _uboRingMode = glGetError() == GL_NO_ERROR ? 1 : 0;
+    }
+    if (!_uboRingMode)
+    {
+        Glext::GLDeleteBuffers(1, &_uboRing);
+        _uboRing = 0;
+    }
+    Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _vboParams);
+    printf("gfx: VR UBO ring mode %d (%s), stride %d, %d x %d KB\n", _uboRingMode,
+           _uboRingMode == 2 ? "persistent map" : (_uboRingMode == 1 ? "map unsynchronized" : "off"),
+           _uboRingStride, kUboRingSegs, kUboRingSegSize >> 10);
+}
+
+void GFXEngine::VRFrameBoundary()
+{
+    if (_uboRingMode <= 0)
+        return;
+    // A segment skipped last time (fence not signalled) still holds its old fence:
+    // the new fence comes later in the stream and covers that work too.
+    if (_uboRingFence[_uboRingSeg])
+        g_ring.DeleteSync(_uboRingFence[_uboRingSeg]);
+    _uboRingFence[_uboRingSeg] = g_ring.FenceSync(0x9117 /* GL_SYNC_GPU_COMMANDS_COMPLETE */, 0);
+    _uboRingSeg = (_uboRingSeg + 1) % kUboRingSegs;
+    _uboRingOff = 0;
+    if (void *f = _uboRingFence[_uboRingSeg])
+    {
+        // Normally long signalled (two frames ago); bounded wait otherwise. Reuse the
+        // segment only once the GPU is done with it: on timeout / failure keep the
+        // fence and send this frame's blocks down the ordinary UBO path (ring miss).
+        const GLenum r = g_ring.ClientWaitSync(f, 0x1 /* SYNC_FLUSH_COMMANDS_BIT */, 100000000ull);
+        if (r == 0x911A /* ALREADY_SIGNALED */ || r == 0x911C /* CONDITION_SATISFIED */)
+        {
+            g_ring.DeleteSync(f);
+            _uboRingFence[_uboRingSeg] = NULL;
+        }
+        else
+            _uboRingOff = kUboRingSegSize;
+    }
+}
+
 void GFXEngine::CommitUBOParameters()
 {
     if (_vbo && _vboStatesChanged)
     {
         _vboStatesChanged = false;
+        _statUbo++;
+
+        if (_uboRingMode < 0)
+            UboRingSetup();
+        if (_uboRingMode > 0 && _uboRingOff + _uboRingStride <= kUboRingSegSize)
+        {
+            const GLintptr off = (GLintptr)_uboRingSeg * kUboRingSegSize + _uboRingOff;
+            _uboRingOff += _uboRingStride;
+            bool ok = true;
+            if (_uboRingMode == 2)
+                memcpy(_uboRingPtr + off, &_vboStatesBlock, _vboParamsSize);
+            else
+            {
+                Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _uboRing);
+                void *p = Glext::GLMapBufferRange(GL_UNIFORM_BUFFER, off, _vboParamsSize,
+                                                  0x0002 /* WRITE */ | 0x0004 /* INVALIDATE_RANGE */ | 0x0020 /* UNSYNCHRONIZED */);
+                if (p)
+                {
+                    memcpy(p, &_vboStatesBlock, _vboParamsSize);
+                    g_ring.UnmapBuffer(GL_UNIFORM_BUFFER);
+                }
+                else
+                    ok = false;
+            }
+            if (ok)
+            {
+                g_ring.BindBufferRange(GL_UNIFORM_BUFFER, _vboParamsBlockBinding, _uboRing, off, _vboParamsSize);
+                _uboRingBound = true;
+                return;
+            }
+        }
+        if (_uboRingMode > 0)
+            _statUboOverflow++;
+        if (_uboRingBound)
+        {
+            Glext::GLBindBufferBase(GL_UNIFORM_BUFFER, _vboParamsBlockBinding, _vboParams);
+            _uboRingBound = false;
+        }
         
         Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _vboParams);
         
@@ -6091,11 +7355,13 @@ void GFXEngine::SetProjectionMatrix(const mat4x4f &mat)
         _vboStatesBlock.Proj = tmp;
         _vboStatesChanged = true;
     }
+#ifndef UA_GLES
     else
     {
         glMatrixMode(GL_PROJECTION);
         glLoadMatrixf(&tmp.m00);
     }
+#endif
 }
 
 void GFXEngine::SetModelViewMatrix(const mat4x4f &mat)
@@ -6106,11 +7372,13 @@ void GFXEngine::SetModelViewMatrix(const mat4x4f &mat)
         _vboStatesBlock.View = tmp;
         _vboStatesChanged = true;
     }
+#ifndef UA_GLES
     else
     {
         glMatrixMode(GL_MODELVIEW);
         glLoadMatrixf(&tmp.m00);
     }
+#endif
 }
 
 TShaderProg::TShaderProg(uint32_t id)
@@ -6523,7 +7791,7 @@ PfnCompressedTexImage2D CompressedTexImage2D()
     if (!tried)
     {
         tried = true;
-        fn = (PfnCompressedTexImage2D)SDL_GL_GetProcAddress("glCompressedTexImage2D");
+        fn = (PfnCompressedTexImage2D)UA_GL_GetProcAddress("glCompressedTexImage2D");
     }
     return fn;
 }
@@ -6703,6 +7971,118 @@ ResBitmap *GFXEngine::LoadDdsTexture(const std::string &path, bool srgb)
     if (glGetError() != GL_NO_ERROR)
     {
         printf("texcomp: '%s' upload failed - falling back\n", path.c_str());
+        ForgetTexture(bm->hwTex);
+        glDeleteTextures(1, &bm->hwTex);
+        delete bm;
+        return NULL;
+    }
+    bm->hwBytes = bytes;
+    Perf::TexAlloc(true, bytes);
+    return bm;
+}
+
+// ---------------------------------------------------------------------------
+// KTX 1.1 + ASTC (Quest). Only taken when a <stem>.ktx sits beside a map, which
+// the desktop data never has.
+// ---------------------------------------------------------------------------
+ResBitmap *GFXEngine::LoadKtxTexture(const std::string &path, bool srgb)
+{
+    static int astc = -1;
+    if (astc < 0)
+    {
+        const char *e = (const char *)glGetString(GL_EXTENSIONS);
+        astc = (e && strstr(e, "GL_KHR_texture_compression_astc_ldr")) ? 1 : 0;
+        printf("texcomp: ASTC LDR %s\n", astc ? "available" : "not available");
+    }
+    if (!astc)
+        return NULL;
+
+    std::vector<uint8_t> buf;
+    {
+        Perf::Scope perfDec(Perf::DEC);
+        FILE *f = fopen(path.c_str(), "rb");
+        if (!f)
+            return NULL;
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz > 64)
+        {
+            buf.resize(sz);
+            if (fread(buf.data(), 1, sz, f) != (size_t)sz)
+                buf.clear();
+        }
+        fclose(f);
+    }
+    static const uint8_t kId[12] = {0xAB, 'K', 'T', 'X', ' ', '1', '1', 0xBB, '\r', '\n', 0x1A, '\n'};
+    if (buf.size() < 64 || memcmp(buf.data(), kId, 12) != 0)
+    {
+        printf("texcomp: '%s' is not a KTX 1.1 file\n", path.c_str());
+        return NULL;
+    }
+    auto rd32 = [&buf](size_t o) -> uint32_t
+    { return buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16) | ((uint32_t)buf[o + 3] << 24); };
+    if (rd32(12) != 0x04030201)
+        return NULL;
+    uint32_t ifmt = rd32(28);
+    const int w = rd32(36), h = rd32(40);
+    const int levels = std::max(1u, rd32(56));
+    size_t off = 64 + rd32(60);
+
+    // GL_COMPRESSED_RGBA_ASTC_4x4..12x12 = 0x93B0..0x93BD, sRGB = 0x93D0..0x93DD.
+    uint32_t base = ifmt;
+    if (base >= 0x93D0 && base <= 0x93DD)
+        base -= 0x20;
+    if (base < 0x93B0 || base > 0x93BD || w <= 0 || h <= 0)
+    {
+        printf("texcomp: '%s' format 0x%x not ASTC LDR - falling back\n", path.c_str(), ifmt);
+        return NULL;
+    }
+    const GLenum fmt = srgb ? base + 0x20 : base;
+
+    PfnCompressedTexImage2D up = CompressedTexImage2D();
+    if (!up)
+        return NULL;
+    ResBitmap *bm = new ResBitmap();
+    bm->width = w;
+    bm->height = h;
+
+    Perf::Scope perfTex(Perf::TEX);
+    glGenTextures(1, &bm->hwTex);
+    _states.Tex = bm->hwTex;
+    _states.TexMip = false;
+    SetRenderStates(0);
+
+    const bool mips = levels > 1;
+    bm->hwTexMips = mips;
+    bm->hwTexSrgb = srgb;
+    bm->hwTexRG = false;
+    bm->hwHd = true;
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mips ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
+    if (mips && _maxAniso > 1.0f)
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, _maxAniso);
+
+    while (glGetError() != GL_NO_ERROR) {}
+    uint32_t bytes = 0;
+    bool ok = true;
+    for (int i = 0, lw = w, lh = h; i < levels; ++i, lw = std::max(1, lw / 2), lh = std::max(1, lh / 2))
+    {
+        if (off + 4 > buf.size()) { ok = false; break; }
+        uint32_t n = rd32(off);
+        off += 4;
+        if (off + n > buf.size()) { ok = false; break; }
+        up(GL_TEXTURE_2D, i, fmt, lw, lh, 0, n, buf.data() + off);
+        off += (n + 3) & ~3u;
+        bytes += n;
+    }
+    if (!ok || glGetError() != GL_NO_ERROR)
+    {
+        printf("texcomp: '%s' %s - falling back\n", path.c_str(), ok ? "upload failed" : "truncated");
         ForgetTexture(bm->hwTex);
         glDeleteTextures(1, &bm->hwTex);
         delete bm;

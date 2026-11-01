@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UA Reforged VR (Meta Quest 3 / 3S, Quest 2, Quest Pro): native OpenXR app, no Java code. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.ameliaaura.uareforged.vr"
+    android:versionCode="900"
+    android:versionName="0.9.0"
+    android:installLocation="auto">
+
+    <uses-sdk android:minSdkVersion="32" android:targetSdkVersion="34" />
+
+    <uses-feature android:glEsVersion="0x00030002" android:required="true" />
+    <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true" />
+    <!-- Horizon OS only launches apps that declare hand tracking; declared, not required (controllers only). -->
+    <uses-feature android:name="oculus.software.handtracking" android:required="false" />
+    <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
+    <!-- Colour passthrough behind the miniature war table (XR_FB_passthrough). -->
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true" />
+    <!-- First launch: "Get the game" and the Reforge pack download onto the headset. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- OpenXR runtime broker access (from the Khronos OpenXR loader for Android). -->
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+        </intent>
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRApiLayerService" />
+        </intent>
+    </queries>
+
+    <application
+        android:label="UA Reforged VR"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:extractNativeLibs="false"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest|quest2|cambria|eureka|quest3s" />
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:resizeableActivity="false"
+            android:excludeFromRecents="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode">
+            <meta-data android:name="android.app.lib_name" android:value="uavr" />
+            <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="com.oculus.intent.category.VR" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

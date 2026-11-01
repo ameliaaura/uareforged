@@ -1,11 +1,4 @@
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_opengl.h>
-
-#if defined(__APPLE__) && defined(__MACH__)
-#include <OpenGL/glext.h>
-#else
-#include <GL/glext.h>
-#endif
+#include "glapi.h"
 
 namespace GFX
 {

@@ -31,6 +31,9 @@
 #include "world/parsers.h"
 #include "world/saveparsers.h"
 #include "world/nparticle.h"
+#ifdef UA_VR_ENABLED
+namespace VR { struct DioramaWindow; } // vr/vr.h (diorama)
+#endif
 
 #include "gui/uamsgbox.h"
 
@@ -2175,6 +2178,9 @@ public:
     void RenderSuperItems(baseRender_msg *arg);
     void RenderSuperWave(vec2d pos, vec2d fromPos, baseRender_msg *arg);
     void RenderFillers(baseRender_msg *arg);
+#ifdef UA_VR_ENABLED
+    void RenderDiorama(const VR::DioramaWindow &w, baseRender_msg *rndrs); // VR (yw_game.cpp)
+#endif
     
     void PrepareFiller(cellArea *sct, cellArea *sct2, float v9h, float v8h, bool vertical, TCellFillerCh *out, bool force = false);
     void PrepareAllFillers();
@@ -2313,6 +2319,9 @@ public:
     }
     
     void ypaworld_func64__sub1(TInputState *inpt);
+    // Input flags the controls use: the profile's flags, except in VR, where the controllers always take the
+    // standard joystick path (joystick on, alt joystick off). The profile itself is not changed.
+    uint32_t InputPrefs() const;
     void ypaworld_func64__sub21__sub5(int arg);
     
     

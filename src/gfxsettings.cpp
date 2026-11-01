@@ -42,7 +42,14 @@ struct Feature
 // High with every newer row (SKY, ATMOS, SHADOWS, GLOW, MARKS, TRAILS, UI 2, BUILDINGS 3 far LOD) at its
 // old value must stay = the published New Look.
 const Feature kFeatures[] = {
-    //  name        menu label            Orig Low Med High Ultra VR
+    //  name        menu label            Orig Low Med High Ultra VR VRCLASSIC
+    // (2026-10-18): VR = the VR app (Quest 3; first values, measured on the headset -
+    // has the fps table and why each row is where it is). VRCLASSIC = the original VR look's
+    // look on the same data (HD units, V2, the 3x HUD pack; no New Look feature): the app's LOOK: ORIGINAL.
+    // Quest 3 bench 10-18 (each feature alone over VRCLASSIC, level 1 tank / level 41 war table, eye GPU L+R ms): FX, BUILDINGS,
+    // MARKS, TRAILS, ATMOS 2, SKY 3 within +-0.3; SHADOWS 1 +0.6 (frame +0.8); FLOOR +2.3 / +7.2 (level 41 table 48 fps)
+    // -> FLOOR 0. DRAWDIST 2 (13 sectors) pays for shadows + skies in the vehicle (fewer draws). GLOW is held
+    // at 0 and ATMOS at <= 2 in a headset session whatever the column says (SetStereo: not per-eye passes).
     // Preset levels: SHADOWS, GLOW, TRAILS (Low =
     // flashes+tracers, Med + short smoke, High/Ultra full), MARKS (tracks = level 3 only = High+, 6 min),
     // UI (Med/High 2, Ultra 3 = 4x), SKY (+ own Original/New toggle), ATMOS. VR: every
@@ -53,36 +60,36 @@ const Feature kFeatures[] = {
     // UI: the 3x HUD/menu pack draws the 2D layer in software at
     // 9x the pixels and uploads 11 MB every frame (+1.4-2 ms per frame at any resolution; Apple M-series, L7575 4K Low
     // +38 % with it, +7 % without) -> off in Low/Medium/VR until a dirty-rect upload lands.
-    {"HDMODELS",  "REMASTERED UNITS",  {0, 1, 2, 3, 3, 0}, {"OFF", "ON", "ON", "ON"}, true},
-    {"V2",        "MODERN LIGHTING",   {0, 1, 2, 2, 3, 0}, {"OFF", "BASIC", "FULL", "FULL"}, true},
-    {"FX",        "NEW EFFECTS",       {0, 1, 2, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, true},
-    {"BUILDINGS", "NEW BUILDINGS",     {0, 1, 2, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, true},
-    {"HDTEX",     "SHARP TEXTURES",    {0, 1, 1, 1, 1, 0}, {"OFF", "ON", "ON", "ON"}, true},
-    {"FLOOR",     "GROUND DETAIL",     {0, 0, 0, 3, 3, 0}, {"OFF", "ON", "ON", "ON"}, false},
-    {"DRAWDIST",  "DRAW DISTANCE",     {0, 2, 2, 0, 3, 1}, {"GAME", "SHORT", "MEDIUM", "FAR"}, false},
-    {"SKY",       "NEW SKY",           {0, 1, 2, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
-    {"ATMOS",     "ATMOSPHERE",        {0, 1, 2, 3, 3, 1}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
-    {"SHADOWS",   "SHADOWS",           {0, 0, 1, 2, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
-    {"GLOW",      "GLOW",              {0, 0, 1, 2, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
-    {"MARKS",     "BATTLE MARKS",      {0, 1, 2, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
-    {"TRAILS",    "TRAILS",            {0, 1, 2, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
+    {"HDMODELS",  "REMASTERED UNITS",  {0, 1, 2, 3, 3, 3, 3}, {"OFF", "ON", "ON", "ON"}, true},
+    {"V2",        "MODERN LIGHTING",   {0, 1, 2, 2, 3, 2, 2}, {"OFF", "BASIC", "FULL", "FULL"}, true},
+    {"FX",        "NEW EFFECTS",       {0, 1, 2, 3, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, true},
+    {"BUILDINGS", "NEW BUILDINGS",     {0, 1, 2, 3, 3, 2, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, true},
+    {"HDTEX",     "SHARP TEXTURES",    {0, 1, 1, 1, 1, 1, 1}, {"OFF", "ON", "ON", "ON"}, true},
+    {"FLOOR",     "GROUND DETAIL",     {0, 0, 0, 3, 3, 0, 0}, {"OFF", "ON", "ON", "ON"}, false},
+    {"DRAWDIST",  "DRAW DISTANCE",     {0, 2, 2, 0, 3, 2, 0}, {"GAME", "SHORT", "MEDIUM", "FAR"}, false},
+    {"SKY",       "NEW SKY",           {0, 1, 2, 3, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
+    {"ATMOS",     "ATMOSPHERE",        {0, 1, 2, 3, 3, 2, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
+    {"SHADOWS",   "SHADOWS",           {0, 0, 1, 2, 3, 1, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
+    {"GLOW",      "GLOW",              {0, 0, 1, 2, 3, 0, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
+    {"MARKS",     "BATTLE MARKS",      {0, 1, 2, 3, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
+    {"TRAILS",    "TRAILS",            {0, 1, 2, 3, 3, 3, 0}, {"OFF", "LOW", "MEDIUM", "HIGH"}, false},
     // UI + UISTYLE are read once per run (the UI scale must never change mid-run): the menu label says so.
-    {"UI",        "SHARP (RESTART)", {0, 0, 2, 2, 3, 0}, {"OFF", "ICONS", "FULL", "4K"}, false},
+    {"UI",        "SHARP (RESTART)",  {0, 0, 2, 2, 3, 1, 1}, {"OFF", "ICONS", "FULL", "4K"}, false},
     // UI graphics: menu look. Modern on
     // High/Ultra, classic elsewhere. Needs UI >= 2 (High 2, Ultra 3).
-    {"UISTYLE",   "STYLE (RESTART)",      {0, 0, 0, 1, 1, 0}, {"CLASSIC", "MODERN", "MODERN", "MODERN"}, false},
+    {"UISTYLE",   "STYLE (RESTART)",      {0, 0, 0, 1, 1, 0, 0}, {"CLASSIC", "MODERN", "MODERN", "MODERN"}, false},
     // SKY3D: Blender 3D cloud towers baked into the dramatic skies' panoramas (same texture size/format as NEW,
     // measured cost = noise); High/Ultra on, VR off (Quest unmeasured). Only read when SKY > 0.
     // Appended last so every older row keeps its index (menu click scripts, saved files are by name anyway).
-    {"SKY3D",     "3D CLOUDS",         {0, 0, 0, 1, 1, 0}, {"OFF", "ON", "ON", "ON"}, false},
+    {"SKY3D",     "3D CLOUDS",         {0, 0, 0, 1, 1, 0, 0}, {"OFF", "ON", "ON", "ON"}, false},
 };
 const int kNumFeatures = sizeof(kFeatures) / sizeof(kFeatures[0]);
 
 // DRAWDIST level -> sectors per side (0 = the game's own gfx.view_sectors, 17 by default).
 const int kDrawSectors[4] = {0, 9, 13, 25};
 
-const char *kPresetNames[PRESET_COUNT] = {"ORIGINAL", "LOW", "MEDIUM", "HIGH", "ULTRA", "VR"};
-const char *kPresetKeys[PRESET_COUNT] = {"original", "low", "medium", "high", "ultra", "vr"};
+const char *kPresetNames[PRESET_COUNT] = {"ORIGINAL", "LOW", "MEDIUM", "HIGH", "ULTRA", "VR", "VR CLASSIC"};
+const char *kPresetKeys[PRESET_COUNT] = {"original", "low", "medium", "high", "ultra", "vr", "vrclassic"};
 
 // New Look calibration (releases/newlook/env.sh, batch-1 approved look).
 const char *kNlSun = "-0.551,-0.695,-0.462,0.70,0.20";
@@ -91,6 +98,8 @@ const char *kNlFarSpec = "1,1.9";
 const char *kNlFarEdge = "0.7,0.75,0.35";
 
 bool gInited = false;
+int gApplied = PRESET_NONE;              // preset at the last OnLevelLoad
+bool gStereo = false;                    // a VR headset session is active (SetStereo)
 int gPreset = PRESET_NONE;
 bool gEnvPreset = false;                 // UA_GFX_PRESET: saved overrides ignored
 int gOverride[sizeof(kFeatures) / sizeof(kFeatures[0])];
@@ -133,7 +142,7 @@ int ParsePreset(const char *v)
     for (int p = 0; p < PRESET_COUNT; ++p)
         if (!strcasecmp(v, kPresetKeys[p]))
             return p;
-    if (v[0] >= '0' && v[0] <= '5' && !v[1])
+    if (v[0] >= '0' && v[0] < '0' + PRESET_COUNT && !v[1])
         return v[0] - '0';
     return PRESET_NONE;
 }
@@ -209,7 +218,26 @@ int GfxEnvLevel(const char *name)
     return v ? Clamp3(atoi(v)) : -1;
 }
 
+int ResolveRaw(const char *name, int f, int dflt, Src *src);
+
+// per-eye caps in a headset session (see gfxsettings.h SetStereo).
+int StereoCap(const char *name)
+{
+    if (!gStereo)
+        return 3;
+    if (!strcmp(name, "GLOW"))
+        return 0;
+    if (!strcmp(name, "ATMOS"))
+        return 2;
+    return 3;
+}
+
 int Resolve(const char *name, int f, int dflt, Src *src)
+{
+    return std::min(ResolveRaw(name, f, dflt, src), StereoCap(name));
+}
+
+int ResolveRaw(const char *name, int f, int dflt, Src *src)
 {
     int v = GfxEnvLevel(name);
     if (v >= 0)
@@ -451,6 +479,19 @@ int Sky3dFor(int preset, int sky3dOverride, int skies)
     return sky3dOverride >= 0 ? sky3dOverride : kFeatures[f].lv[preset];
 }
 
+void SetStereo(bool on)
+{
+    if (on == gStereo)
+        return;
+    gStereo = on;
+    gGen++;
+    printf("gfx: stereo caps %s (GLOW 0, ATMOS <= 2)\n", on ? "on" : "off");
+}
+
+bool Stereo() { return gStereo; }
+
+int AppliedPreset() { return gApplied; }
+
 int GetSkies()
 {
     Init();
@@ -557,6 +598,7 @@ void OnLevelLoad(NC_STACK_ypaworld *yw)
 {
     Init();
     (void)yw;
+    gApplied = gPreset;
     GFX::Engine.SetRenderV2(gfxLevel("V2", 0) > 0);
     GFX::Engine.SetGround(gfxLevel("FLOOR", 0) > 0);
     GFX::Engine.ShadowsApply(); // SHADOWS / GLOW: same level = no work; a change rebuilds or frees here
@@ -609,8 +651,8 @@ namespace
 //   3840x2160: 4.15 / 4.44 / 10.18 / 16.06 / 17.34 ms. (Medium = UI 2 + shadows/glow 1, no floor; High =
 //   floor + 3x UI pack.) VR (= Low with DRAWDIST 1, UI 0, no HD models in the real VR column, so this errs high)
 //   keeps the earlier VR/Low ratio (0.845 at 1080p, 0.969 at 4K).
-const double kPresetCost1080[PRESET_COUNT] = {0.423, 0.361, 0.612, 1.0, 1.166, 0.305};
-const double kPresetCost2160[PRESET_COUNT] = {0.258, 0.276, 0.634, 1.0, 1.080, 0.268};
+const double kPresetCost1080[PRESET_COUNT] = {0.423, 0.361, 0.612, 1.0, 1.166, 0.305, 0.305}; // VR columns: never benched on desktop
+const double kPresetCost2160[PRESET_COUNT] = {0.258, 0.276, 0.634, 1.0, 1.080, 0.268, 0.268};
 
 double PresetCost(int p)
 {

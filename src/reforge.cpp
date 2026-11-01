@@ -84,7 +84,7 @@
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
-#include <SDL2/SDL_opengl.h>
+#include "system/glapi.h"
 
 #include "includes.h"
 #include "reforge.h"
@@ -489,7 +489,7 @@ namespace
 // (enable lists), the level's squads/robos/buddies, gem upgrades, building and
 // host guns, plus each type's states, weapons, destruction / scale fx (closure).
 // A slot first needed later (HdEnsure, at unit/weapon creation) is loaded then and
-// logged "hd-models: LATE" - the proof counts them (target 0). Loaded slots stay
+// logged "hd-models: LATE" - the VR build counts them (target 0). Loaded slots stay
 // with the set (the set is cached across levels of the same set id).
 // UA_HD_LAZY=0 = the eager path; tool modes (viewer/export) are always eager.
 struct HdSlots
@@ -822,6 +822,28 @@ NC_STACK_base *LegoLod(NC_STACK_base *near, const vec3d &pos)
     }
     return far;
 }
+
+#ifdef UA_VR_ENABLED
+// The war-table miniature (VR): every building of the map is drawn at once, a few centimetres tall, so it always
+// takes the far mesh when the pack has one (the near HD blocks cost several ms of GPU per eye on a whole city).
+NC_STACK_base *LegoFarFor(NC_STACK_base *near)
+{
+    if (gLegoFar.empty() || !near)
+        return near;
+    auto it = gLegoFar.find(near);
+    if (it == gLegoFar.end())
+        return near;
+    NC_STACK_base *far = it->second;
+    if (gLegoFarPrepped.insert(far).second)
+    {
+        far->SetVizLimit(near->GetVisLimit());
+        far->SetFadeLength(near->GetFadeLength());
+        far->SetStatic(true);
+        far->MakeVBO();
+    }
+    return far;
+}
+#endif
 
 void ApplyHdLegos(NC_STACK_base *root)
 {

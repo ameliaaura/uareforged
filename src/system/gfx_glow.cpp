@@ -15,11 +15,13 @@
 // Quest's multiview MSAA eye buffers would need the mask drawn inside the eye
 // pass instead).
 
-#include <SDL2/SDL_opengl.h>
+#include "glapi.h" // GLES on the Quest / ANGLE, desktop GL otherwise
+#ifndef UA_GLES // (glapi.h has the GLES headers)
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/glext.h>
 #else
 #include <GL/glext.h>
+#endif
 #endif
 #include <algorithm>
 #include <cstdio>
@@ -331,12 +333,12 @@ void GlowPass::CollectSlow(TRenderNode *node)
 bool GlowPass::BuildPrograms()
 {
     GFXEngine &E = GFXEngine::Instance;
-    pBlit = (PfnBlit)SDL_GL_GetProcAddress("glBlitFramebuffer");
-    pDelFbo = (PfnDelFb)SDL_GL_GetProcAddress("glDeleteFramebuffers");
-    pDelRbo = (PfnDelFb)SDL_GL_GetProcAddress("glDeleteRenderbuffers");
+    pBlit = (PfnBlit)UA_GL_GetProcAddress("glBlitFramebuffer");
+    pDelFbo = (PfnDelFb)UA_GL_GetProcAddress("glDeleteFramebuffers");
+    pDelRbo = (PfnDelFb)UA_GL_GetProcAddress("glDeleteRenderbuffers");
     if (!pBlit || !pDelFbo || !pDelRbo)
         return false;
-    pProgU1f = (PfnProgU1f)SDL_GL_GetProcAddress("glProgramUniform1f");
+    pProgU1f = (PfnProgU1f)UA_GL_GetProcAddress("glProgramUniform1f");
     if (!pProgU1f)
         return false;
     {
@@ -548,7 +550,11 @@ void GlowPass::Apply()
     else
     {
         glDepthMask(GL_TRUE);
+#ifdef UA_GLES
+        glClearDepthf(1.0f);
+#else
         glClearDepth(1.0);
+#endif
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDepthMask(E._lastStates.Zwrite ? GL_TRUE : GL_FALSE);
     }

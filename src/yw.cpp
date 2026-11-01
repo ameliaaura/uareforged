@@ -1,3 +1,7 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#include "vr/vr_radio.h"
+#endif
 #include <inttypes.h>
 #include <string.h>
 #include <math.h>
@@ -27,6 +31,76 @@
 #include "bitmap.h"
 #include <functional>
 #include <map>
+
+// Settings page, rows 15-16: with VR active the right half belongs to the
+// comfort-vignette controls, so the left labels stop short of it.
+static int VRRowLabelWidth(int full, int v120, int checkBoxWidth, int buttonsSpace)
+{
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+        return v120 + checkBoxWidth + 2 * buttonsSpace;
+#endif
+    (void)v120; (void)checkBoxWidth; (void)buttonsSpace;
+    return full;
+}
+
+// Settings page, rows 1-3: the page's three free-text rows. With VR active they
+// hold the VR controls rows (header + two rows of buttons, see the VR block
+// after the tunnel-vision widgets), so their text is replaced.
+static std::string VRSettingsText(const std::string &flat, const char *vr)
+{
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+        return vr;
+#endif
+    (void)vr;
+    return flat;
+}
+
+#ifdef UA_VR_ENABLED
+// VR controls rows on the Settings page (button ids 1179-1184; 1183-1184 =
+// cockpit frame + display rate on row 4, the page's empty spacer row).
+std::string VRControlLabel(int id)
+{
+    switch ( id )
+    {
+    case 1179: return VR::GroundGripLabel(VR::GroundGripMode());
+    case 1180: return VR::CrosshairLabel(VR::CrosshairColour());
+    case 1181: return VR::MapBoardOn() ? "MAP BOARD: ON" : "MAP BOARD: OFF (2D MAP)";
+    case 1182: return VR::StationTurnLabel(); // SNAP 30 / 45 / 20 / SMOOTH
+    case 1183: return VR::CockpitFrameLabel(VR::CockpitFrameSetting()); // OPEN / OPEN+RIM / CLASSIC
+    case 1184: return VR::DisplayRateLabel(VR::DisplayRateSetting());
+    case 1185: return VR::FpsCounterOn() ? "FPS COUNTER: ON" : "FPS COUNTER: OFF"; // menu
+    // shared with the pause panel's Settings page
+    case 1176: { const int pct = VR::ComfortVignettePercent();
+                 return fmt::sprintf("TUNNEL VISION: %s %d%%", VR::ComfortVignettePreset(pct), pct); }
+    case 1178: return VR::CockpitShellsOn() ? "COCKPIT: ON" : "COCKPIT: OFF (PANEL)";
+    case 1187: return VR::ControlsCardAuto() ? "CONTROLS CARD: AUTO" : "CONTROLS CARD: OFF";
+    case 1188: return "RESTORE VR DEFAULTS"; // Options page, row 1 left
+    // VR MODE + the Command Deck extras
+    case 1190: return VR::CommandDeck() ? "VR MODE: COMMAND DECK" : "VR MODE: CLASSIC";
+    case 1191: return VR::FieldOrders() ? "FIELD ORDERS: ON" : "FIELD ORDERS: OFF";
+    case 1192: return VR::WristSquads() ? "WRIST SQUADS: ON" : "WRIST SQUADS: OFF";
+    case 1193: return VR::SquadWheel() ? "SQUAD WHEEL: ON" : "SQUAD WHEEL: OFF";
+    case 1194: return VR::MapWall() ? "MAP SIZE: WALL" : "MAP SIZE: TABLE";
+    case 1196: return VR::DirectionalRadio() ? "DIRECTIONAL RADIO: ON" : "DIRECTIONAL RADIO: OFF"; // directional radio
+    case 1197: return VR::QuickStation() ? "QUICK STATION: ON" : "QUICK STATION: OFF"; //
+    case 1198: return VR::PanelsFree() ? "PANELS: FREE" : "PANELS: FIXED"; //
+    case 1199: return "RESET PANELS"; //
+    case 1195: return VR::CommandDeck() ? "COMMAND DECK" : "CLASSIC"; // shell Options button text (row label "VR Mode:")
+    default: return " ";
+    }
+}
+
+void VRRefreshControlRows(NC_STACK_button *page)
+{
+    if ( !page || !VR::Active() )
+        return;
+    for (int id = 1179; id <= 1185; id++)
+        page->SetText(id, VRControlLabel(id));
+    page->SetText(1172, VRControlLabel(1195)); // the Direct3D Device row is the VR MODE row in VR
+}
+#endif
 
 extern yw_infolog info_log;
 
@@ -475,6 +549,9 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
 
             uint32_t v37 = profiler_begin();
             
+#ifdef UA_VR_ENABLED
+            VR::CommandWorldHook(this); // VR command layer -> _updateMessage (no-op when VR is off)
+#endif
             // Do user commands before any unit state can be changed
             if (_userRobo)
             {
@@ -552,6 +629,12 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             const mat3x3 &v57 = SFXEngine::SFXe.sb_0x424c74();
             TF::TForm3D *v58 = TF::Engine.GetViewPoint();
 
+#ifdef UA_VR_ENABLED
+            // VR: the cockpit never shakes (sickness); the audio update above
+            // still runs, and the shake already reaches the rumble/haptics path
+            // (yw_game.cpp SndGetTopShake -> Input FF_TYPE_SHAKE).
+            if ( !VR::SuppressViewShake(v57.m00 + v57.m11 + v57.m22) ) // shake angle -> haptics (cockpit)
+#endif
             v58->SclRot = v57 * v58->SclRot;
 
             if ( _replayRecorder->do_record )
@@ -882,6 +965,9 @@ void ypaworld_func129__sub0(NC_STACK_ypaworld *yw, const cellArea &cell, yw_arg1
                     arg159.Priority = 77;
                     arg159.MsgID = 33;
 
+#ifdef UA_VR_ENABLED
+                    VRRadio::SetNextEventPos(cell.CenterPos, 33); // the attacked power station
+#endif
                     yw->ypaworld_func159(&arg159);
                 }
             }
@@ -1914,6 +2000,11 @@ void NC_STACK_ypaworld::ypaworld_func150(yw_arg150 *arg)
 
 void NC_STACK_ypaworld::DeleteLevel()
 {
+#ifdef UA_VR_ENABLED
+    VR::LevelBoundary(); // Command Deck state never survives into another level / load
+    extern void VRDioBatchClear();
+    VRDioBatchClear(); // the diorama's merged sector meshes belong to this level
+#endif
     EnableLevelPasses();
 
     if ( _levelInfo.State == TLevelInfo::STATE_COMPLETED )
@@ -3347,7 +3438,7 @@ bool NC_STACK_ypaworld::CreateVideoControls()
         btn_64arg.xpos = 0;
         btn_64arg.ypos = vertMenuSpace + _fontH;
         btn_64arg.width = menuWidth;
-        btn_64arg.caption = Locale::Text::Dialogs(Locale::DLG_S_TXT2);
+        btn_64arg.caption = VRSettingsText(Locale::Text::Dialogs(Locale::DLG_S_TXT2), " "); // row 1 = RESTORE VR DEFAULTS + FPS COUNTER
         btn_64arg.caption2.clear();
         btn_64arg.button_id = 1169;
         btn_64arg.txt_r = _iniColors[60].r;
@@ -3359,7 +3450,7 @@ bool NC_STACK_ypaworld::CreateVideoControls()
             btn_64arg.xpos = 0;
             btn_64arg.ypos = 2 * (_fontH + vertMenuSpace);
             btn_64arg.width = menuWidth;
-            btn_64arg.caption = Locale::Text::Dialogs(Locale::DLG_S_TXT3);
+            btn_64arg.caption = VRSettingsText(Locale::Text::Dialogs(Locale::DLG_S_TXT3), " ");
             btn_64arg.button_id = 1170;
             btn_64arg.caption2.clear();
 
@@ -3368,7 +3459,7 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                 btn_64arg.xpos = 0;
                 btn_64arg.width = menuWidth;
                 btn_64arg.ypos = 3 * (_fontH + vertMenuSpace);
-                btn_64arg.caption = Locale::Text::Dialogs(Locale::DLG_S_TXT4);
+                btn_64arg.caption = VRSettingsText(Locale::Text::Dialogs(Locale::DLG_S_TXT4), " ");
                 btn_64arg.caption2.clear();
                 btn_64arg.button_id = 1171;
 
@@ -3397,7 +3488,7 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                         btn_64arg.tileset_down = 19;
                         btn_64arg.field_3A = 30;
                         btn_64arg.button_type = NC_STACK_button::TYPE_CHECKBX;
-                        btn_64arg.caption = _gfxMode.name;
+                        btn_64arg.caption = yw_ShellResCaption(_gfxMode);
                         btn_64arg.caption2.clear();
                         btn_64arg.pressedCode = 0;
                         btn_64arg.tileset_up = 18;
@@ -3420,7 +3511,8 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                             btn_64arg.xpos = 0;
                             btn_64arg.ypos = 2 * (3 * (vertMenuSpace + _fontH));
                             btn_64arg.width = v294 * 0.4;
-                            btn_64arg.caption = Locale::Text::Dialogs(Locale::DLG_S_SEL3D);
+                            // in VR the Direct3D Device row (only OpenGL exists there) is the VR MODE row
+                            btn_64arg.caption = VRSettingsText(Locale::Text::Dialogs(Locale::DLG_S_SEL3D), "VR Mode:");
                             btn_64arg.caption2.clear();
                             btn_64arg.downCode = 0;
                             btn_64arg.upCode = 0;
@@ -3445,6 +3537,15 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                                 btn_64arg.xpos = buttonsSpace + v294 * 0.4;
                                 btn_64arg.flags = NC_STACK_button::FLAG_BORDER | NC_STACK_button::FLAG_CENTER | NC_STACK_button::FLAG_TEXT;
                                 btn_64arg.caption = _GameShell->win3d_name;
+#ifdef UA_VR_ENABLED
+                                if ( VR::Active() )
+                                {
+                                    btn_64arg.button_type = NC_STACK_button::TYPE_BUTTON;
+                                    btn_64arg.downCode = 0;
+                                    btn_64arg.upCode = 1190;
+                                    btn_64arg.caption = VRControlLabel(1195);
+                                }
+#endif
                                 btn_64arg.button_id = 1172;
                                 btn_64arg.txt_r = _iniColors[68].r;
                                 btn_64arg.txt_g = _iniColors[68].g;
@@ -3947,7 +4048,7 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                                                                                                                                                         btn_64arg.field_3A = 16;
                                                                                                                                                         btn_64arg.button_type = NC_STACK_button::TYPE_CAPTION;
                                                                                                                                                         btn_64arg.xpos = checkBoxWidth + buttonsSpace;
-                                                                                                                                                        btn_64arg.width = v120; // right half: Graphics rows (gfx settings)
+                                                                                                                                                        btn_64arg.width = VRRowLabelWidth(v120, v120, checkBoxWidth, buttonsSpace); // flat: right half = Graphics rows; VR: narrowed for the vignette controls
                                                                                                                                                         btn_64arg.caption = Locale::Text::Advanced(Locale::ADV_MOVIEHD);
                                                                                                                                                         btn_64arg.caption2.clear();
                                                                                                                                                         btn_64arg.button_id = 2;
@@ -3987,7 +4088,7 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                                                                                                                                                                 btn_64arg.field_3A = 16;
                                                                                                                                                                 btn_64arg.button_type = NC_STACK_button::TYPE_CAPTION;
                                                                                                                                                                 btn_64arg.xpos = checkBoxWidth + buttonsSpace;
-                                                                                                                                                                btn_64arg.width = v120; // right half: Graphics rows (gfx settings)
+                                                                                                                                                                btn_64arg.width = VRRowLabelWidth(v120, v120, checkBoxWidth, buttonsSpace); // flat: right half = Graphics rows; VR: narrowed for the vignette controls
                                                                                                                                                                 btn_64arg.caption = Locale::Text::Advanced(Locale::ADV_MOVIEFILL);
                                                                                                                                                                 btn_64arg.caption2.clear();
                                                                                                                                                                 btn_64arg.button_id = 2;
@@ -4032,7 +4133,7 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                                                                                                                                                                         btn_64arg.field_3A = 16;
                                                                                                                                                                         btn_64arg.button_type = NC_STACK_button::TYPE_CAPTION;
                                                                                                                                                                         btn_64arg.xpos = checkBoxWidth + buttonsSpace;
-                                                                                                                                                                        btn_64arg.width = v120; // right half: Graphics rows (gfx settings)
+                                                                                                                                                                        btn_64arg.width = VRRowLabelWidth(v120, v120, checkBoxWidth, buttonsSpace); // flat: right half = Graphics rows; VR: narrowed for the vignette controls
                                                                                                                                                                         btn_64arg.caption = Locale::Text::Advanced(Locale::ADV_WALLSIG);
                                                                                                                                                                         btn_64arg.caption2.clear();
                                                                                                                                                                         btn_64arg.button_id = 2;
@@ -4046,6 +4147,118 @@ bool NC_STACK_ypaworld::CreateVideoControls()
 
                                                                                                                                                                         if ( _GameShell->video_button->Add(&btn_64arg) )
                                                                                                                                                                         {
+#ifdef UA_VR_ENABLED
+                                                                                                                                                                            // Port addition (VR only): comfort vignette ("tunnel vision"). The
+                                                                                                                                                                            // page has no free row, so it takes the right half of rows 15-16
+                                                                                                                                                                            // (their labels are narrowed by VRRowLabelWidth): row 15 a preset
+                                                                                                                                                                            // button cycling Off/Low/High (shows the value, "Custom" after the
+                                                                                                                                                                            // slider moved), row 16 a 0-100 % slider. Applied live; saved in
+                                                                                                                                                                            // the profile (";#!vr_vignette").
+                                                                                                                                                                            if ( VR::Active() )
+                                                                                                                                                                            {
+                                                                                                                                                                                const int vrX = v120 + 2 * checkBoxWidth + 4 * buttonsSpace;
+                                                                                                                                                                                const int vrW = dword_5A50B2 - vrX;
+                                                                                                                                                                                const int pct = VR::ComfortVignettePercent();
+                                                                                                                                                                                btn_64arg.tileset_down = 19;
+                                                                                                                                                                                btn_64arg.tileset_up = 18;
+                                                                                                                                                                                btn_64arg.field_3A = 30;
+                                                                                                                                                                                btn_64arg.button_type = NC_STACK_button::TYPE_BUTTON;
+                                                                                                                                                                                btn_64arg.xpos = vrX;
+                                                                                                                                                                                btn_64arg.ypos = 15 * (vertMenuSpace + _fontH);
+                                                                                                                                                                                btn_64arg.width = vrW;
+                                                                                                                                                                                btn_64arg.caption = fmt::sprintf("TUNNEL VISION: %s %d%%", VR::ComfortVignettePreset(pct), pct);
+                                                                                                                                                                                btn_64arg.caption2.clear();
+                                                                                                                                                                                btn_64arg.downCode = 0;
+                                                                                                                                                                                btn_64arg.upCode = 1142;
+                                                                                                                                                                                btn_64arg.pressedCode = 0;
+                                                                                                                                                                                btn_64arg.flags = NC_STACK_button::FLAG_BORDER | NC_STACK_button::FLAG_CENTER | NC_STACK_button::FLAG_TEXT;
+                                                                                                                                                                                btn_64arg.button_id = 1176;
+                                                                                                                                                                                btn_64arg.txt_r = _iniColors[68].r;
+                                                                                                                                                                                btn_64arg.txt_g = _iniColors[68].g;
+                                                                                                                                                                                btn_64arg.txt_b = _iniColors[68].b;
+                                                                                                                                                                                if ( _GameShell->video_button->Add(&btn_64arg) )
+                                                                                                                                                                                {
+                                                                                                                                                                                    NC_STACK_button::Slider vrSl;
+                                                                                                                                                                                    vrSl.min = 0;
+                                                                                                                                                                                    vrSl.max = 100;
+                                                                                                                                                                                    vrSl.value = pct;
+                                                                                                                                                                                    btn_64arg.tileset_down = 18;
+                                                                                                                                                                                    btn_64arg.tileset_up = 18;
+                                                                                                                                                                                    btn_64arg.field_3A = 30;
+                                                                                                                                                                                    btn_64arg.button_type = NC_STACK_button::TYPE_SLIDER;
+                                                                                                                                                                                    btn_64arg.ypos = 16 * (vertMenuSpace + _fontH);
+                                                                                                                                                                                    btn_64arg.caption = " ";
+                                                                                                                                                                                    btn_64arg.caption2.clear();
+                                                                                                                                                                                    btn_64arg.downCode = 1143;
+                                                                                                                                                                                    btn_64arg.upCode = 1144;
+                                                                                                                                                                                    btn_64arg.pressedCode = 1145;
+                                                                                                                                                                                    btn_64arg.flags = 0;
+                                                                                                                                                                                    btn_64arg.field_34 = &vrSl;
+                                                                                                                                                                                    btn_64arg.button_id = 1177;
+                                                                                                                                                                                    _GameShell->video_button->Add(&btn_64arg);
+                                                                                                                                                                                    // cockpit: shells + dash screens on/off (right half of row 14).
+                                                                                                                                                                                    btn_64arg.tileset_down = 19;
+                                                                                                                                                                                    btn_64arg.tileset_up = 18;
+                                                                                                                                                                                    btn_64arg.field_3A = 30;
+                                                                                                                                                                                    btn_64arg.button_type = NC_STACK_button::TYPE_BUTTON;
+                                                                                                                                                                                    btn_64arg.xpos = vrX;
+                                                                                                                                                                                    btn_64arg.ypos = 14 * (vertMenuSpace + _fontH);
+                                                                                                                                                                                    btn_64arg.width = vrW;
+                                                                                                                                                                                    btn_64arg.caption = VR::CockpitShellsOn() ? "COCKPIT: ON" : "COCKPIT: OFF (PANEL)";
+                                                                                                                                                                                    btn_64arg.caption2.clear();
+                                                                                                                                                                                    btn_64arg.downCode = 0;
+                                                                                                                                                                                    btn_64arg.upCode = 1146;
+                                                                                                                                                                                    btn_64arg.pressedCode = 0;
+                                                                                                                                                                                    btn_64arg.flags = NC_STACK_button::FLAG_BORDER | NC_STACK_button::FLAG_CENTER | NC_STACK_button::FLAG_TEXT;
+                                                                                                                                                                                    btn_64arg.field_34 = NULL;
+                                                                                                                                                                                    btn_64arg.button_id = 1178;
+                                                                                                                                                                                    btn_64arg.txt_r = _iniColors[68].r;
+                                                                                                                                                                                    btn_64arg.txt_g = _iniColors[68].g;
+                                                                                                                                                                                    btn_64arg.txt_b = _iniColors[68].b;
+                                                                                                                                                                                    _GameShell->video_button->Add(&btn_64arg);
+                                                                                    // VR controls: rows 2-4, two cycling
+                                                                                    // buttons per row, under the "VR CONTROLS" header that replaces the
+                                                                                    // page's free text in VR. Applied live, saved in the profile
+                                                                                    // (";#!vr_grips", ";#!vr_crosshair", ";#!vr_board", ";#!vr_snapturn").
+                                                                                    const int halfW = (dword_5A50B2 - buttonsSpace) / 2;
+                                                                                    // RESTORE VR DEFAULTS takes row 1 left (the "VR CONTROLS" header text).
+                                                                                    const struct { int id, code, row, col; std::string cap; } vrRows[8] = {
+                                                                                        {1188, 1189, 1, 0, VRControlLabel(1188)},
+                                                                                        {1179, 1180, 2, 0, VRControlLabel(1179)},
+                                                                                        {1180, 1181, 2, 1, VRControlLabel(1180)},
+                                                                                        {1181, 1182, 3, 0, VRControlLabel(1181)},
+                                                                                        {1182, 1183, 3, 1, VRControlLabel(1182)},
+                                                                                        {1183, 1184, 4, 0, VRControlLabel(1183)},
+                                                                                        {1184, 1185, 4, 1, VRControlLabel(1184)},
+                                                                                        {1185, 1186, 1, 1, VRControlLabel(1185)}, // menu: right of the "VR CONTROLS" header
+                                                                                    };
+                                                                                    for (const auto &vr : vrRows)
+                                                                                    {
+                                                                                        btn_64arg.tileset_down = 19;
+                                                                                        btn_64arg.tileset_up = 18;
+                                                                                        btn_64arg.field_3A = 30;
+                                                                                        btn_64arg.button_type = NC_STACK_button::TYPE_BUTTON;
+                                                                                        btn_64arg.xpos = vr.col ? halfW + buttonsSpace : 0;
+                                                                                        btn_64arg.ypos = vr.row * (vertMenuSpace + _fontH);
+                                                                                        btn_64arg.width = halfW;
+                                                                                        btn_64arg.caption = vr.cap;
+                                                                                        btn_64arg.caption2.clear();
+                                                                                        btn_64arg.downCode = 0;
+                                                                                        btn_64arg.upCode = vr.code;
+                                                                                        btn_64arg.pressedCode = 0;
+                                                                                        btn_64arg.flags = NC_STACK_button::FLAG_BORDER | NC_STACK_button::FLAG_CENTER | NC_STACK_button::FLAG_TEXT;
+                                                                                        btn_64arg.field_34 = NULL;
+                                                                                        btn_64arg.button_id = vr.id;
+                                                                                        btn_64arg.txt_r = _iniColors[68].r;
+                                                                                        btn_64arg.txt_g = _iniColors[68].g;
+                                                                                        btn_64arg.txt_b = _iniColors[68].b;
+                                                                                        _GameShell->video_button->Add(&btn_64arg);
+                                                                                    }
+                                                                                                                                                                                }
+                                                                                                                                                                                v70 = 1;
+                                                                                                                                                                            }
+                                                                                                                                                                            else // flat (VR not active) = the Graphics rows
+#endif
                                                                                                                                                                             // Port addition (graphics settings): Graphics rows in
                                                                                                                                                                             // the free right half of rows 14-16 (same layout as the
                                                                                                                                                                             // right-hand checkbox column above). Row 14: preset
@@ -5701,6 +5914,9 @@ void NC_STACK_ypaworld::ypaworld_func159(yw_arg159 *arg)
     // noteworthy happened", so one hook here covers every event the game
     // already considers radio-worthy. No-op when the variable is unset.
     Radio::NotifyEvent(this, arg);
+#ifdef UA_VR_ENABLED
+    VRRadio::NoteEvent(this, arg); // directional radio (place + type of the event)
+#endif
 
     if ( arg->MsgID )
         VoiceMessagePlayMsg(arg->unit, arg->Priority, arg->MsgID);
@@ -5880,6 +6096,16 @@ size_t NC_STACK_ypaworld::ypaworld_func161(yw_arg161 *arg)
     }
 
     Perf::LevelLoadEnd(arg->lvlID, ok != 0);
+
+#ifdef UA_VR_ENABLED
+    if ( ok && VR::Active() )
+    {
+        const uint32_t ip = InputPrefs();
+        fprintf(stderr, "UAVR input: level %d profile joystick %s altjoystick %s -> controls joystick %s altjoystick %s\n",
+                arg->lvlID, (_preferences & World::PREF_JOYDISABLE) ? "no" : "yes", (_preferences & World::PREF_ALTJOYSTICK) ? "yes" : "no",
+                (ip & World::PREF_JOYDISABLE) ? "no" : "yes", (ip & World::PREF_ALTJOYSTICK) ? "yes" : "no");
+    }
+#endif
 
     // Performance: unit census (vehicle id -> visproto index of vp_normal), so
     // stress configs can target the unit types that are really in the level.
@@ -6263,12 +6489,24 @@ void NC_STACK_ypaworld::UpdateGameShell()
     v16.field_4 = (!_GameShell->IsWindowedFlag()) + 1;
     _GameShell->video_button->SetState(&v16);
 
-    _GameShell->video_button->SetText(1156, _GameShell->p_YW->_gfxMode.name);
+    _GameShell->video_button->SetText(1156, yw_ShellResCaption(_GameShell->p_YW->_gfxMode));
 
     tmp = _GameShell->video_button->GetSliderData(1159);
     tmp->value = _GameShell->fxnumber;
 
     _GameShell->video_button->Refresh(1159);
+#ifdef UA_VR_ENABLED
+    if ( NC_STACK_button::Slider *vrSl = _GameShell->video_button->GetSliderData(1177) )
+    {
+        vrSl->value = VR::ComfortVignettePercent(); // profile just loaded
+        _GameShell->video_button->Refresh(1177);
+    }
+    if ( VR::Active() )
+    {
+        _GameShell->video_button->SetText(1178, VR::CockpitShellsOn() ? "COCKPIT: ON" : "COCKPIT: OFF (PANEL)");
+        VRRefreshControlRows(_GameShell->video_button); // rows: profile just loaded
+    }
+#endif
 
     NC_STACK_button::button_66arg v9;
     v9.butID = 1050;
@@ -6757,6 +6995,12 @@ size_t NC_STACK_ypaworld::LoadSettings(const std::string &fileName, const std::s
         ypa_log_out("Error while loading information from %s\n", fileName.c_str());
         return 0;
     }
+#ifdef UA_VR_ENABLED
+    // one-shot upgrade of a pre- profile in a VR session (crosshair, frame,
+    // resolution); a no-op for current profiles and with VR off.
+    if ( (sdfMask & World::SDF_INPUT) && (sdfMask & World::SDF_VIDEO) )
+        yw_VRProfileMigrate(this, fileName);
+#endif
     
     if (playIntro && !_GameShell->remoteMode)
     {

@@ -54,7 +54,7 @@ public:
     // Returns false if no game controller is open or it cannot rumble, which
     // is what keeps the legacy SDL_Haptic path in charge for real FF sticks.
     static bool Rumble(uint16_t lowFreq, uint16_t highFreq, uint32_t ms);
-    static bool HasRumble() { return _gameCtrl != NULL; };
+    static bool HasRumble();
     static bool JoyDebug() { return _joyDebug; };
 
     static void QueryKeyboard(TInputState *arg);
@@ -79,6 +79,9 @@ protected:
     static void JoyOpenDevice(int deviceIndex);
     static void JoyCloseDevice();
     static void CheckGameController(uint32_t *btnState);
+    static void CheckVRControllers(uint32_t *btnState);
+    static void VRPointerButton(bool &state, bool down, int sdlBtn);
+    static void ReleaseVRPointer();
     static int GameCtrlAxisVal(SDL_GameControllerAxis axis);
    
 

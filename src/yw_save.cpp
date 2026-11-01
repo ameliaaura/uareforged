@@ -1,10 +1,412 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#if defined(WIN32) && !defined(__WINE__)
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
+#if !defined(WIN32) || defined(__WINE__)
+#include <unistd.h>
+#elif defined(UA_VR_ENABLED)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include "includes.h"
 #include "yw_internal.h"
+#include "env.h"
 #include "yw.h"
 #include "yparobo.h"
 
+
+#ifdef UA_VR_ENABLED
+// VR settings as profile lines (input section of user.txt). ";#!" keeps each line a
+// comment for builds/originals that do not know the key.
+std::vector<std::string> yw_VRProfileLines()
+{
+    std::vector<std::string> l;
+    // VR comfort vignette ("tunnel vision", percent), cockpit shells.
+    l.push_back(fmt::sprintf(";#!vr_vignette = %d", VR::ComfortVignettePercent()));
+    l.push_back(fmt::sprintf(";#!vr_cockpit = %d", VR::CockpitShellsOn() ? 1 : 0));
+    // controls: ground grips 0 drive / 1 brake / 2 off; crosshair 0 green,
+    // 1 white, 2 red, 3 yellow, 4 cyan; map board; station snap turn.
+    l.push_back(fmt::sprintf(";#!vr_grips = %d", VR::GroundGripMode()));
+    l.push_back(fmt::sprintf(";#!vr_crosshair = %d", VR::CrosshairColour()));
+    l.push_back(fmt::sprintf(";#!vr_board = %d", VR::MapBoardOn() ? 1 : 0));
+    l.push_back(fmt::sprintf(";#!vr_snapturn = %d", VR::StationSnapTurn() ? 1 : 0));
+    // cockpit frame 1 open / 0 classic (2 open + rim); display rate 0 auto / 72 / 90 / 120.
+    l.push_back(fmt::sprintf(";#!vr_frame = %d", VR::CockpitFrameToProfile(VR::CockpitFrameSetting())));
+    l.push_back(fmt::sprintf(";#!vr_hz = %d", VR::DisplayRateSetting()));
+    // menu: FPS counter 1 on / 0 off.
+    l.push_back(fmt::sprintf(";#!vr_fps = %d", VR::FpsCounterOn() ? 1 : 0));
+    // station snap angle (20 / 30 / 45), first-entry controls card 1 on / 0 off,
+    // and the VR profile version (yw_VRProfileMigrate).
+    l.push_back(fmt::sprintf(";#!vr_snapdeg = %d", VR::StationSnapDeg()));
+    l.push_back(fmt::sprintf(";#!vr_card = %d", VR::ControlsCardAuto() ? 1 : 0));
+    // VR MODE 0 classic / 1 command deck; extras 0 / 1 or -1 (follows the mode).
+    l.push_back(fmt::sprintf(";#!vr_mode = %d", VR::CommandDeck() ? 1 : 0));
+    l.push_back(fmt::sprintf(";#!vr_fieldorders = %d", VR::ModeExtraRaw(0)));
+    l.push_back(fmt::sprintf(";#!vr_wristsq = %d", VR::ModeExtraRaw(1)));
+    l.push_back(fmt::sprintf(";#!vr_sqwheel = %d", VR::ModeExtraRaw(2)));
+    l.push_back(fmt::sprintf(";#!vr_mapsize = %d", VR::ModeExtraRaw(3)));
+    l.push_back(fmt::sprintf(";#!vr_dirradio = %d", VR::ModeExtraRaw(4))); // directional radio
+    l.push_back(fmt::sprintf(";#!vr_quickstation = %d", VR::ModeExtraRaw(5))); //
+    l.push_back(fmt::sprintf(";#!vr_panels = %d", VR::PanelsFree() ? 1 : 0)); //
+    {
+        char pl[32][48];
+        const int n = VR::PanelProfileLines(pl, 32); // only once a panel was moved
+        for (int i = 0; i < n; i++)
+            l.push_back(pl[i]);
+    }
+    if (VR::TokenTable()) // hidden key, written only when set
+        l.push_back(";#!vr_tokentable = 1");
+    if (VR::DioramaPoseSet()) // diorama placement, written once the player placed it
+    {
+        static const char *k[5] = {"x", "y", "z", "yaw", "scale"};
+        for (int i = 0; i < 5; i++)
+            l.push_back(fmt::sprintf(";#!vr_dio_%s = %d", k[i], VR::DioramaPoseKey(i)));
+    }
+    l.push_back(fmt::sprintf(";#!vr_cfgver = %d", yw_vrProfileCfgVer));
+    return l;
+}
+
+// version of the VR settings in the profile being used. A session that never
+// loaded a profile has the current one; loading a profile sets it from its
+// ";#!vr_cfgver" line (0 when absent: written before).
+int yw_vrProfileCfgVer = YW_VR_CFGVER;
+
+// the game (2D) resolution VR sessions use. The 2D canvas is scaled onto the
+// fixed-size VR panel, so a larger mode only shrinks every HUD / menu element and
+// adds 2D work per frame (lower frame rate, no visible gain, all UI too
+// small). VR sessions therefore always play at the default mode.
+GFX::GfxMode yw_VRDefaultMode()
+{
+    for (const GFX::GfxMode &m : GFX::GFXEngine::Instance.GetAvailableModes())
+        if ( m.w == GFX::DEFAULT_WIDTH && m.h == GFX::DEFAULT_HEIGHT )
+            return m;
+    return GFX::GfxMode(Common::Point(GFX::DEFAULT_WIDTH, GFX::DEFAULT_HEIGHT));
+}
+
+// the stored game resolution back to the default (profile lines "videomode" and
+// ";#!gfxmode"; the windowed flag is kept). Also updates the Options page's pending
+// choice so a later OK does not write the old mode back.
+void yw_VRResetResolution(NC_STACK_ypaworld *yw)
+{
+    const GFX::GfxMode m = yw_VRDefaultMode();
+    yw->_gfxMode = m;
+    yw->_gameDefaultRes = Common::Point(m.w, m.h);
+    if ( UserData *usr = yw->_GameShell )
+    {
+        usr->_gfxMode = m;
+        int idx = GFX::GFXEngine::Instance.GetGfxModeIndex(m);
+        usr->_gfxModeIndex = idx < 0 ? 0 : idx;
+        usr->video_listvw.selectedEntry = usr->_gfxModeIndex;
+        usr->game_default_res = (m.w << 12) | m.h;
+    }
+}
+
+// "RESTORE DEFAULTS" (shell Options VR section and the pause panel's Settings
+// page): every VR setting back to the tested defaults (+ the frame
+// default OPEN+RIM). The game resolution is reset by the caller.
+void yw_VRRestoreDefaults()
+{
+    VR::SetComfortVignettePercent(50);
+    VR::SetCockpitShellsOn(true);
+    VR::SetGroundGripMode(VR::GRIP_DRIVE);
+    VR::SetCrosshairColour(VR::XHAIR_YELLOW);
+    VR::SetMapBoardOn(true);
+    VR::SetStationSnapTurn(true);
+    VR::SetStationSnapDeg(30);
+    VR::SetCockpitFrame(VR::FRAME_OPEN_RIM);
+#ifdef UA_VR_NEWLOOK
+    VR::SetDisplayRateSetting(90); // the release default: 90 Hz, the New Look's frame budget
+#else
+    VR::SetDisplayRateSetting(0);
+#endif
+    VR::SetFpsCounterOn(false);
+    VR::SetControlsCardAuto(true);
+    VR::ResetModeToDefault(); // VR MODE to the build default, extras follow the mode
+    VR::SetPanelsFree(false); // PANELS FIXED. A moved layout is kept (Options Cancel can
+                              // undo this); only the RESET PANELS row clears it.
+    fprintf(stderr, "UAVR settings: restored defaults\n");
+}
+
+// one-shot profile migration (VR settings version bump). Runs after a VR session loaded a
+// full profile; profiles written before (no ";#!vr_cfgver", or an older value):
+// v1: crosshair YELLOW (profiles stored GREEN only because older builds
+//       defaulted to it), cockpit frame OPEN+RIM, game resolution the default.
+// Every other setting is kept; the file is patched line by line (yw_VRPatchProfileFile:
+// the ;#!vr_* lines plus, for v1, "videomode" / ";#!gfxmode"), so all other lines stay
+// byte-identical. VR off (flat play with a VR build): nothing happens.
+void yw_VRProfileMigrate(NC_STACK_ypaworld *yw, const std::string &saveFile)
+{
+    if ( !VR::Active() || yw_vrProfileCfgVer >= YW_VR_CFGVER )
+        return;
+    const int from = yw_vrProfileCfgVer;
+    VR::SetCrosshairColour(VR::XHAIR_YELLOW);
+    VR::SetCockpitFrame(VR::FRAME_OPEN_RIM);
+    yw_VRResetResolution(yw);
+    yw_vrProfileCfgVer = YW_VR_CFGVER;
+    const bool ok = yw_VRPatchProfileFile(fmt::sprintf("save:%s", saveFile), yw);
+    fprintf(stderr, "UAVR profile: migrated %s from v%d to v%d (crosshair yellow, frame open+rim, resolution %dx%d): %s\n",
+            saveFile.c_str(), from, YW_VR_CFGVER, yw->_gfxMode.w, yw->_gfxMode.h, ok ? "saved" : "NOT saved (next save writes it)");
+}
+
+bool yw_VRPatchProfile(const std::string &userName, NC_STACK_ypaworld *ywRes)
+{
+    return yw_VRPatchProfileFile(fmt::sprintf("save:%s/user.txt", userName), ywRes);
+}
+
+// the in-mission pause panel must not write live mission state
+// (SaveSettings SDF_ALL would persist unfinished campaign data). Rewrite only the
+// ";#!vr_*" lines of the existing profile; every other line stays byte-identical.
+// Missing keys are inserted after the last VR line. No VR line at all (or an
+// unreadable profile) -> nothing is written; the next normal profile save has them.
+// ywRes != NULL also rewrites the stored game resolution lines ("videomode",
+// ";#!gfxmode") from ywRes; they are only replaced, never added.
+bool yw_VRPatchProfileFile(const std::string &path, NC_STACK_ypaworld *ywRes)
+{
+    FSMgr::iNode *node = FSMgr::iDir::findNode(correctSeparatorAndExt(Common::Env.ApplyPrefix(path)));
+    if ( !node || node->getType() != FSMgr::iNode::NTYPE_FILE )
+        return false;
+    const std::string disk = node->getPath();
+    // read the whole profile with explicit error / EOF checks; a short or
+    // failed read aborts (never write back a truncated profile).
+    std::string text;
+    {
+        FILE *in = fopen(disk.c_str(), "rb");
+        if ( !in )
+            return false;
+        char buf[16384];
+        size_t n;
+        while ( (n = fread(buf, 1, sizeof(buf), in)) > 0 )
+            text.append(buf, n);
+        const bool readOk = !ferror(in) && feof(in);
+        fclose(in);
+        if ( !readOk || text.empty() )
+            return false;
+    }
+    std::vector<std::string> lines;
+    for (size_t at = 0; at < text.size();)
+    {
+        size_t e = text.find('\n', at);
+        e = (e == std::string::npos) ? text.size() : e + 1;
+        lines.push_back(text.substr(at, e - at));
+        at = e;
+    }
+    auto keyOf = [](const std::string &l) -> std::string {
+        size_t a = l.find(";#!vr_");
+        if ( a == std::string::npos || l.find_first_not_of(" \t") != a )
+            return std::string();
+        size_t e = l.find_first_of(" \t=", a);
+        return l.substr(a, e == std::string::npos ? std::string::npos : e - a);
+    };
+    auto trimmed = [](const std::string &l) -> std::string {
+        size_t a = l.find_first_not_of(" \t");
+        size_t e = l.find_last_not_of(" \t\r\n");
+        return (a == std::string::npos || e == std::string::npos) ? std::string() : l.substr(a, e - a + 1);
+    };
+    // p6: a line whose value is unchanged is kept verbatim (formatting,
+    // comments); only changed values are rewritten. Value = text after '=' without
+    // blanks.
+    auto valueOf = [](const std::string &l) -> std::string {
+        std::string v;
+        size_t eq = l.find('=');
+        if ( eq == std::string::npos )
+            return v;
+        // p6: an inline "; comment" after the value is not part of it
+        for (size_t i = eq + 1; i < l.size() && l[i] != ';'; i++)
+            if ( l[i] != ' ' && l[i] != '\t' && l[i] != '\r' && l[i] != '\n' )
+                v += l[i];
+        return v;
+    };
+    auto rewrite = [&](std::string &l, const std::string &repl) {
+        if ( valueOf(l) == valueOf(repl) )
+            return;
+        size_t a = l.find_first_not_of(" \t");
+        if ( a == std::string::npos )
+            a = 0;
+        std::string eol;
+        while ( !l.empty() && (l.back() == '\n' || l.back() == '\r') )
+        {
+            eol.insert(eol.begin(), l.back());
+            l.pop_back();
+        }
+        l = l.substr(0, a) + repl + eol;
+    };
+    const std::vector<std::string> fresh = yw_VRProfileLines();
+    std::vector<bool> used(fresh.size(), false);
+    int last = -1;
+    for (size_t i = 0; i < lines.size(); i++)
+    {
+        const std::string k = keyOf(lines[i]);
+        if ( k.empty() )
+            continue;
+        last = (int)i;
+        for (size_t f = 0; f < fresh.size(); f++)
+            if ( keyOf(fresh[f]) == k )
+            {
+                rewrite(lines[i], fresh[f]);
+                used[f] = true;
+            }
+    }
+    // the resolution lines (video section): changed values rewritten in place,
+    // missing ones added at the end of the video section (after the VR lines below).
+    std::vector<std::string> resAdd;
+    if ( ywRes )
+    {
+        auto firstWord = [](const std::string &l) -> std::string {
+            size_t a = l.find_first_not_of(" \t");
+            if ( a == std::string::npos )
+                return std::string();
+            size_t e = l.find_first_of(" \t=\r\n", a);
+            return l.substr(a, e == std::string::npos ? std::string::npos : e - a);
+        };
+        const bool win = ywRes->_GameShell && ywRes->_GameShell->IsWindowedFlag();
+        const std::string vm = fmt::sprintf("videomode = %d", (ywRes->_gameDefaultRes.x << 12) | ywRes->_gameDefaultRes.y);
+        const std::string gm = fmt::sprintf(";#!gfxmode = %d_%d_%d", ywRes->_gfxMode.w, ywRes->_gfxMode.h, win ? 1 : 0);
+        bool haveVm = false, haveGm = false;
+        for (std::string &l : lines)
+        {
+            const std::string w = firstWord(l);
+            if ( !StriCmp(w, "videomode") )
+            {
+                rewrite(l, vm);
+                haveVm = true;
+            }
+            else if ( !StriCmp(w, ";#!gfxmode") )
+            {
+                rewrite(l, gm);
+                haveGm = true;
+            }
+        }
+        if ( !haveVm )
+            resAdd.push_back("    " + vm + "\n");
+        if ( !haveGm )
+            resAdd.push_back("    " + gm + "\n");
+    }
+    // a profile without any VR line yet (written by a flat build): insert them
+    // at the end of the input section (before its "end").
+    // p6: section delimiters as the script parser sees them - first word,
+    // case-insensitive, an inline "; comment" ignored, comment lines never count.
+    auto firstTok = [&](const std::string &l) -> std::string {
+        const std::string t = trimmed(l);
+        if ( t.empty() || t[0] == ';' )
+            return std::string();
+        size_t e = t.find_first_of(" \t;");
+        return t.substr(0, e == std::string::npos ? std::string::npos : e);
+    };
+    auto sectionEnd = [&](const char *section) -> int {
+        for (size_t i = 0; i < lines.size(); i++)
+            if ( !StriCmp(firstTok(lines[i]), section) )
+                for (size_t j = i + 1; j < lines.size(); j++)
+                    if ( !StriCmp(firstTok(lines[j]), "end") )
+                        return (int)j;
+        return -1;
+    };
+    if ( last < 0 )
+    {
+        const int e = sectionEnd("new_input");
+        if ( e < 1 )
+            return false;
+        last = e - 1;
+        // the line before "end" must end with a newline for the inserted lines
+        if ( !lines[last].empty() && lines[last].back() != '\n' && lines[last].back() != '\r' )
+            lines[last] += '\n';
+    }
+    std::vector<std::string> add;
+    for (size_t f = 0; f < fresh.size(); f++)
+        if ( !used[f] )
+            add.push_back("    " + fresh[f] + "\n");
+    lines.insert(lines.begin() + last + 1, add.begin(), add.end());
+    if ( !resAdd.empty() )
+    {
+        const int e = sectionEnd("new_video");
+        if ( e < 1 )
+            return false; // p6: no place for them - write nothing
+        if ( !lines[e - 1].empty() && lines[e - 1].back() != '\n' && lines[e - 1].back() != '\r' )
+            lines[e - 1] += '\n';
+        lines.insert(lines.begin() + e, resAdd.begin(), resAdd.end());
+    }
+    std::string out;
+    // keep non-VR bytes exact - only add a newline between lines, never
+    // after an unterminated final line.
+    for (size_t i = 0; i < lines.size(); i++)
+    {
+        const std::string &l = lines[i];
+        out += l;
+        if ( i + 1 < lines.size() && (l.empty() || (l.back() != '\n' && l.back() != '\r')) )
+            out += '\n';
+    }
+    // never truncate the live profile. Write a sibling temp file on disk,
+    // check write + flush + fsync + close, then rename() it over user.txt (atomic on
+    // POSIX; MoveFileEx REPLACE_EXISTING on Windows). On any failure the old profile
+    // stays untouched and the temp file is removed.
+    // the temp file is uniquely named and created exclusively, so it can
+    // never alias user.txt or another writer's temp file.
+#if defined(WIN32) && !defined(__WINE__)
+    const std::string tmp = disk + ".vrtmp" + std::to_string(GetCurrentProcessId()) + "_" + std::to_string(GetTickCount());
+    int fd = _open(tmp.c_str(), _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if ( fd < 0 )
+        return false;
+    FILE *f = _fdopen(fd, "wb");
+    if ( !f )
+    {
+        _close(fd);
+        remove(tmp.c_str());
+        return false;
+    }
+#else
+    std::string tmp = disk + ".vrtmpXXXXXX";
+    int fd = mkstemp(&tmp[0]);
+    if ( fd < 0 )
+        return false;
+    FILE *f = fdopen(fd, "wb");
+    if ( !f )
+    {
+        close(fd);
+        remove(tmp.c_str());
+        return false;
+    }
+#endif
+    bool ok = fwrite(out.data(), 1, out.size(), f) == out.size();
+    ok = (fflush(f) == 0) && ok;
+#if !defined(WIN32) || defined(__WINE__)
+    ok = (fsync(fileno(f)) == 0) && ok;
+#else
+    ok = (_commit(_fileno(f)) == 0) && ok;
+#endif
+    ok = (fclose(f) == 0) && ok;
+#if defined(WIN32) && !defined(__WINE__)
+    ok = ok && MoveFileExA(tmp.c_str(), disk.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    ok = ok && rename(tmp.c_str(), disk.c_str()) == 0;
+#endif
+    if ( !ok )
+        remove(tmp.c_str());
+    return ok;
+}
+#endif
+
+std::string yw_ShellResCaption(const GFX::GfxMode &m)
+{
+#ifdef UA_VR_ENABLED
+    // VR sessions always play at the default mode (yw_VRDefaultMode); the row is
+    // locked there and says so. The stored choice is kept for flat play.
+    if ( VR::Active() )
+    {
+        const GFX::GfxMode d = yw_VRDefaultMode();
+        return (m.w == d.w && m.h == d.h) ? d.name + " (VR)" : m.name + " (VR: " + d.name + ")";
+    }
+#endif
+    return m.name;
+}
 
 int yw_write_callSign(NC_STACK_ypaworld *yw, const char *filename, const char *callsign)
 {
@@ -114,6 +516,11 @@ int yw_write_input(FSMgr::FileHandle *fil, UserData *usr)
         fil->printf("    signatures = yes\n");
     else
         fil->printf("    signatures = no\n");
+
+#ifdef UA_VR_ENABLED
+    for (const std::string &l : yw_VRProfileLines())
+        fil->printf("    %s\n", l.c_str());
+#endif
 
     for (size_t i = 1; i < usr->InputConfig.size(); i++)
     {

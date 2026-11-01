@@ -10,6 +10,10 @@
 namespace World
 {
 
+#ifdef UA_VR_ENABLED
+float ParticleViewScale = 1.0f;
+#endif
+
 ParticleSystem::ParticleSystem()
 {
 }
@@ -20,11 +24,23 @@ void ParticleSystem::AddParticle(NC_STACK_particle *base, const vec3d& pos, cons
         _particles.emplace_back( base, pos, vec, age, ++_seedCounter );
 }
 
+// Simulation step and render queueing are separate (VR): the
+// update must run exactly once per game tick, while queueing only reads the
+// particle state and the current view. UpdateRender() keeps the original
+// one-call behaviour (same erase order, same RNG draws, same queue order).
 void ParticleSystem::UpdateRender(area_arg_65 *rndrParams, int32_t delta)
 {
     //Prevent spawn new particles from particle render
     _disableAdd = true;
-    
+
+    Update(delta);
+    QueueRender(rndrParams);
+
+    _disableAdd = false;
+}
+
+void ParticleSystem::Update(int32_t delta)
+{
     float fsec = (float)delta * 0.001;
     
     for(auto it = _particles.begin(); it != _particles.end();)
@@ -46,20 +62,27 @@ void ParticleSystem::UpdateRender(area_arg_65 *rndrParams, int32_t delta)
         
         f.Vec += f.pParticleGen->_accelStart + f.pParticleGen->_accelDelta * f.Age;
         f.Pos += f.Vec * fsec + NC_STACK_particle::RandVec() * f.pParticleGen->_noisePower;
-        float scl = f.pParticleGen->_scaleStart + f.pParticleGen->_scaleDelta * f.Age;
-        
-        Render(&f, scl, rndrParams);
         
         it++;
     }
-    
-    _disableAdd = false;
+}
+
+void ParticleSystem::QueueRender(area_arg_65 *rndrParams)
+{
+    for(Frak &f : _particles)
+    {
+        float scl = f.pParticleGen->_scaleStart + f.pParticleGen->_scaleDelta * f.Age;
+        Render(&f, scl, rndrParams);
+    }
 }
 
 
 void ParticleSystem::Render(Frak *p, float scale, area_arg_65 *rndrParams)
 {
     TF::TForm3D *view = rndrParams->ViewTForm;
+#ifdef UA_VR_ENABLED
+    scale *= ParticleViewScale; // VR diorama: billboards shrink with the miniature
+#endif
 
     // Transformed position, but without of projection
     vec3d pos = view->CalcSclRot.Transform(p->Pos - view->CalcPos);

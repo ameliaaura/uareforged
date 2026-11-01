@@ -1,3 +1,7 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#include "vr/vr_radio.h"
+#endif
 #include <inttypes.h>
 #include <string.h>
 #include <math.h>
@@ -23,6 +27,10 @@
 #include "system/perf.h"
 #include "reforge_sky.h"
 #include <algorithm>
+#include <chrono>
+#include <limits>
+#include <list>
+#include <map>
 
 extern uint32_t bact_id;
 
@@ -269,9 +277,17 @@ int NC_STACK_ypaworld::LevelCommonLoader(TLevelDescription *mapp, int levelID, i
     /* Set hidden fractions to default world's*/
     _hiddenFractions = _worldHiddenFractions;
 
-    if ( _gfxMode != GFX::Engine.GetGfxMode() || _GameShell->IsWindowedFlag() != GFX::Engine.GetGfxMode().windowed )
+    GFX::GfxMode levelMode = _gfxMode;
+#ifdef UA_VR_ENABLED
+    // VR sessions always play at the default 2D mode (yw_VRDefaultMode: a larger
+    // mode only shrinks the panel UI and costs 2D time); the profile's choice is kept
+    // for flat play.
+    if ( VR::Active() )
+        levelMode = yw_VRDefaultMode();
+#endif
+    if ( levelMode != GFX::Engine.GetGfxMode() || _GameShell->IsWindowedFlag() != GFX::Engine.GetGfxMode().windowed )
     {
-        GFX::Engine.SetResolution(_gfxMode, _GameShell->IsWindowedFlag());
+        GFX::Engine.SetResolution(levelMode, _GameShell->IsWindowedFlag());
 
         _screenSize = GFX::Engine.GetScreenSize();
 
@@ -931,6 +947,9 @@ void NC_STACK_ypaworld::CellSetNewOwner(cellArea *cell, NC_STACK_ypabact *a5, in
                     v21.Priority = 78;
                     v21.MsgID = 45;
 
+#ifdef UA_VR_ENABLED
+                    VRRadio::SetNextEventPos(cell->CenterPos, 45); // the captured station, not the attacker
+#endif
                     ypaworld_func159(&v21);
                 }
             }
@@ -941,6 +960,9 @@ void NC_STACK_ypaworld::CellSetNewOwner(cellArea *cell, NC_STACK_ypabact *a5, in
                 v24.Priority = 78;
                 v24.MsgID = 67;
 
+#ifdef UA_VR_ENABLED
+                VRRadio::SetNextEventPos(cell->CenterPos, 67); // sector event, no unit
+#endif
                 ypaworld_func159(&v24);
             }
         }
@@ -959,6 +981,9 @@ void NC_STACK_ypaworld::CellSetNewOwner(cellArea *cell, NC_STACK_ypabact *a5, in
                             v23.Priority = 80;
                             v23.MsgID = 82;
 
+#ifdef UA_VR_ENABLED
+                            VRRadio::SetNextEventPos(cell->CenterPos, 82); // sector event, no unit
+#endif
                             ypaworld_func159(&v23);
                         }
                         else if ( _userRobo->_owner == cell->owner )
@@ -968,6 +993,9 @@ void NC_STACK_ypaworld::CellSetNewOwner(cellArea *cell, NC_STACK_ypabact *a5, in
                             v22.Priority = 80;
                             v22.MsgID = 81;
 
+#ifdef UA_VR_ENABLED
+                            VRRadio::SetNextEventPos(cell->CenterPos, 81); // sector event, no unit
+#endif
                             ypaworld_func159(&v22);
                         }
                     }
@@ -1660,8 +1688,21 @@ void NC_STACK_ypaworld::RenderSector(TRenderingSector *sct, baseRender_msg *bs77
         }
     }
 
+#ifdef UA_VR_ENABLED
+    // VR diorama: other owners' units only where the player can see them (the map
+    // rule + stealth, as the table / wrist radar). -1 = the normal view (all drawn).
+    extern int g_vrDioramaMe;
+    extern uint32_t g_vrDioramaSkip;
+#endif
     for ( NC_STACK_ypabact* &bact : sct->p_cell->unitsList )
     {
+#ifdef UA_VR_ENABLED
+        if ( g_vrDioramaSkip && bact->_gid == g_vrDioramaSkip )
+            continue; // VR: carried in the hand, drawn there
+        if ( g_vrDioramaMe >= 0 && bact->_owner != g_vrDioramaMe &&
+             !(bact->_pSector && bact->_pSector->IsCanSee(g_vrDioramaMe) && !bact->IsHiddenFor(g_vrDioramaMe)) )
+            continue;
+#endif
         if ( sct->dword8 || bact->_bact_type == BACT_TYPES_ROBO)
         {
             // reforge shadows (host-station shadow lighter): tag the station and its guns as
@@ -1768,6 +1809,13 @@ bool NC_STACK_ypaworld::IsVisibleMapPos(vec2d pos)
     if ( !IsGamePlaySector( pt ) || !_viewerBact )
         return false;
 
+#ifdef UA_VR_ENABLED
+    // VR diorama: while the miniature is collected the window is a square
+    extern bool g_vrDioWinOn;
+    extern int g_vrDioWin[4];
+    if ( g_vrDioWinOn )
+        return pt.x >= g_vrDioWin[0] && pt.x <= g_vrDioWin[2] && pt.y >= g_vrDioWin[1] && pt.y <= g_vrDioWin[3];
+#endif
     Common::Point dist = _viewerBact->_cellId.AbsDistance( pt ); 
     if ( dist.x + dist.y <= (_renderSectors - 1) / 2 )
         return true;
@@ -1953,6 +2001,34 @@ void NC_STACK_ypaworld::PrepareAllFillers()
 // One row/column more than the max sector count: RenderFillers peeks one sector
 // beyond the render window ([j + 1][i + 1]) when stitching the landscape.
 TRenderingSector rendering_sectors[YW_RENDER_SECTORS_MAX + 1][ YW_RENDER_SECTORS_MAX + 1];
+
+#ifdef UA_VR_ENABLED
+int g_vrDioramaMe = -1;
+uint32_t g_vrDioramaSkip = 0;
+bool g_vrDioWinOn = false; // IsVisibleMapPos uses the diorama window (RenderDiorama only)
+int g_vrDioWin[4] = {0, 0, -1, -1};
+
+// The unit with this gid (host stations, squad leaders, members), or NULL.
+static NC_STACK_ypabact *VRFindBact(NC_STACK_ypaworld *yw, uint32_t gid)
+{
+    if ( !gid )
+        return NULL;
+    for ( NC_STACK_ypabact *r : yw->_unitsList )
+    {
+        if ( r->_gid == gid )
+            return r;
+        for ( NC_STACK_ypabact *c : r->_kidList )
+        {
+            if ( c->_gid == gid )
+                return c;
+            for ( NC_STACK_ypabact *u : c->_kidList )
+                if ( u->_gid == gid )
+                    return u;
+        }
+    }
+    return NULL;
+}
+#endif
 
 void NC_STACK_ypaworld::RenderFillers(baseRender_msg *arg)
 {
@@ -2270,6 +2346,830 @@ static bool PerfCamPose(NC_STACK_ypaworld *yw, vec3d *eye, mat3x3 *rot)
     return true;
 }
 
+#ifdef UA_VR_ENABLED
+// ---------------------------------------------------------------------------
+// VR diorama static batching. The miniature draws the
+// lego buildings and the landscape fillers of a chunk of C x C sectors as one merged
+// mesh per material (texture, PBR maps, flags, colour, fog) instead of one draw per
+// lego mesh. Each chunk is built by capturing exactly what RenderSector (lego part) and
+// RenderFillers would queue, through a view at the chunk origin, then merging the
+// captured meshes (positions moved into chunk space). A per-frame signature of the
+// chunk's content (lego ids, cell type, heights, filler surfaces / heights, which
+// sectors of the window it covers) picks a cached build or triggers a rebuild, so
+// destroyed buildings, finished constructions, owner / type changes and window pans
+// stay correct. Sectors under construction (scaled each frame) and anything that
+// cannot be merged fall back to the per-object path. Units, super items, particles,
+// glow and the carried unit are unchanged. Only RenderDiorama uses it.
+//   UA_VR_DIO_BATCH=0 off, =n chunk side (1..8, default 8); UA_VR_DIO_BATCH_MS build
+//   budget per frame (default 0 = unlimited; with a budget the rest of the chunks draw
+//   unbatched until built).
+namespace DioBatching
+{
+struct BMesh
+{
+    GFX::TMesh mesh;
+    float fogStart = 0.0, fogLength = 0.0;
+};
+
+struct Batch
+{
+    std::vector<uint64_t> sig;
+    std::list<BMesh> meshes;
+    std::vector<GFX::TRenderNode> loose; // dynamic-texture lego meshes: Mesh = the lego's own, TForm chunk-relative
+    vec3d origin;
+    int tris = 0;
+    uint32_t lastUse = 0;
+};
+
+struct MatKey
+{
+    ResBitmap *tex;
+    const GFX::TPbrMaterial *pbr;
+    uint32_t flags;
+    float c[4];
+    float fog[2];
+    bool operator<(const MatKey &b) const
+    {
+        if (tex != b.tex) return tex < b.tex;
+        if (pbr != b.pbr) return pbr < b.pbr;
+        if (flags != b.flags) return flags < b.flags;
+        for (int i = 0; i < 4; i++) if (c[i] != b.c[i]) return c[i] < b.c[i];
+        if (fog[0] != b.fog[0]) return fog[0] < b.fog[0];
+        return fog[1] < b.fog[1];
+    }
+};
+
+const int kVariants = 3;              // cached builds per chunk (window pans back and forth)
+std::map<int, std::vector<Batch *>> g_cache;
+const void *g_world = NULL;
+int g_mode = -1;                      // chunk side, 0 = off
+double g_budgetMs = 0.0;           // 0 = build every missing chunk now (Quest: ~0.4 ms per chunk vs ~11 ms per
+                                      // chunk-frame drawn unbatched, so building at once is always cheaper)
+uint32_t g_frame = 0;
+bool g_skipFill[YW_RENDER_SECTORS_MAX + 1][YW_RENDER_SECTORS_MAX + 1];
+bool g_batched[YW_RENDER_SECTORS_MAX + 1][YW_RENDER_SECTORS_MAX + 1];
+// stats for the UA_VR_CMD_LOG line
+int g_stChunks = 0, g_stBatched = 0, g_stBuilt = 0, g_stDraws = 0, g_stLive = 0;
+double g_stBuildMs = 0.0;
+
+void Clear()
+{
+    for (auto &kv : g_cache)
+        for (Batch *b : kv.second)
+            delete b; // TMesh frees its VBOs
+    g_cache.clear();
+    g_stLive = 0;
+}
+
+int Mode()
+{
+    if (g_mode < 0)
+    {
+        g_mode = 8; // Quest level 41 whole: side 8 = 479 draws, 119.9 fps; side 4 = 1059 draws, 117.3 fps
+        if (const char *v = getenv("UA_VR_DIO_BATCH"))
+            g_mode = std::max(0, std::min(8, atoi(v)));
+        if (const char *v = getenv("UA_VR_DIO_BATCH_MS"))
+            g_budgetMs = std::max(0.0, atof(v));
+    }
+    return g_mode;
+}
+
+inline uint64_t FBits(float f) // raw float bits, zero-extended (packed with unsigned shifts)
+{
+    uint32_t i;
+    memcpy(&i, &f, sizeof(i));
+    return i;
+}
+inline uint64_t Pack(uint64_t hi, uint64_t lo) { return (hi << 32) | (lo & 0xffffffffull); }
+
+bool HasParticles(const NC_STACK_base::Instance *inst)
+{
+    if (!inst)
+        return false;
+    if (!inst->Particles.empty())
+        return true;
+    for (const NC_STACK_base::Instance *k : inst->KidsOpts)
+        if (HasParticles(k))
+            return true;
+    return false;
+}
+
+bool IsLinearIdentity(const mat4x4 &m)
+{
+    return fabs(m.m00 - 1.0) < 1e-9 && fabs(m.m11 - 1.0) < 1e-9 && fabs(m.m22 - 1.0) < 1e-9 &&
+           fabs(m.m01) < 1e-9 && fabs(m.m02) < 1e-9 && fabs(m.m10) < 1e-9 &&
+           fabs(m.m12) < 1e-9 && fabs(m.m20) < 1e-9 && fabs(m.m21) < 1e-9;
+}
+
+// Append src (transformed by m) to the merged meshes of its material.
+void Merge(std::list<BMesh> &out, std::map<MatKey, BMesh *> &open, const GFX::TRenderNode &n)
+{
+    const GFX::TMesh &src = *n.Mesh;
+    if (src.Vertexes.empty() || src.Indixes.empty())
+        return;
+    MatKey k;
+    k.tex = n.Tex;
+    k.pbr = n.Pbr;
+    k.flags = n.Flags & ~GFX::RFLAGS_FALLOFF; // decided per frame (Render's rule, on the batch)
+    k.c[0] = n.Color.r; k.c[1] = n.Color.g; k.c[2] = n.Color.b; k.c[3] = n.Color.a;
+    k.fog[0] = n.FogStart; k.fog[1] = n.FogLength;
+
+    const size_t maxV = (size_t)std::numeric_limits<GFX::IndexType>::max();
+    BMesh *dst = NULL;
+    auto it = open.find(k);
+    if (it != open.end() && it->second->mesh.Vertexes.size() + src.Vertexes.size() <= maxV)
+        dst = it->second;
+    if (!dst)
+    {
+        out.emplace_back();
+        dst = &out.back();
+        dst->mesh.Mat.Tex = k.tex;
+        dst->mesh.Mat.Pbr = k.pbr;
+        dst->mesh.Mat.Flags = k.flags;
+        dst->mesh.Mat.Color = n.Color;
+        dst->fogStart = n.FogStart;
+        dst->fogLength = n.FogLength;
+        open[k] = dst;
+    }
+
+    const mat4x4 &m = n.TForm;
+    const bool ident = IsLinearIdentity(m);
+    const size_t base = dst->mesh.Vertexes.size();
+    dst->mesh.Vertexes.reserve(base + src.Vertexes.size());
+    for (const GFX::TVertex &sv : src.Vertexes)
+    {
+        GFX::TVertex v = sv;
+        if (ident)
+        {
+            v.Pos.x = sv.Pos.x + m.m03;
+            v.Pos.y = sv.Pos.y + m.m13;
+            v.Pos.z = sv.Pos.z + m.m23;
+        }
+        else
+        {
+            const vec3d p = m.Transform(vec3d(sv.Pos.x, sv.Pos.y, sv.Pos.z));
+            v.Pos.x = p.x; v.Pos.y = p.y; v.Pos.z = p.z;
+            // (PBR meshes are never merged: no shading frame to turn here)
+        }
+        dst->mesh.Vertexes.push_back(v);
+    }
+    dst->mesh.Indixes.reserve(dst->mesh.Indixes.size() + src.Indixes.size());
+    for (GFX::IndexType i : src.Indixes)
+        dst->mesh.Indixes.push_back((GFX::IndexType)(base + i));
+}
+} // namespace DioBatching
+
+void VRDioBatchClear()
+{
+    DioBatching::Clear();
+    DioBatching::g_world = NULL;
+}
+
+// The lego part of RenderSector for a finished (not constructing) sector.
+static void DioRenderLego(NC_STACK_ypaworld *yw, TRenderingSector *sct, baseRender_msg *arg, bool emitOnly)
+{
+    cellArea *pcell = sct->p_cell;
+    const int v17 = pcell->SectorType == 1 ? 0 : -1;
+    const int v20 = pcell->SectorType == 1 ? 1 : 3;
+    for (int zz = 0; zz < v20; zz++)
+        for (int xx = 0; xx < v20; xx++)
+        {
+            NC_STACK_base *bld = Reforge::LegoFarFor(yw->_legoArray[ yw->GetLegoBld(pcell, xx, zz) ].Base);
+            if ( emitOnly )
+            {
+                NC_STACK_base::CheckOpts( &pcell->BldVPOpts.At(xx, zz), bld );
+                if ( !DioBatching::HasParticles(pcell->BldVPOpts.At(xx, zz)) )
+                    continue;
+            }
+            bld->SetPosition( sct->p_cell->CenterPos + vec3d((v17 + xx) * 300.0, 0.0, (v17 + zz) * 300.0) );
+            NC_STACK_base::CheckOpts( &pcell->BldVPOpts.At(xx, zz), bld );
+            bld->Render(arg, pcell->BldVPOpts.At(xx, zz));
+        }
+}
+
+// The units part of RenderSector (same filters as the diorama).
+static void DioRenderUnits(TRenderingSector *sct, baseRender_msg *bs77)
+{
+    for ( NC_STACK_ypabact* &bact : sct->p_cell->unitsList )
+    {
+        if ( g_vrDioramaSkip && bact->_gid == g_vrDioramaSkip )
+            continue;
+        if ( g_vrDioramaMe >= 0 && bact->_owner != g_vrDioramaMe &&
+             !(bact->_pSector && bact->_pSector->IsCanSee(g_vrDioramaMe) && !bact->IsHiddenFor(g_vrDioramaMe)) )
+            continue;
+        if ( sct->dword8 || bact->_bact_type == BACT_TYPES_ROBO)
+            bact->Render(bs77);
+    }
+}
+
+// RenderFillers' two loops over the diorama window, minus the fillers a chunk batch drew.
+static void DioRenderFillers(NC_STACK_ypaworld *yw, int N, baseRender_msg *arg)
+{
+    for (int pass = 0; pass < 2; pass++)
+    {
+        const bool vert = pass == 0;
+        for (int i = 0; i < N - (vert ? 0 : 1); i++)
+            for (int j = 0; j < N - (vert ? 1 : 0); j++)
+            {
+                if ( DioBatching::g_skipFill[j][i] )
+                    continue;
+                TRenderingSector &sct = rendering_sectors[j][i];
+                TRenderingSector &sct2 = vert ? rendering_sectors[j + 1][i] : rendering_sectors[j][i + 1];
+                if (sct.dword4 == 1 && sct2.dword4 == 1 && (sct.dword8 == 1 || sct2.dword8 == 1))
+                {
+                    float h;
+                    if (rendering_sectors[j + 1][i + 1].dword4 == 1)
+                        h = rendering_sectors[j + 1][i + 1].p_cell->averg_height;
+                    else
+                        h = sct2.p_cell->averg_height;
+                    TCellFillerCh &filler = vert ? yw->_cellsVFCache( sct2.p_cell->CellId.x - 1, sct2.p_cell->CellId.y )
+                                                 : yw->_cellsHFCache( sct2.p_cell->CellId.x, sct2.p_cell->CellId.y - 1 );
+                    yw->PrepareFiller(sct.p_cell, sct2.p_cell, sct2.p_cell->averg_height, h, vert, &filler);
+                    filler.Render(arg);
+                }
+            }
+    }
+}
+
+// Signature of a chunk's content for this window (independent of the view).
+// Window indexes: sectors (x, y) with x in [ax, bx), y in [ay, by).
+static void DioChunkSig(NC_STACK_ypaworld *yw, int ax, int bx, int ay, int by, int N, std::vector<uint64_t> &sig)
+{
+    sig.clear();
+    sig.push_back(((uint64_t)(uint16_t)ax << 48) | ((uint64_t)(uint16_t)ay << 32) | ((uint64_t)(uint16_t)bx << 16) | (uint16_t)by);
+    for (int y = ay; y < by; y++)
+        for (int x = ax; x < bx; x++)
+        {
+            const TRenderingSector &s = rendering_sectors[x][y];
+            if ( !s.dword4 )
+            {
+                sig.push_back(~0ull);
+                continue;
+            }
+            const cellArea *c = s.p_cell;
+            sig.push_back(DioBatching::Pack((uint32_t)c->CellId.x, (uint32_t)c->CellId.y));
+            sig.push_back(DioBatching::Pack((uint32_t)c->type_id, (uint32_t)c->SectorType));
+            sig.push_back(DioBatching::Pack(DioBatching::FBits(c->CenterPos.x), DioBatching::FBits(c->CenterPos.z)));
+            sig.push_back(DioBatching::Pack(DioBatching::FBits(c->CenterPos.y), DioBatching::FBits(c->height)));
+            const int n = c->SectorType == 1 ? 1 : 3;
+            for (int zz = 0; zz < n; zz++)
+                for (int xx = 0; xx < n; xx++)
+                    sig.push_back((uint32_t)yw->GetLegoBld(c, xx, zz));
+        }
+    // the fillers owned by these sectors (as RenderFillers would draw them, view aside)
+    for (int pass = 0; pass < 2; pass++)
+    {
+        const bool vert = pass == 0;
+        for (int y = ay; y < by; y++)
+            for (int x = ax; x < bx; x++)
+            {
+                if ( vert ? x >= N - 1 : y >= N - 1 )
+                    continue;
+                const TRenderingSector &s1 = rendering_sectors[x][y];
+                const TRenderingSector &s2 = vert ? rendering_sectors[x + 1][y] : rendering_sectors[x][y + 1];
+                if ( !(s1.dword4 == 1 && s2.dword4 == 1) )
+                {
+                    sig.push_back(~1ull);
+                    continue;
+                }
+                const float h = rendering_sectors[x + 1][y + 1].dword4 == 1 ? rendering_sectors[x + 1][y + 1].p_cell->averg_height
+                                                                          : s2.p_cell->averg_height;
+                sig.push_back(DioBatching::Pack((uint32_t)yw->_secTypeArray[ s1.p_cell->type_id ].SurfaceType,
+                                                (uint32_t)yw->_secTypeArray[ s2.p_cell->type_id ].SurfaceType));
+                sig.push_back(DioBatching::Pack(DioBatching::FBits(s1.p_cell->height), DioBatching::FBits(s2.p_cell->height)));
+                sig.push_back(DioBatching::Pack(DioBatching::FBits(h), DioBatching::FBits(s2.p_cell->averg_height)));
+            }
+    }
+}
+
+// Capture and merge one chunk. False = something could not be merged (draw it unbatched).
+static bool DioBuildChunk(NC_STACK_ypaworld *yw, DioBatching::Batch *b, int ax, int bx, int ay, int by, int N, baseRender_msg *rndrs)
+{
+    TF::TForm3D *view = TF::Engine.GetViewPoint();
+    if ( !view )
+        return false;
+    const TRenderingSector &s0 = rendering_sectors[ax][ay];
+    b->origin = s0.dword4 ? s0.p_cell->CenterPos : vec3d();
+    for (int y = ay; y < by && !s0.dword4; y++) // any covered sector as the origin
+        for (int x = ax; x < bx; x++)
+            if ( rendering_sectors[x][y].dword4 )
+            {
+                b->origin = rendering_sectors[x][y].p_cell->CenterPos;
+                y = by;
+                break;
+            }
+
+    std::vector<GFX::TRenderNode> cap;
+    cap.reserve(512);
+    const mat3x3 savedRot = view->CalcSclRot;
+    const vec3d savedPos = view->CalcPos;
+    view->CalcSclRot = mat3x3::Ident();
+    view->CalcPos = b->origin;
+    extern bool g_vrNoEmit;
+    const bool savedNoEmit = g_vrNoEmit;
+    g_vrNoEmit = true;
+    baseRender_msg arg = *rndrs;
+    arg.flags = 0;
+    GFX::Engine.VRSetCapture(&cap);
+
+    for (int y = ay; y < by; y++)
+        for (int x = ax; x < bx; x++)
+            if ( rendering_sectors[x][y].dword4 )
+                DioRenderLego(yw, &rendering_sectors[x][y], &arg, false);
+    const size_t legoEnd = cap.size();
+    for (int pass = 0; pass < 2; pass++)
+    {
+        const bool vert = pass == 0;
+        for (int y = ay; y < by; y++)
+            for (int x = ax; x < bx; x++)
+            {
+                if ( vert ? x >= N - 1 : y >= N - 1 )
+                    continue;
+                TRenderingSector &s1 = rendering_sectors[x][y];
+                TRenderingSector &s2 = vert ? rendering_sectors[x + 1][y] : rendering_sectors[x][y + 1];
+                if ( !(s1.dword4 == 1 && s2.dword4 == 1) )
+                    continue;
+                const float h = rendering_sectors[x + 1][y + 1].dword4 == 1 ? rendering_sectors[x + 1][y + 1].p_cell->averg_height
+                                                                          : s2.p_cell->averg_height;
+                TCellFillerCh &filler = vert ? yw->_cellsVFCache( s2.p_cell->CellId.x - 1, s2.p_cell->CellId.y )
+                                             : yw->_cellsHFCache( s2.p_cell->CellId.x, s2.p_cell->CellId.y - 1 );
+                yw->PrepareFiller(s1.p_cell, s2.p_cell, s2.p_cell->averg_height, h, vert, &filler);
+                filler.Render(&arg);
+            }
+    }
+
+    GFX::Engine.VRSetCapture(NULL);
+    g_vrNoEmit = savedNoEmit;
+    view->CalcSclRot = savedRot;
+    view->CalcPos = savedPos;
+
+    std::map<DioBatching::MatKey, DioBatching::BMesh *> open;
+    for (size_t i = 0; i < cap.size(); i++)
+    {
+        const GFX::TRenderNode &n = cap[i];
+        if ( !n.Mesh )
+            return false;
+        // Kept as individual draws (original mesh, bounds and per-object distance): animated
+        // textures; PBR meshes (V2FarFade shades by the draw's projected bounds, and the shading
+        // frame stays the object's own); LUMTRACY (sorted back to front per object).
+        if ( (n.Flags & (GFX::RFLAGS_DYNAMIC_TEXTURE | GFX::RFLAGS_LUMTRACY)) || n.coordsID >= 0 || n.Pbr )
+        {
+            if ( i >= legoEnd ) // filler meshes can be rebuilt elsewhere: never keep a pointer
+                return false;
+            b->loose.push_back(n);
+            continue;
+        }
+        DioBatching::Merge(b->meshes, open, n);
+    }
+    const bool vbo = GFX::Engine.VBOEnabled();
+    for (DioBatching::BMesh &bm : b->meshes)
+    {
+        bm.mesh.RecalcBoundBox();
+        b->tris += bm.mesh.Indixes.size() / 3;
+        GFX::Engine.MeshMakeVBO(&bm.mesh);
+        if ( vbo ) // the GPU copy is all the draw needs (the index count stays)
+            std::vector<GFX::TVertex>().swap(bm.mesh.Vertexes);
+    }
+    return true;
+}
+
+static void DioQueueBatch(DioBatching::Batch *b, baseRender_msg *rndrs)
+{
+    TF::TForm3D *view = TF::Engine.GetViewPoint();
+    mat4x4 tf = view->CalcSclRot;
+    tf *= mat4x4(b->origin - view->CalcPos);
+    const float distance = tf.getTranslate().length();
+    const bool newsky = System::IniConf::GfxNewSky.Get<bool>();
+    const float transDist = System::IniConf::GfxSkyDistance.Get<int>();
+
+    for (DioBatching::BMesh &bm : b->meshes)
+    {
+        GFX::TMesh &msh = bm.mesh;
+        rndrs->adeCount += msh.Indixes.size() / 3;
+        GFX::TRenderNode &rend = GFX::Engine.AllocRenderNode();
+        rend = GFX::TRenderNode( GFX::TRenderNode::TYPE_MESH );
+        rend.Distance = distance;
+        rend.Color = msh.Mat.Color;
+        rend.Pbr = msh.Mat.Pbr;
+        rend.Flags = msh.Mat.Flags | rndrs->flags;
+        rend.Tex = msh.Mat.Tex;
+        if (newsky && !(rend.Flags & GFX::RFLAGS_IGNORE_FALLOFF))
+        {
+            if ( distance >= transDist ||
+                 tf.Transform(msh.BoundBox.Min).XZ().length() >= transDist ||
+                 tf.Transform(msh.BoundBox.Max).XZ().length() >= transDist )
+                rend.Flags |= GFX::RFLAGS_FALLOFF;
+        }
+        rend.Mesh = &msh;
+        rend.TForm = tf;
+        rend.TimeStamp = rndrs->globTime;
+        rend.FrameTime = rndrs->frameTime;
+        rend.FogStart = bm.fogStart;
+        rend.FogLength = bm.fogLength;
+        GFX::GFXEngine::Instance.QueueRenderMesh(&rend);
+        DioBatching::g_stDraws++;
+    }
+
+    for (const GFX::TRenderNode &ln : b->loose) // animated textures: per mesh, as Render does
+    {
+        GFX::TMesh &msh = *ln.Mesh;
+        rndrs->adeCount += msh.Indixes.size() / 3;
+        GFX::TRenderNode &rend = GFX::Engine.AllocRenderNode();
+        rend = GFX::TRenderNode( GFX::TRenderNode::TYPE_MESH );
+        rend.Distance = distance;
+        rend.Color = ln.Color;
+        rend.Pbr = ln.Pbr;
+        rend.Flags = (ln.Flags & ~GFX::RFLAGS_FALLOFF) | rndrs->flags;
+        rend.Tex = ln.Tex;
+        rend.coordsID = ln.coordsID;
+        if ((msh.Mat.Flags & GFX::RFLAGS_DYNAMIC_TEXTURE) && msh.Mat.TexSource)
+        {
+            msh.Mat.TexSource->SetTime(rndrs->globTime, rndrs->frameTime);
+            const uint32_t frameid = msh.Mat.TexSource->GetCurrentFrameID();
+            if (frameid < msh.CoordsCache.size())
+            {
+                rend.Tex = msh.CoordsCache.at(frameid).Tex;
+                rend.coordsID = frameid;
+            }
+        }
+        rend.TForm = tf;
+        rend.TForm *= ln.TForm;
+        const float ldist = rend.TForm.getTranslate().length(); // as Render: the object's own view distance
+        rend.Distance = ldist;
+        if (newsky && !(rend.Flags & GFX::RFLAGS_IGNORE_FALLOFF))
+        {
+            if ( ldist >= transDist ||
+                 rend.TForm.Transform(msh.BoundBox.Min).XZ().length() >= transDist ||
+                 rend.TForm.Transform(msh.BoundBox.Max).XZ().length() >= transDist )
+                rend.Flags |= GFX::RFLAGS_FALLOFF;
+        }
+        rend.Mesh = &msh;
+        rend.TimeStamp = rndrs->globTime;
+        rend.FrameTime = rndrs->frameTime;
+        rend.FogStart = ln.FogStart;
+        rend.FogLength = ln.FogLength;
+        GFX::GFXEngine::Instance.QueueRenderMesh(&rend);
+        DioBatching::g_stDraws++;
+    }
+}
+
+// The batched sector pass: lego buildings and fillers by chunk (cached merged meshes),
+// units per sector. Expects the beebox pass done (dword4 / dword8 / p_cell for the window).
+static void DioRenderBatched(NC_STACK_ypaworld *yw, const VR::DioramaWindow &w, int W, int H, int N, baseRender_msg *rndrs)
+{
+    using namespace DioBatching;
+    const int C = g_mode;
+    if ( g_world != yw ) // a new world object: nothing cached belongs to it
+    {
+        Clear();
+        g_world = yw;
+    }
+    g_frame++;
+    g_stChunks = g_stBatched = g_stBuilt = g_stDraws = 0;
+    for (int j = 0; j <= N; j++)
+        for (int i = 0; i <= N; i++)
+            g_skipFill[j][i] = g_batched[j][i] = false;
+
+    const auto t0 = std::chrono::steady_clock::now();
+    double buildMs = 0.0;
+    std::vector<uint64_t> sig;
+    sig.reserve(1024);
+
+    const int cx0 = w.x0 / C, cx1 = w.x1 / C, cy0 = w.y0 / C, cy1 = w.y1 / C;
+    for (int cy = cy0; cy <= cy1; cy++)
+        for (int cx = cx0; cx <= cx1; cx++)
+        {
+            // the chunk's sectors in window indexes
+            const int ax = std::max(cx * C, w.x0) - w.x0, bx = std::min(cx * C + C - 1, w.x1) - w.x0 + 1;
+            const int ay = std::max(cy * C, w.y0) - w.y0, by = std::min(cy * C + C - 1, w.y1) - w.y0 + 1;
+            if ( ax >= bx || ay >= by )
+                continue;
+            g_stChunks++;
+
+            // constructions (scaled every frame, and they change the cell type) in the chunk or
+            // the ring its fillers touch: per-object path
+            bool constructing = false, visible = false, any = false;
+            for (int y = ay; y <= std::min(by, N - 1) && !constructing; y++)
+                for (int x = ax; x <= std::min(bx, N - 1); x++)
+                {
+                    const TRenderingSector &s = rendering_sectors[x][y];
+                    if ( !s.dword4 )
+                        continue;
+                    if ( s.dword8 )
+                        visible = true;
+                    if ( x < bx && y < by )
+                        any = true;
+                    if ( s.p_cell->PurposeType == cellArea::PT_CONSTRUCTING &&
+                         yw->_inBuildProcess.find(s.p_cell->Id) != yw->_inBuildProcess.end() )
+                    {
+                        constructing = true;
+                        break;
+                    }
+                }
+            if ( constructing || !any )
+                continue;
+
+            DioChunkSig(yw, ax, bx, ay, by, N, sig);
+            std::vector<Batch *> &vars = g_cache[cx + cy * 1024];
+            Batch *b = NULL;
+            for (Batch *v : vars)
+                if ( v->sig == sig )
+                {
+                    b = v;
+                    break;
+                }
+            if ( !b )
+            {
+                const double spent = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                if ( spent > g_budgetMs && g_budgetMs > 0.0 )
+                    continue; // built on a later frame; drawn per object now
+                const auto tb = std::chrono::steady_clock::now();
+                b = new Batch();
+                b->sig = sig;
+                const bool ok = DioBuildChunk(yw, b, ax, bx, ay, by, N, rndrs);
+                buildMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tb).count();
+                g_stBuilt++;
+                if ( !ok )
+                {
+                    b->meshes.clear();
+                    b->loose.clear(); // kept as a "cannot batch" marker for this signature
+                }
+                if ( (int)vars.size() >= kVariants ) // least recently used out
+                {
+                    auto lru = std::min_element(vars.begin(), vars.end(), [](Batch *a, Batch *c) { return a->lastUse < c->lastUse; });
+                    delete *lru;
+                    vars.erase(lru);
+                }
+                b->tris = ok ? b->tris : -1;
+                vars.push_back(b);
+            }
+            b->lastUse = g_frame;
+            if ( b->tris < 0 )
+                continue; // could not be merged: per-object path
+
+            g_stBatched++;
+            for (int y = ay; y < by; y++)
+                for (int x = ax; x < bx; x++)
+                    g_batched[x][y] = g_skipFill[x][y] = true;
+            if ( visible )
+                DioQueueBatch(b, rndrs);
+        }
+
+    // per sector: unbatched lego (+ units, as RenderSector), or units + emitters only
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+        {
+            TRenderingSector *sct = &rendering_sectors[x][y];
+            if ( !sct->dword4 )
+                continue;
+            if ( !g_batched[x][y] )
+            {
+                yw->RenderSector(sct, rndrs);
+                continue;
+            }
+            if ( sct->dword8 )
+            {
+                // particle emitters of the buildings (smoke etc.): Render with the queue off
+                const int ade = rndrs->adeCount;
+                GFX::Engine.VRSetDropQueue(true);
+                DioRenderLego(yw, sct, rndrs, true);
+                GFX::Engine.VRSetDropQueue(false);
+                rndrs->adeCount = ade;
+            }
+            DioRenderUnits(sct, rndrs);
+        }
+
+    g_stBuildMs = buildMs;
+    g_stLive = 0;
+    for (auto &kv : g_cache)
+        g_stLive += (int)kv.second.size();
+}
+#endif
+
+#ifdef UA_VR_ENABLED
+// VR Living Diorama: collect the gameplay sectors of the window (a square, not the
+// viewer's diamond) through the miniature camera VR::DioramaView set: terrain, buildings,
+// fillers, units (others' only where seen), super items. The view frustum (the eyes'
+// union) culls; nothing is culled by the full-scale view distance.
+void NC_STACK_ypaworld::RenderDiorama(const VR::DioramaWindow &w, baseRender_msg *rndrs)
+{
+    const int W = w.x1 - w.x0 + 1, H = w.y1 - w.y0 + 1;
+    const int N = std::max(W, H);
+    if ( W <= 0 || H <= 0 || N > YW_RENDER_SECTORS_MAX )
+        return;
+
+    const int savedRS = _renderSectors;
+    const Common::Point savedCell = _viewerBact->_cellId;
+    const auto savedOflags = _viewerBact->_oflags;
+    _renderSectors = N; // RenderFillers' window; IsVisibleMapPos (super items) radius
+    _viewerBact->_cellId = Common::Point(w.x0 + W / 2, w.y0 + H / 2);
+    _viewerBact->_oflags |= BACT_OFLAG_ALWAYSREND; // the player's own unit / station is on the table too
+    // UA_VR_DIO_SEEALL=1 (sim dev aid): every unit is drawn (no fog of war)
+    static int seeAll = -1;
+    if ( seeAll < 0 )
+        seeAll = (getenv("UA_VR_DIO_SEEALL") && atoi(getenv("UA_VR_DIO_SEEALL"))) ? 1 : 0;
+    g_vrDioramaMe = seeAll ? -1 : w.me;
+    g_vrDioramaSkip = w.carryGid;
+
+    for (int j = 0; j <= N; j++)
+        for (int i = 0; i <= N; i++)
+        {
+            rendering_sectors[j][i].dword4 = 0;
+            rendering_sectors[j][i].dword8 = 0;
+        }
+
+    // sim dev aid: UA_VR_DIO_TEST_DESTROY=call,cx,cy flattens the buildings of sector cx,cy
+    // (the normal damage path, as a hit would) at that diorama call, so the miniature can be
+    // seen to follow a destroyed building. Inert unless set.
+    static int tdCall = -2, tdX = 0, tdY = 0, tdCalls = 0;
+    if ( tdCall == -2 )
+    {
+        tdCall = -1;
+        if ( const char *v = getenv("UA_VR_DIO_TEST_DESTROY") )
+            if ( sscanf(v, "%d,%d,%d", &tdCall, &tdX, &tdY) != 3 )
+                tdCall = -1;
+    }
+    if ( tdCall >= 0 && tdCalls == tdCall && tdX < 0 ) // -1,-1: the built-up sector nearest the window centre
+    {
+        double best = 1e9;
+        for (int y = w.y0; y <= w.y1; y++)
+            for (int x = w.x0; x <= w.x1; x++)
+            {
+                if ( !IsGamePlaySector(Common::Point(x, y)) )
+                    continue;
+                cellArea &c = _cells(x, y);
+                const int n = c.SectorType == 1 ? 1 : 3;
+                int built = 0;
+                bool weak = true;
+                for (int zz = 0; zz < n; zz++)
+                    for (int xx = 0; xx < n; xx++)
+                    {
+                        if ( c.buildings_health.At(xx, zz) > 0 )
+                            built++;
+                        if ( _legoArray[ GetLegoBld(&c, xx, zz) ].Shield >= 100 )
+                            weak = false;
+                    }
+                if ( c.PurposeType != cellArea::PT_NONE || !weak || built < 2 )
+                    continue;
+                const double d = hypot(x - (w.x0 + w.x1) * 0.5, y - (w.y0 + w.y1) * 0.5) - built * 0.01;
+                if ( d < best )
+                {
+                    best = d;
+                    tdX = x;
+                    tdY = y;
+                }
+            }
+    }
+    if ( tdCall >= 0 && tdCalls++ == tdCall && IsGamePlaySector(Common::Point(tdX, tdY)) )
+    {
+        cellArea &tc = _cells(tdX, tdY);
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                yw_arg129 a;
+                a.field_0 = 0;
+                a.pos = tc.CenterPos + vec3d(dx * 300.0, 0.0, dz * 300.0);
+                a.field_10 = 10000000;
+                a.OwnerID = tc.owner;
+                a.unit = NULL;
+                ypaworld_func129(&a);
+            }
+        fprintf(stderr, "UAVR diorama: test destroy sector %d,%d at call %d (owner %d, type %d)\n", tdX, tdY, tdCall, tc.owner, tc.type_id);
+    }
+
+    const bool batched = DioBatching::Mode() > 0; // VR: static sector batching
+    const uint32_t queued0 = GFX::Engine.VRQueuedCount();
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+        {
+            const Common::Point c(w.x0 + x, w.y0 + y);
+            if ( !IsGamePlaySector(c) )
+                continue;
+            TRenderingSector *sct = &rendering_sectors[x][y];
+            RenderAdditionalBeeBox(c, sct, rndrs);
+            if ( sct->dword4 && !batched )
+                RenderSector(sct, rndrs);
+        }
+    if ( batched )
+        DioRenderBatched(this, w, W, H, N, rndrs);
+
+    g_vrDioWin[0] = w.x0; g_vrDioWin[1] = w.y0; g_vrDioWin[2] = w.x1; g_vrDioWin[3] = w.y1;
+    g_vrDioWinOn = true; // super-item waves: the square window, not the diamond
+    RenderSuperItems(rndrs);
+    g_vrDioWinOn = false;
+    if ( batched )
+        DioRenderFillers(this, N, rndrs); // minus the fillers the chunk batches drew
+    else
+        RenderFillers(rndrs);
+
+    // the hovered unit again, additive: a glow over the real model
+    if ( w.hoverGid && w.hoverGid != w.carryGid )
+    {
+        NC_STACK_ypabact *b = VRFindBact(this, w.hoverGid);
+        if ( b && b->_status != BACT_STATUS_DEAD )
+        {
+            extern bool g_vrNoEmit;
+            const uint32_t fl = rndrs->flags;
+            rndrs->flags |= GFX::RFLAGS_LUMTRACY;
+            g_vrNoEmit = true; // meshes only, the emitters already ran this frame
+            b->Render(rndrs);
+            g_vrNoEmit = false;
+            rndrs->flags = fl;
+        }
+    }
+    // the carried unit at the hand (its own place is skipped above), a little bigger
+    if ( w.carryGid )
+    {
+        NC_STACK_ypabact *b = VRFindBact(this, w.carryGid);
+        if ( b && b->_status != BACT_STATUS_DEAD )
+        {
+            const vec3d pos = b->_tForm.Pos;
+            const mat3x3 rot = b->_tForm.SclRot;
+            static uint32_t loggedGid = 0;
+            if ( loggedGid != w.carryGid && getenv("UA_VR_CMD_LOG") )
+            {
+                loggedGid = w.carryGid;
+                fprintf(stderr, "UAVR diorama: unit %u in the hand: drawn at %.0f,%.0f,%.0f (its place %.0f,%.0f,%.0f), x%.1f\n", w.carryGid,
+                        w.carryPos[0], w.carryPos[1], w.carryPos[2], pos.x, pos.y, pos.z, w.carryScale);
+            }
+            b->_tForm.Pos = vec3d(w.carryPos[0], w.carryPos[1], w.carryPos[2]);
+            b->_tForm.SclRot = rot * mat3x3::Scale(vec3d(w.carryScale, w.carryScale, w.carryScale));
+            extern bool g_vrNoEmit;
+            const uint32_t fl = rndrs->flags;
+            rndrs->flags |= GFX::RFLAGS_VR_NOCLIP;
+            // no particles at the hand transform (they would stay in the world);
+            // the carried unit's emitters pause while it is in the hand
+            g_vrNoEmit = true;
+            b->Render(rndrs);
+            g_vrNoEmit = false;
+            rndrs->flags = fl;
+            b->_tForm.Pos = pos;
+            b->_tForm.SclRot = rot;
+        }
+    }
+
+    // the draws this frame against the window's sectors (the table sizes the window)
+    VR::DioramaReportDraws((int)(GFX::Engine.VRQueuedCount() - queued0), W * H);
+
+    // UA_VR_CMD_LOG: what the miniature shows, every 100 frames (sim evidence)
+    static int logEvery = -1, calls = 0;
+    if ( logEvery < 0 )
+        logEvery = (getenv("UA_VR_CMD_LOG") && strcmp(getenv("UA_VR_CMD_LOG"), "0")) ? 100 : 0;
+    if ( logEvery && (calls++ % logEvery) == 0 )
+    {
+        int vis = 0, tot = 0, own = 0, other = 0, hidden = 0, fx = 0;
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++)
+            {
+                const TRenderingSector &sct = rendering_sectors[x][y];
+                if ( !sct.dword4 )
+                    continue;
+                tot++;
+                if ( sct.dword8 )
+                    vis++;
+                for ( NC_STACK_ypabact *b : sct.p_cell->unitsList )
+                {
+                    if ( b->_bact_type == BACT_TYPES_MISSLE )
+                    {
+                        if ( !fx )
+                            fprintf(stderr, "UAVR diorama: missile (owner %d) in sector %d,%d\n", b->_owner, sct.p_cell->CellId.x, sct.p_cell->CellId.y);
+                        fx++;
+                        continue;
+                    }
+                    if ( b->_owner == w.me ) own++;
+                    else if ( b->_pSector && b->_pSector->IsCanSee(w.me) && !b->IsHiddenFor(w.me) ) other++;
+                    else hidden++;
+                }
+            }
+        int byOwner[8] = {0};
+        for ( NC_STACK_ypabact *r : _unitsList )
+        {
+            if ( calls == 1 )
+                fprintf(stderr, "UAVR diorama: commander %u owner %d type %d in sector %d,%d (%d kids)\n", r->_gid, r->_owner, r->_bact_type, r->_cellId.x, r->_cellId.y, (int)r->_kidList.size());
+            byOwner[r->_owner & 7]++;
+            for ( NC_STACK_ypabact *c : r->_kidList )
+            {
+                byOwner[c->_owner & 7]++;
+                byOwner[c->_owner & 7] += (int)c->_kidList.size();
+            }
+        }
+        fprintf(stderr, "UAVR diorama: world units by owner %d %d %d %d %d %d %d %d\n", byOwner[0], byOwner[1], byOwner[2], byOwner[3], byOwner[4], byOwner[5], byOwner[6], byOwner[7]);
+        fprintf(stderr, "UAVR diorama: call %d, sectors in view %d/%d, units own %d other %d (hidden %d), missiles %d, polys %d\n",
+                calls - 1, vis, tot, own, other, hidden, fx, rndrs->adeCount);
+        if ( batched )
+            fprintf(stderr, "UAVR diorama batch: chunks %d batched %d (side %d), batch draws %d, built %d this frame (%.2f ms), cached %d\n",
+                    DioBatching::g_stChunks, DioBatching::g_stBatched, DioBatching::g_mode, DioBatching::g_stDraws,
+                    DioBatching::g_stBuilt, DioBatching::g_stBuildMs, DioBatching::g_stLive);
+    }
+
+    g_vrDioramaMe = -1;
+    g_vrDioramaSkip = 0;
+    _viewerBact->_oflags = savedOflags;
+    _viewerBact->_cellId = savedCell;
+    _renderSectors = savedRS;
+}
+#endif
+
 void NC_STACK_ypaworld::RenderGame(base_64arg *bs64, int a2)
 {
     if ( !_viewerBact )
@@ -2296,6 +3196,18 @@ void NC_STACK_ypaworld::RenderGame(base_64arg *bs64, int a2)
         _viewerBact->_cellId = c;
     }
 
+#ifdef UA_VR_ENABLED
+    // VR: late head pose; the view TForm becomes the centre-eye camera
+    // (vehicle camera * head) for the single scene collection below.
+    const bool vrWorld = v5 && VR::Active();
+    if ( vrWorld )
+        VR::BeginWorldView(v5);
+    // VR: the Command Deck table shows the world in miniature instead (the view
+    // becomes the miniature's camera; the sector window is collected below).
+    VR::DioramaWindow dio;
+    const bool vrDiorama = vrWorld && VR::DioramaView(v5, &dio);
+#endif
+
     if ( v5 )
         v5->CalcGlobal();
 
@@ -2320,6 +3232,16 @@ void NC_STACK_ypaworld::RenderGame(base_64arg *bs64, int a2)
     if ( rndrs.maxZ * 1.25 > GFX::Engine.GetProjectionFar() )
         GFX::Engine.setFrustumClip( GFX::Engine.GetProjectionNear(), rndrs.maxZ * 1.25 );
 
+#ifdef UA_VR_ENABLED
+    if ( vrDiorama )
+    {
+        // View space is the room (UA units): everything on the table is within metres.
+        rndrs.maxZ = 2000.0;
+        RenderDiorama(dio, &rndrs);
+    }
+    else
+    {
+#endif
     int v6 = _renderSectors - 1;
 
     // Clear the whole window RenderFillers may read (one sector beyond the
@@ -2369,6 +3291,9 @@ void NC_STACK_ypaworld::RenderGame(base_64arg *bs64, int a2)
     RenderSuperItems(&rndrs);
 
     RenderFillers(&rndrs);
+#ifdef UA_VR_ENABLED
+    }
+#endif
 
     bs64->field_C = rndrs.adeCount;
 
@@ -2387,24 +3312,54 @@ void NC_STACK_ypaworld::RenderGame(base_64arg *bs64, int a2)
     rrg.flags = 0;
 
 
+#ifdef UA_VR_ENABLED
+    if ( vrDiorama )
+        World::ParticleViewScale = (float)dio.k; // billboards are sized in view space
+#endif
     ParticleSystem().UpdateRender(&rrg, bs64->DTime);
+#ifdef UA_VR_ENABLED
+    World::ParticleViewScale = 1.0f;
+#endif
 
     ReforgeMarks::Render(this, &rrg); // gfx MARKS: scorch/crater/track decals + smoulder smoke (inert at level 0)
+#ifdef UA_VR_ENABLED
+    // Trails are world-sized ribbons (not scaled like the particles): on the war-table miniature a fight filled the
+    // view with them (level 1 table: 6 fps, ~130 ms eye GPU). None on the miniature.
+    if ( ReforgeTrails::Level() && !vrDiorama )
+#else
     if ( ReforgeTrails::Level() ) // gfx TRAILS (0 = original: nothing queued)
+#endif
         ReforgeTrails::Render(&rrg, bs64->DTime);
 
     GFX::Engine.BeginScene();
     
+#ifdef UA_VR_ENABLED
+    if ( _skyRender && !vrDiorama ) // the miniature stands in the room: no sky
+#else
     if ( _skyRender )
+#endif
         yw_renderSky(&rndrs);
 
+#ifdef UA_VR_ENABLED
+    if ( !vrDiorama ) // no sun shadows on the war-table miniature (room-scale view, shadow cascades are world-scale)
+#endif
     GFX::Engine.ShadowWorldScene(); // reforge shadows: no-op at level 0
+#ifdef UA_VR_ENABLED
+    if ( vrWorld )
+        VR::RasterizeEyes(); // the queued lists, once per eye
+    else
+#endif
     GFX::Engine.Rasterize();
 
     // Reforge ATMOSPHERE level 3: weather particles over the finished world frame (no-op unless built)
     GFX::Engine.AtmosDrawWeather(bs64->DTime / 1000.0f);
 
     GFX::Engine.EndScene();
+
+#ifdef UA_VR_ENABLED
+    if ( vrWorld )
+        VR::EndWorldView(v5); // back to the vehicle camera for the HUD
+#endif
 
     _viewerBact->_cellId = perfSavedCell;
 
@@ -3837,6 +4792,10 @@ void NC_STACK_ypaworld::VoiceMessageCalcPositionToUnit()
 
         _voiceMessage.Carrier.Position = _userUnit->_position + tmp;
     }
+#ifdef UA_VR_ENABLED
+    // DIRECTIONAL RADIO on = pan towards the event relative to the head
+    VRRadio::VoicePosition(this, _voiceMessage.Unit, &_voiceMessage.Carrier.Position);
+#endif
 }
 
 void NC_STACK_ypaworld::VoiceMessageUpdate()
@@ -3849,6 +4808,10 @@ void NC_STACK_ypaworld::VoiceMessageUpdate()
 
             _voiceMessage.Carrier.Vector = _userUnit->_fly_dir * _userUnit->_fly_dir_length;
         }
+#ifdef UA_VR_ENABLED
+        else // reporter dead (unit lost): keep the voice on the saved place, head-relative
+            VRRadio::VoicePosition(this, NULL, &_voiceMessage.Carrier.Position);
+#endif
 
         if ( _voiceMessage.Carrier.Sounds[0].IsEnabled() )
         {

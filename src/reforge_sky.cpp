@@ -68,7 +68,7 @@ std::string FindPanorama(const std::string &base, int level, int *widthOut, cons
     int want = std::max(1, std::min(3, level));
     for (int i = want - 1; i >= 0; --i)
     {
-        for (const char *ext : {".dds", ".png"})
+        for (const char *ext : {".ktx", ".dds", ".png"}) // .ktx = ASTC (Quest pack; absent on desktop data)
         {
             std::string p = base + "/" + stem + std::to_string(widths[i]) + ext;
             if (FileExists(p))
@@ -259,7 +259,22 @@ bool Apply(NC_STACK_base *sky, const std::string &skyName, int skyHeight, int le
 
     uint32_t t0 = SDL_GetTicks();
     ResBitmap *tex = NULL;
-    if (file.size() > 4 && file.compare(file.size() - 4, 4, ".dds") == 0)
+    if (file.size() > 4 && file.compare(file.size() - 4, 4, ".ktx") == 0)
+    {
+        tex = GFX::Engine.LoadKtxTexture(file, false); // NULL when the GL has no ASTC
+        if (!tex)
+        {
+            const std::string stem = file.substr(0, file.size() - 4);
+            if (FileExists(stem + ".dds"))
+                tex = GFX::Engine.LoadDdsTexture(stem + ".dds", false);
+            else if (SDL_Surface *s = IMG_Load((stem + ".png").c_str()))
+            {
+                tex = GFX::Engine.LoadRawTexture(s, NULL, false);
+                SDL_FreeSurface(s);
+            }
+        }
+    }
+    else if (file.size() > 4 && file.compare(file.size() - 4, 4, ".dds") == 0)
         tex = GFX::Engine.LoadDdsTexture(file, false);
     else if (SDL_Surface *s = IMG_Load(file.c_str()))
     {

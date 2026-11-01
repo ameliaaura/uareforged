@@ -1,3 +1,6 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -2017,6 +2020,10 @@ void NC_STACK_ypabact::User_layer(update_msg *arg)
             v61.tgType = BACT_TGT_TYPE_UNIT;
         }
 
+#ifdef UA_VR_ENABLED
+        VR::NoteUserAim(_world, this, 0.0, 0.0, 0.0, 0.0, _fire_pos.y, _fire_pos.z); // direction 0 = forward axis (LaunchMissile)
+#endif
+
         if ( arg->inpt->Buttons.IsAny({0, 1}) )
         {
             v61.direction = vec3d(0.0, 0.0, 0.0);
@@ -3336,6 +3343,11 @@ size_t NC_STACK_ypabact::LaunchMissile(bact_arg79 *arg)
         wobj->_rotation.SetX( _rotation.AxisX() );
 
         wobj->_rotation.SetY( wobj->_rotation.AxisZ() * wobj->_rotation.AxisX() );
+
+#ifdef UA_VR_ENABLED
+        if ( (_oflags & BACT_OFLAG_USERINPT) && i == 0 )
+            VR::NoteUserShot(this, wobj, wobj->_position.x, wobj->_position.y, wobj->_position.z, wobj->_fly_dir.x, wobj->_fly_dir.y, wobj->_fly_dir.z); // UA_VR_AIM_LOG
+#endif
 
         if ( i == 0 )
         {

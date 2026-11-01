@@ -15,11 +15,19 @@ namespace Common {
 // that id with the "<OBSOLETE>" marker, so its caption comes from the built-in
 // default "LOCALE" (see Locale::Text::Get).
 constexpr const char *PortName    = "Urban Assault: Reforged";
+#ifdef UA_VR_NEWLOOK
+constexpr const char *PortVersion = "0.9.0"; // the Quest app (UA Reforged VR)
+#else
 constexpr const char *PortVersion = "0.8.0";
+#endif
 
 // Short label for the title screen (the corner next to the language button)
 // and anywhere else a compact identity fits better than the full one.
+#ifdef UA_VR_NEWLOOK
+constexpr const char *ShellLabel  = "UA Reforged VR 0.9 (OpenUA)";
+#else
 constexpr const char *ShellLabel  = "UA Reforged 0.8 (OpenUA)";
+#endif
 
 inline std::string PortIdentity()
 {

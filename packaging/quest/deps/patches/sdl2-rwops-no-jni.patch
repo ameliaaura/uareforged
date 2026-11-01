@@ -1,0 +1,24 @@
+--- a/src/file/SDL_rwops.c	2026-10-07 09:34:17
++++ b/src/file/SDL_rwops.c	2026-10-07 09:34:17
+@@ -556,8 +556,10 @@
+     }
+ #if defined(__ANDROID__)
+ #ifdef HAVE_STDIO_H
+-    /* Try to open the file on the filesystem first */
+-    if (*file == '/') {
++    /* UAVR patch: the Quest build runs inside a NativeActivity without SDLActivity, so there is
++       no JavaVM for SDL (internal-storage lookup and the asset system would crash). Every path is
++       opened with plain fopen; relative paths resolve against the CWD (the game data dir). */
++    if (1) {
+         FILE *fp = fopen(file, mode);
+         if (fp) {
+             if (!IsRegularFileOrPipe(fp)) {
+@@ -567,6 +569,8 @@
+             }
+             return SDL_RWFromFP(fp, 1);
+         }
++        SDL_SetError("Couldn't open %s", file);
++        return NULL;
+     } else {
+         /* Try opening it from internal storage if it's a relative path */
+         char *path;

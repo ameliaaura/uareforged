@@ -36,12 +36,14 @@
 //   UA_R2_GROUND_DEBUG=class|macro|detail|ratio|nodetail   debug output
 //   UA_R2_GROUND_LOG=1        print the first ground draws (atlas, uv range)
 
-#include <SDL2/SDL_opengl.h>
+#include "glapi.h" // GLES on the Quest / ANGLE, desktop GL otherwise
 #include <SDL2/SDL_image.h>
+#ifndef UA_GLES // (glapi.h has the GLES headers)
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/glext.h>
 #else
 #include <GL/glext.h>
+#endif
 #endif
 #include <cstring>
 #include <cmath>
@@ -412,7 +414,7 @@ typedef void (APIENTRY *PfnTexImage3D)(GLenum, GLint, GLint, GLsizei, GLsizei, G
 
 GLuint UploadArray(const std::string &path, int *layersOut, float aniso, uint32_t *bytes)
 {
-    static PfnTexImage3D texImage3D = (PfnTexImage3D)SDL_GL_GetProcAddress("glTexImage3D");
+    static PfnTexImage3D texImage3D = (PfnTexImage3D)UA_GL_GetProcAddress("glTexImage3D") /* eglGetProcAddress on Android */;
     if (!texImage3D)
         return 0;
     SDL_Surface *s = IMG_Load(path.c_str());

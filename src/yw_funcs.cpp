@@ -14,6 +14,7 @@
 #include "reforge.h"
 #include "loaders.h"
 #include "system/inivals.h"
+#include "vr/vr.h"
 
 extern GuiList stru_5C91D0;
 
@@ -1869,6 +1870,10 @@ void NC_STACK_ypaworld::ypaworld_func158__sub4__sub1()
     {
         if ( _briefScreen.Stage )
         {
+#ifdef UA_VR_ENABLED
+            if ( _levelInfo.State == TLevelInfo::STATE_BRIEFING || _levelInfo.State == TLevelInfo::STATE_DEBRIEFING )
+                VR::BridgeNoteBriefing(); // Command Deck: briefing on the bridge monitor
+#endif
             if ( _levelInfo.State == TLevelInfo::STATE_BRIEFING )
             {
                 if ( _GameShell->Input->KbdLastHit == Input::KC_RETURN )

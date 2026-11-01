@@ -1,4 +1,7 @@
 #define GLOBAL
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+#endif
 #include "system/fsmgr.h"
 #include "reforge.h"
 #include "system/system.h"
@@ -267,6 +270,10 @@ int ProcessGameplayFrame()
         ypaworld->Process(&world_update_arg);
     }
 
+#ifdef UA_VR_ENABLED
+    VR::GameplayFrameHook(ypaworld); // dev aid, inert unless UA_VR_TAKE_TANK is set
+#endif
+
     // After Process(): a gameplay frame resets the level state, so a forced
     // end set before it would be swallowed.
     AutostartLevelTimeout();
@@ -325,6 +332,23 @@ int ProcessGameplayFrame()
         {
             GameScreenMode = GAME_SCREEN_MODE_MENU;
             Input::Engine.QueryInput(&input_states);
+
+            // menu fix: a level started
+            // straight from the title screen (UA_AUTOSTART_LEVEL, which the Quest
+            // build always uses) comes back here with EnvMode still TITLE and
+            // the level state still COMPLETED / ABORTED. The title buttons are
+            // only enabled in STATE_MENU (GameShellUiHandleInput), so the main
+            // menu showed no options at all. The normal path (Single-Player ->
+            // map) never returns to the title with a level state.
+            // It is also the flat "captions gone after a level" bug (same cause), but
+            // the flat game is kept exactly as released: VR builds only for now.
+#ifdef UA_VR_ENABLED
+            if ( userdata.EnvMode == ENVMODE_TITLE )
+            {
+                ypaworld->_levelInfo.State = TLevelInfo::STATE_MENU;
+                printf("UA: back to the title after a level: state -> MENU (title buttons enabled)\n");
+            }
+#endif
 
             if (!v0)
                 return 0;
@@ -790,9 +814,16 @@ int ProcessMenuFrame()
 
 int ProcessNextFrame()
 {
+#ifdef UA_VR_ENABLED
+    VR::FrameStart(); // backend pacing + timing; no-op when VR is off
+#endif
+
     input_states = TInputState();
     Input::Engine.QueryInput(&input_states);
 
+#ifdef UA_VR_ENABLED
+    const bool resetPeriod = userdata.ResetInputPeriod;
+#endif
     if ( userdata.ResetInputPeriod )
     {
         input_states.Period = 1;
@@ -800,6 +831,16 @@ int ProcessNextFrame()
     }
 
     input_states.Period++;
+
+#ifdef UA_VR_ENABLED
+    {
+        // OpenXR: game tick from the runtime's display clock (VR::TickMs); returns the
+        // measured value unchanged when VR is off.
+        uint32_t vrTick = VR::TickMs(input_states.Period);
+        if ( !resetPeriod )
+            input_states.Period = vrTick;
+    }
+#endif
     
     world_update_arg.DTime = input_states.Period;
     world_update_arg.field_8 = &input_states;
@@ -1160,7 +1201,13 @@ int WinMain__sub0()
 
 uint32_t maxTicks = 1000/60; // init on 60FPS
 
+#ifdef __ANDROID__
+// Quest: called by the NativeActivity shell (platform/quest/.../ua_main_android.cpp)
+// on the android_main thread, after EGL + OpenXR are up and the CWD is the data dir.
+extern "C" int UA_main(int argc, char *argv[])
+#else
 int main(int argc, char *argv[])
+#endif
 {
     // Line-buffer stdout/stderr so logs are visible when redirected to a file
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -1187,6 +1234,9 @@ int main(int argc, char *argv[])
     System::Init(!gfxVbo);
     
     GFX::Engine.Init();
+#ifdef UA_VR_ENABLED
+    VR::Init(); // UA_VR=sim selects the desktop simulator; unset = flat game
+#endif
     System::Movie.Init();
     
     Gui::UA::Init();
@@ -1291,6 +1341,9 @@ int main(int argc, char *argv[])
     sub_4113E8();
     Gui::UA::Deinit();
     
+#ifdef UA_VR_ENABLED
+    VR::Shutdown();
+#endif
     System::Deinit();
 
     return 0;

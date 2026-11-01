@@ -1,4 +1,4 @@
-#include <SDL2/SDL_opengl.h>
+#include "../system/glapi.h"
 
 #include "root.h"
 #include "widget.h"

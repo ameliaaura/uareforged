@@ -1,4 +1,10 @@
+#ifdef UA_VR_ENABLED
+#include "gfxsettings.h"
+#include "vr/vr.h"
+#include "vr/vr_radio.h"
+#endif
 #include <inttypes.h>
+#include <algorithm>
 #include <string.h>
 #include <math.h>
 #include <iterator>
@@ -48,6 +54,276 @@ int dword_5C8B7C;
 int dword_5C8B80;
 int dword_5C8B84;
 int dword_5C8B88;
+
+#ifdef UA_VR_ENABLED
+// menu: in a VR session the exit menu is the VR
+// pause panel. The VR Menu button toggles it from anywhere (yw case 24); it
+// pauses like the original. Two pages, laid out in the same window:
+//   main:     Continue / Settings / Show-Hide Controls / Save / Load / Restart / Exit Mission
+// settings: the VR Settings rows + FPS COUNTER (cycle on click, applied
+//             live, saved to the profile when the panel closes) / Back
+// Button ids stay in the list's 8..15 range: on the main page 8..12 keep their
+// original meaning (exit, save, load, restart, continue), 13 = Settings,
+// 14 = Controls; on the settings page 8..14 are the rows, 15 = Back.
+// VR off: none of this runs (create_exit_menu and the handlers check VR::Active()).
+std::string VRControlLabel(int id); // yw.cpp (Settings row captions, ids 1179..1185; + 1176, 1178, 1187)
+void sub_451714(TileMap *, CmdStream *cur, const std::string &txt, int a2, uint8_t a4);
+void ypaworld_func64__sub7__sub2__sub8(NC_STACK_ypaworld *yw); // open the exit menu
+void ypaworld_func64__sub7__sub2__sub9(NC_STACK_ypaworld *yw); // close it
+static int s_vrPausePage = 0;       // 0 main, 1 settings, 2 controls
+static int s_vrPauseRows = 0;       // rows the window is laid out for (0 = not yet)
+static bool s_vrPauseCard = false;  // CONTROLS toggle: card beside the panel
+static bool s_vrPauseDirty = false; // a setting changed: save the profile on close
+static bool s_vrPauseResDirty = false; // RESTORE DEFAULTS reset the stored resolution
+static const int kVRPauseMain[7] = {12, 13, 14, 9, 10, 11, 8};
+
+// the Settings page grouped into
+// COMFORT / VIEW / CONTROLS with header rows, the new comfort rows (tunnel vision
+// levels, station turn + snap angle), cockpit on/off, the first-entry controls card
+// and RESTORE DEFAULTS. Row r has button id 8 + r (headers get no button box).
+// a "Mode" group with VR MODE on top, and the CONTROLS
+// group (grips, board, card + the Command Deck extras) moved to a second page ("CONTROLS >")
+// because 21 rows no longer fit the 720 px panel. Page 1 = settings, page 2 = controls.
+enum VRSetRow
+{
+    VRS_HDR_MODE = 0, VRS_MODE,
+    VRS_HDR_COMFORT, VRS_VIGNETTE, VRS_TURN,
+    VRS_HDR_VIEW, VRS_FRAME, VRS_COCKPIT, VRS_XHAIR, VRS_HZ, VRS_FPS,
+    VRS_HDR_CONTROLS, VRS_GRIPS, VRS_BOARD, VRS_CARD,
+    VRS_FIELDORD, VRS_WRISTSQ, VRS_SQWHEEL, VRS_MAPSIZE, VRS_DIRRADIO,
+    VRS_QUICKST, VRS_PANELS, VRS_PANELRESET, //
+    VRS_MORE, VRS_RESTORE, VRS_BACK, VRS_BACK2,
+    VRS_LOOK, // New Look app: LOOK: NEW LOOK / ORIGINAL (graphics preset VR / VR CLASSIC)
+    VRS_COUNT
+};
+static const int kVRPage1[] = {
+    VRS_HDR_MODE, VRS_MODE,
+#ifdef UA_VR_NEWLOOK
+    VRS_LOOK,
+#endif
+    VRS_HDR_COMFORT, VRS_VIGNETTE, VRS_TURN,
+    VRS_HDR_VIEW, VRS_FRAME, VRS_COCKPIT, VRS_XHAIR, VRS_HZ, VRS_FPS,
+    VRS_MORE, VRS_RESTORE, VRS_BACK };
+static const int kVRPage2[] = {
+    VRS_HDR_CONTROLS, VRS_GRIPS, VRS_BOARD, VRS_CARD,
+    VRS_FIELDORD, VRS_WRISTSQ, VRS_SQWHEEL, VRS_MAPSIZE, VRS_DIRRADIO,
+    VRS_QUICKST, VRS_PANELS, VRS_PANELRESET, VRS_BACK2 };
+#ifdef UA_VR_NEWLOOK
+static const int kVRPauseMaxRows = 15; // ids 8 .. 22 (bits fit an int); page 1 is the longest (+ LOOK)
+#else
+static const int kVRPauseMaxRows = 14; // ids 8 .. 21 (bits fit an int); page 1 is the longest
+#endif
+
+static int VRPageRows(int page)
+{
+    return page == 2 ? (int)(sizeof(kVRPage2) / sizeof(int)) : page == 1 ? (int)(sizeof(kVRPage1) / sizeof(int)) : 7;
+}
+
+// the VRSetRow shown at position `pos` of settings page `page` (1 or 2)
+static int VRPageRow(int page, int pos)
+{
+    return page == 2 ? kVRPage2[pos] : kVRPage1[pos];
+}
+
+static bool VRPauseHeaderRow(int row)
+{
+    return row == VRS_HDR_MODE || row == VRS_HDR_COMFORT || row == VRS_HDR_VIEW || row == VRS_HDR_CONTROLS;
+}
+
+static bool VRPause()
+{
+    return VR::Active();
+}
+
+static int VRPauseRowId(int row)
+{
+    return s_vrPausePage ? 8 + row : kVRPauseMain[row];
+}
+
+static void VRPauseLayout(NC_STACK_ypaworld *yw)
+{
+    const int rows = VRPageRows(s_vrPausePage);
+    if ( rows == s_vrPauseRows )
+        return;
+    exit_menu.numEntries = exit_menu.shownEntries = rows;
+    exit_menu.minShownEntries = exit_menu.maxShownEntries = rows;
+    if ( exit_menu.buttons.size() < (size_t)(8 + kVRPauseMaxRows) )
+        exit_menu.buttons.resize(8 + kVRPauseMaxRows);
+    for (int i = 8; i < 8 + kVRPauseMaxRows; i++)
+        exit_menu.buttons[i] = ButtonBox();
+    const int v5 = yw->_fontH + exit_menu.upperVborder + dword_5C8B84;
+    for (int r = 0; r < rows; r++)
+        if ( !(s_vrPausePage && VRPauseHeaderRow(VRPageRow(s_vrPausePage, r))) )
+            exit_menu.buttons[VRPauseRowId(r)] = ButtonBox(dword_5C8B80, r * dword_5C8B7C + v5, dword_5C8B88, yw->_fontH);
+    exit_menu.SetRect(yw, -2, -2);
+    s_vrPauseRows = rows;
+}
+
+static void VRPauseSetPage(NC_STACK_ypaworld *yw, int page)
+{
+    if ( s_vrPausePage == page )
+        return;
+    s_vrPausePage = page;
+    VRPauseLayout(yw);
+    fprintf(stderr, "UAVR pause: page %s\n", page == 2 ? "controls" : page ? "settings" : "main");
+}
+
+// Panel closed (Continue, Menu, close box, Exit/Load/Restart): back to the
+// main page next time, and save changed settings into the profile.
+static void VRPauseClosed(NC_STACK_ypaworld *yw)
+{
+    if ( s_vrPausePage )
+        VRPauseSetPage(yw, 0);
+    if ( s_vrPauseDirty && yw->_GameShell )
+    {
+        // only the VR lines; SDF_ALL would also write live mission state.
+        // plus the resolution lines after RESTORE DEFAULTS.
+        const bool ok = yw_VRPatchProfile(yw->_GameShell->UserName, s_vrPauseResDirty ? yw : NULL);
+        fprintf(stderr, "UAVR pause: settings saved to profile %s (%s)\n", yw->_GameShell->UserName.c_str(), ok ? "ok" : "FAILED");
+    }
+    s_vrPauseDirty = false;
+    s_vrPauseResDirty = false;
+}
+
+static std::string VRSettingsRowLabel(int row)
+{
+    switch ( row )
+    {
+    case VRS_HDR_MODE:     return "- MODE -";
+    case VRS_MODE:         return VRControlLabel(1190);
+#ifdef UA_VR_NEWLOOK
+    case VRS_LOOK:
+    {
+        // the choice applies at the next level load (models / textures / skies are loaded with the level)
+        const bool nl = GfxSettings::GetPreset() != GfxSettings::PRESET_VRCLASSIC;
+        const bool pending = GfxSettings::AppliedPreset() != GfxSettings::PRESET_NONE &&
+                             GfxSettings::AppliedPreset() != GfxSettings::GetPreset();
+        return std::string(nl ? "LOOK: NEW LOOK" : "LOOK: ORIGINAL") + (pending ? " (NEXT LEVEL)" : "");
+    }
+#endif
+    case VRS_HDR_COMFORT:  return "- COMFORT -";
+    case VRS_VIGNETTE:     return VRControlLabel(1176);
+    case VRS_TURN:         return VRControlLabel(1182);
+    case VRS_HDR_VIEW:     return "- VIEW -";
+    case VRS_FRAME:        return VRControlLabel(1183);
+    case VRS_COCKPIT:      return VRControlLabel(1178);
+    case VRS_XHAIR:        return VRControlLabel(1180);
+    case VRS_HZ:           return VRControlLabel(1184);
+    case VRS_FPS:          return VRControlLabel(1185);
+    case VRS_HDR_CONTROLS: return "- CONTROLS -";
+    case VRS_GRIPS:        return VRControlLabel(1179);
+    case VRS_BOARD:        return VRControlLabel(1181);
+    case VRS_CARD:         return VRControlLabel(1187);
+    case VRS_FIELDORD:     return VRControlLabel(1191);
+    case VRS_WRISTSQ:      return VRControlLabel(1192);
+    case VRS_SQWHEEL:      return VRControlLabel(1193);
+    case VRS_MAPSIZE:      return VRControlLabel(1194);
+    case VRS_DIRRADIO:     return VRControlLabel(1196);
+    case VRS_QUICKST:      return VRControlLabel(1197);
+    case VRS_PANELS:       return VRControlLabel(1198);
+    case VRS_PANELRESET:   return VRControlLabel(1199);
+    case VRS_MORE:         return "CONTROLS >";
+    case VRS_RESTORE:      return "RESTORE DEFAULTS";
+    case VRS_BACK:         return "Back";
+    case VRS_BACK2:        return "< Back";
+    default:               return " ";
+    }
+}
+
+static std::string VRPauseLabel(int id)
+{
+    if ( s_vrPausePage )
+        return VRSettingsRowLabel(VRPageRow(s_vrPausePage, id - 8));
+    switch ( id )
+    {
+    case 8:  return Locale::Text::Common(Locale::CMN_EXITMISN);
+    case 9:  return Locale::Text::Common(Locale::CMN_SAVE);
+    case 10: return Locale::Text::Common(Locale::CMN_LOAD);
+    case 11: return Locale::Text::Common(Locale::CMN_RESTART);
+    case 12: return Locale::Text::Common(Locale::CMN_CONTINUE);
+    case 13: return "Settings";
+    case 14: return s_vrPauseCard ? "Hide Controls" : "Show Controls";
+    default: return " ";
+    }
+}
+
+// Settings page click (button up): cycle the row, applied live.
+static void VRPauseSettingClick(NC_STACK_ypaworld *yw, int id)
+{
+    const int row = VRPageRow(s_vrPausePage, id - 8);
+    switch ( row )
+    {
+    case VRS_MODE:     VR::SetCommandDeck(!VR::CommandDeck()); break;
+#ifdef UA_VR_NEWLOOK
+    case VRS_LOOK: // New Look (preset VR) <-> Original (preset VR CLASSIC = the original VR look); saved in SAVE/gfx.txt
+        GfxSettings::SetPreset(GfxSettings::GetPreset() == GfxSettings::PRESET_VRCLASSIC ? GfxSettings::PRESET_VR
+                                                                                         : GfxSettings::PRESET_VRCLASSIC);
+        GfxSettings::Save();
+        fprintf(stderr, "UAVR settings: LOOK %s (applies at the next level load)\n", GfxSettings::PresetKey(GfxSettings::GetPreset()));
+        break;
+#endif
+    case VRS_FIELDORD: VR::SetFieldOrders(!VR::FieldOrders()); break;
+    case VRS_WRISTSQ:  VR::SetWristSquads(!VR::WristSquads()); break;
+    case VRS_SQWHEEL:  VR::SetSquadWheel(!VR::SquadWheel()); break;
+    case VRS_MAPSIZE:  VR::SetMapWall(!VR::MapWall()); break;
+    case VRS_DIRRADIO: VR::SetDirectionalRadio(!VR::DirectionalRadio()); break;
+    case VRS_QUICKST:  VR::SetQuickStation(!VR::QuickStation()); break; //
+    case VRS_PANELS:   VR::SetPanelsFree(!VR::PanelsFree()); break;     //
+    case VRS_PANELRESET: VR::ResetPanels(); break;                      //
+    case VRS_MORE:     VRPauseSetPage(yw, 2); return;
+    case VRS_BACK2:    VRPauseSetPage(yw, 1); return;
+    case VRS_VIGNETTE: VR::CycleComfortVignette(); break;
+    case VRS_TURN:     VR::CycleStationTurn(); break;
+    case VRS_FRAME:    VR::SetCockpitFrame((VR::CockpitFrameSetting() + 1) % VR::FRAME_COUNT); break; // 3-way
+    case VRS_COCKPIT:  VR::SetCockpitShellsOn(!VR::CockpitShellsOn()); break;
+    case VRS_XHAIR:    VR::SetCrosshairColour((VR::CrosshairColour() + 1) % VR::XHAIR_COUNT); break;
+    case VRS_HZ:       VR::SetDisplayRateSetting(VR::NextDisplayRateSetting(VR::DisplayRateSetting())); break;
+    case VRS_FPS:      VR::SetFpsCounterOn(!VR::FpsCounterOn()); break;
+    case VRS_GRIPS:    VR::SetGroundGripMode((VR::GroundGripMode() + 1) % VR::GRIP_COUNT); break;
+    case VRS_BOARD:    VR::SetMapBoardOn(!VR::MapBoardOn()); break;
+    case VRS_CARD:     VR::SetControlsCardAuto(!VR::ControlsCardAuto()); break;
+    case VRS_RESTORE:
+        // VR rows + the stored game resolution (VR plays at the default anyway)
+        yw_VRRestoreDefaults();
+        yw_VRResetResolution(yw);
+        s_vrPauseResDirty = true;
+        break;
+    case VRS_BACK:     VRPauseSetPage(yw, 0); return;
+    default: return; // header rows
+    }
+    s_vrPauseDirty = true;
+    fprintf(stderr, "UAVR pause: %s\n", VRSettingsRowLabel(row).c_str());
+}
+
+// a header row on the Settings page - the same three-line geometry as a button
+// row (sub_4DA8DC), the text centred on the window background without a button bar.
+static void VRPauseHeaderLine(NC_STACK_ypaworld *yw, CmdStream *cur, const std::string &txt)
+{
+    for (int part = 0; part < 3; part++)
+    {
+        if ( part != 1 )
+            FontUA::set_yheight(cur, dword_5C8B84);
+        FontUA::store_u8(cur, 123);
+        FontUA::store_u8(cur, 32);
+        FontUA::store_u8(cur, 32);
+        if ( part == 1 )
+        {
+            FontUA::set_txtColor(cur, yw->_iniColors[60].r, yw->_iniColors[60].g, yw->_iniColors[60].b);
+            sub_451714(yw->_guiTiles[0], cur, txt, dword_5C8B88, 32);
+            FontUA::set_txtColor(cur, yw->_iniColors[68].r, yw->_iniColors[68].g, yw->_iniColors[68].b);
+        }
+        else
+        {
+            FontUA::op17(cur, dword_5C8B80 + dword_5C8B88);
+            FontUA::store_u8(cur, 32);
+        }
+        FontUA::store_u8(cur, 32);
+        FontUA::store_u8(cur, 32);
+        FontUA::store_u8(cur, 125);
+        FontUA::next_line(cur);
+    }
+}
+#endif
 
 
 
@@ -2675,6 +2951,21 @@ void create_exit_menu(NC_STACK_ypaworld *yw)
     args.staticItems = true;
     args.closeChar = 85;
 
+#ifdef UA_VR_ENABLED
+    // menu: the VR pause panel needs up to 8 rows (ids 8..15) and room for the
+    // longest Settings caption ("COCKPIT FRAME: CLASSIC").
+    if ( VRPause() )
+    {
+        // up to VRS_COUNT rows (grouped Settings page) and wider for its captions
+        // ("TUNNEL VISION: VERY LOW 25%").
+        args.numEntries = args.shownEntries = args.maxShownEntries = args.minShownEntries = kVRPauseMaxRows;
+        args.entryWidth = 4 * tmp + 16;
+        s_vrPausePage = 0;
+        s_vrPauseRows = 0;
+        s_vrPauseDirty = false;
+    }
+#endif
+
     if ( exit_menu.Init(yw, args) )
     {
         int v5 = yw->_fontH + exit_menu.upperVborder + dword_5C8B84;
@@ -2688,6 +2979,10 @@ void create_exit_menu(NC_STACK_ypaworld *yw)
                                              dword_5C8B88, yw->_fontH);
         }
     }
+#ifdef UA_VR_ENABLED
+    if ( VRPause() )
+        VRPauseLayout(yw);
+#endif
 }
 
 
@@ -2921,11 +3216,251 @@ void sb_0x4d7c08__sub0__sub1()
 }
 
 
+#ifdef UA_VR_ENABLED
+// VR: tell the VR module when a mouse-driven
+// window is up (laser pointer on: map, squad manager, exit menu, confirm box,
+// or the host station, where the flat game is played with the mouse), and draw
+// the controls card (first entry into each vehicle class for 8 s, and while
+// the exit menu is open).
+static void yw_VRPointerAndCard(NC_STACK_ypaworld *yw)
+{
+    const bool inRobo = yw->_userUnit && yw->_userUnit->_bact_type == BACT_TYPES_ROBO;
+    // Whole panel in the host station and for modal boxes; otherwise only while the
+    // ray is on an open window, so the trigger still fires when looking past them.
+    const int mode = (inRobo || exit_menu.IsOpen() || lstvw2.IsOpen()) ? 1 : 2;
+    int rects[24 * 4];
+    int n = 0;
+    for (GuiBase *w : yw->_guiActive)
+    {
+        if ( n >= 24 || w == &up_panel || w->IsClosed() )
+            continue;
+        const ButtonBox &b = (w->flags & GuiBase::FLAG_ICONIFED) ? (const ButtonBox &)w->iconBox : (const ButtonBox &)*w;
+        rects[n * 4 + 0] = b.x; rects[n * 4 + 1] = b.y; rects[n * 4 + 2] = b.w; rects[n * 4 + 3] = b.h;
+        n++;
+    }
+    // the bottom tool bar (bzda) and its pop-up list (gui_lstvw) are click boxes,
+    // not _guiActive windows, so the pointer used to stay off over them while driving.
+    if ( n < 24 && (bzda.field_1D4 & 1) && bzda.IsOpen() )
+    {
+        rects[n * 4 + 0] = bzda.x; rects[n * 4 + 1] = bzda.y; rects[n * 4 + 2] = bzda.w; rects[n * 4 + 3] = bzda.h;
+        n++;
+    }
+    if ( n < 24 && gui_lstvw.IsOpen() )
+    {
+        rects[n * 4 + 0] = gui_lstvw.x; rects[n * 4 + 1] = gui_lstvw.y; rects[n * 4 + 2] = gui_lstvw.w; rects[n * 4 + 3] = gui_lstvw.h;
+        n++;
+    }
+    VR::SetUiPointer(mode, rects, n);
+    // PANELS FREE: the bottom panel = the tool bar and the tooltip line above it
+    if ( bzda.IsOpen() && bzda.y > 0 )
+        VR::PanelNoteSplit(bzda.y - 2 * yw->_fontH, yw->_screenSize.y);
+    {
+        // verification aid: window geometry (2D game coordinates) when it changes.
+        static int geoLog = -1;
+        if ( geoLog < 0 )
+            geoLog = getenv("UA_VR_AIM_LOG") ? 1 : 0;
+        static std::string last;
+        if ( geoLog )
+        {
+            std::string g = fmt::sprintf("screen %dx%d bar %d,%d %dx%d vis %d", yw->_screenSize.x, yw->_screenSize.y, bzda.x, bzda.y, bzda.w, bzda.h, bzda.field_1D4 & 1);
+            if ( squadron_manager.IsOpen() && squadron_manager.buttons.size() > 9 )
+                g += fmt::sprintf(" | squads %d,%d %dx%d row8 %d,%d %dx%d row9 %d,%d entries %d first %d", squadron_manager.x, squadron_manager.y, squadron_manager.w, squadron_manager.h,
+                                  squadron_manager.buttons[8].x, squadron_manager.buttons[8].y, squadron_manager.buttons[8].w, squadron_manager.buttons[8].h,
+                                  squadron_manager.buttons[9].x, squadron_manager.buttons[9].y, squadron_manager.numEntries, squadron_manager.firstShownEntries)
+                     + fmt::sprintf(" cmdr x %d..%d kids from %d step %d", squadron_manager.field_2D0, squadron_manager.field_2D0 + squadron_manager.field_2CC, squadron_manager.field_2D4, squadron_manager.field_2CC);
+            if ( exit_menu.IsOpen() )
+                g += fmt::sprintf(" | exit menu %d,%d %dx%d", exit_menu.x, exit_menu.y, exit_menu.w, exit_menu.h);
+            g += fmt::sprintf(" | map %s | bar buttons", robo_map.IsOpen() ? "open" : "closed");
+            for (size_t i = 0; i < bzda.buttons.size(); i++)
+                if ( bzda.buttons[i].w > 0 )
+                    g += fmt::sprintf(" %d:%d+%d", (int)i, bzda.buttons[i].x, bzda.buttons[i].w);
+            if ( g != last )
+                fprintf(stderr, "UAVR ui: %s\n", g.c_str());
+            last = g;
+        }
+    }
+
+    // menu dev aid (headset lies unworn during automated Quest runs, so no
+    // Menu press): UA_VR_PAUSE_AT=n[,settings][,card][,fps] opens the pause panel
+    // at the n-th HUD frame of the session, optionally on the settings page, with
+    // the controls card, and/or the FPS counter on (not saved). Inert unless set.
+    {
+        static int pauseAt = -2, hudFrames = 0;
+        static bool pSettings = false, pControls = false, pCard = false, pFps = false;
+        if ( pauseAt == -2 )
+        {
+            pauseAt = -1;
+            if ( const char *v = getenv("UA_VR_PAUSE_AT") )
+            {
+                pauseAt = atoi(v);
+                pSettings = strstr(v, "settings") != NULL;
+                pControls = strstr(v, "controls") != NULL; // second page
+                pCard = strstr(v, "card") != NULL;
+                pFps = strstr(v, "fps") != NULL;
+            }
+        }
+        if ( pauseAt >= 0 && ++hudFrames == pauseAt )
+        {
+            if ( exit_menu.IsClosed() )
+                ypaworld_func64__sub7__sub2__sub8(yw);
+            if ( pSettings || pControls )
+                VRPauseSetPage(yw, pControls ? 2 : 1);
+            s_vrPauseCard = pCard;
+            if ( pFps )
+                VR::SetFpsCounterOn(true);
+            fprintf(stderr, "UAVR pause: dev aid UA_VR_PAUSE_AT opened the panel at HUD frame %d\n", hudFrames);
+        }
+    }
+
+    // menu: FPS counter (Settings "FPS COUNTER"), top-right corner of the panel
+    if ( VR::FpsCounterOn() && VR::LastFps() > 0.0f )
+    {
+        const std::string fps = fmt::sprintf("%.0f FPS", VR::LastFps());
+        const int fw = yw->_guiTiles[15]->GetWidth("000 FPS") + 8;
+        const int fx = yw->_screenSize.x - fw - 4, fy = yw->_upScreenBorder + 4;
+        if ( SDL_Surface *scr = GFX::Engine.Screen() )
+        {
+            const float sx = (float)scr->w / yw->_screenSize.x, sy = (float)scr->h / yw->_screenSize.y;
+            SDL_Rect r = { (int)((fx - 4) * sx), (int)((fy - 2) * sy), (int)((fw + 4) * sx), (int)((yw->_fontH + 4) * sy) };
+            SDL_FillRect(scr, &r, SDL_MapRGBA(scr->format, 0, 0, 0, 200));
+        }
+        CmdStream fb;
+        fb.reserve(256);
+        FontUA::select_tileset(&fb, 15);
+        FontUA::set_xpos(&fb, fx);
+        FontUA::set_ypos(&fb, fy);
+        FontUA::set_txtColor(&fb, yw->_iniColors[63].r, yw->_iniColors[63].g, yw->_iniColors[63].b);
+        FontUA::FormateClippedText(yw->_guiTiles[15], &fb, fps, fw, 32);
+        FontUA::set_end(&fb);
+        GFX::Engine.ProcessDrawSeq(fb);
+    }
+
+    int kind = 0;
+    bool timed = VR::ControlsCard(&kind);
+    // menu: with the pause panel open the card is the panel's CONTROLS toggle
+    // (a show/hide button); the timed first-entry card stays away
+    // from the panel unless the toggle is on.
+    if ( VR::Active() && exit_menu.IsOpen() )
+        timed = false;
+    if ( !timed && !(VR::Active() && exit_menu.IsOpen() && s_vrPauseCard) )
+        return;
+
+    static const char *common[] = {
+        "A: next unit      B (hold): host station",
+        "X: map      Y: squad manager      L-stick click: HUD",
+        "Menu: pause (settings, controls, exit)",
+        "Map & menus: point with right hand,",
+        "  R trigger = click,  R grip or B = right click",
+    };
+    static const char *ground[] = {
+        "VR CONTROLS - GROUND VEHICLE",
+        "Left stick: drive and turn",
+        "Right stick: turn, gun up / down",
+        "R trigger: weapon     L trigger: machine gun",
+        "R grip: brake",  // replaced per Settings "GRIPS" (VR::CommandCardLine)
+    };
+    static const char *flyer[] = {
+        "VR CONTROLS - FLYING UNIT",
+        "Left stick: speed and turn",
+        "Right stick: turn, nose up / down",
+        "R trigger: weapon     L trigger: machine gun",
+        "R grip: climb     L grip: descend",
+    };
+    static const char *station[] = {
+        "VR CONTROLS - HOST STATION",
+        "Sticks: move / aim the station gun",
+        "R trigger: fire station gun",
+        "In the station: point at map, bar and units",
+        "A: next station gun / unit",
+    };
+    const char **head = kind == 1 ? flyer : (kind == 2 ? station : ground);
+    static const char *extra = "Double-click a unit (list / map): dive";
+
+    // a confirm box from the exit menu takes the card away (it would cover it)
+    if ( lstvw2.IsOpen() && !timed )
+        return;
+
+    const int lines = 5 + 5 + 1;
+    const int lh = yw->_fontH + 2;
+    int w = yw->_screenSize.x * 0.42;
+    const int h = lh * (lines + 1);
+    int x = (yw->_screenSize.x - w) / 2; // centred: the map / squad windows sit left and right
+    int y = yw->_screenSize.y * 0.22;
+    // never on top of the exit menu (it would be hard to read). The menu and the
+    // full-width card are laid out side by side, centred as a pair: the menu
+    // window (a movable game window) is moved left, the card sits to its right.
+    // If the pair does not fit (narrow screens): below / above the menu, else
+    // the top-left corner.
+    if ( exit_menu.IsOpen() )
+    {
+        const int gap = 16, m = 8;
+        const int mw = exit_menu.w, mh = exit_menu.h;
+        const int pair = mw + gap + (w + 16);
+        if ( pair + 2 * m <= yw->_screenSize.x )
+        {
+            const int mx = (yw->_screenSize.x - pair) / 2;
+            if ( exit_menu.x != mx )
+                exit_menu.x = mx; // drawn from x,y by Formate every frame; clicks use the same box
+            x = mx + mw + gap + 8;
+            y = std::max(m + 6, std::min((int)exit_menu.y, yw->_screenSize.y - h - m));
+        }
+        else if ( exit_menu.y + mh + gap + h <= yw->_screenSize.y )
+            y = exit_menu.y + mh + gap;
+        else if ( exit_menu.y - gap - h >= 0 )
+            y = exit_menu.y - gap - h;
+        else
+        {
+            x = m + 8;
+            y = m + 6;
+        }
+    }
+    if ( getenv("UA_VR_AIM_LOG") )
+    {
+        static int lx = -1, ly = -1, lw = -1;
+        if ( x != lx || y != ly || w != lw )
+            fprintf(stderr, "UAVR ui: card %d,%d %dx%d%s\n", x - 8, y - 6, w + 16, h, exit_menu.IsOpen() ? " (exit menu open)" : "");
+        lx = x; ly = y; lw = w;
+    }
+
+    if ( SDL_Surface *scr = GFX::Engine.Screen() )
+    {
+        const float sx = (float)scr->w / yw->_screenSize.x, sy = (float)scr->h / yw->_screenSize.y;
+        SDL_Rect r = { (int)((x - 8) * sx), (int)((y - 6) * sy), (int)((w + 16) * sx), (int)(h * sy) };
+        SDL_FillRect(scr, &r, SDL_MapRGBA(scr->format, 0, 0, 0, 200));
+    }
+
+    CmdStream buf;
+    buf.reserve(2048);
+    FontUA::select_tileset(&buf, 15);
+    FontUA::set_xpos(&buf, x);
+    FontUA::set_ypos(&buf, y);
+    for (int i = 0; i < lines; i++)
+    {
+        const char *t = VR::CommandCardLine(kind, i, i < 5 ? head[i] : (i < 10 ? common[i - 5] : extra));
+        const SDL_Color c = (i == 0) ? yw->_iniColors[63] : yw->_iniColors[60];
+        FontUA::set_xpos(&buf, x);
+        FontUA::set_txtColor(&buf, c.r, c.g, c.b);
+        FontUA::FormateClippedText(yw->_guiTiles[15], &buf, t, w, 32);
+        FontUA::next_line(&buf);
+    }
+    FontUA::set_end(&buf);
+    GFX::Engine.ProcessDrawSeq(buf);
+}
+#endif
+
 void sb_0x4d7c08__sub0(NC_STACK_ypaworld *yw)
 {
     if ( yw->_userUnit->_bact_type != BACT_TYPES_MISSLE )
     {
+#ifdef UA_VR_ENABLED
+        // perf: sub-timers (no-ops unless VR is active), see vr.h HudPart.
+        double vrT = VR::HudT0();
+#define UA_VR_HUD_LAP(part) do { VR::HudAdd(VR::part, vrT); vrT = VR::HudT0(); } while (0)
+#else
+#define UA_VR_HUD_LAP(part) do { } while (0)
+#endif
         sb_0x4d7c08__sub0__sub4(yw);
+        UA_VR_HUD_LAP(HUD_RADAR);
 
         for(GuiBaseList::iterator it = yw->_guiActive.begin(); it != yw->_guiActive.end(); it++)
         {
@@ -2945,15 +3480,36 @@ void sb_0x4d7c08__sub0(NC_STACK_ypaworld *yw)
                 }
             }
         }
+        UA_VR_HUD_LAP(HUD_WINDOWS);
 
         if ( yw->_userUnit->_status != BACT_STATUS_DEAD )
         {
             sb_0x4d7c08__sub0__sub0(yw);
             sb_0x4d7c08__sub0__sub2(yw);
         }
+        UA_VR_HUD_LAP(HUD_MARKERS);
         draw_tooltip(yw);
         GFX::Engine.ProcessDrawSeq(up_panel.cmdCommands, &up_panel.cmdInclude);
+#ifdef UA_VR_ENABLED
+        // in a vehicle the tool bar floats over the moving world on the VR panel
+        // (and over the dash below it); a dark backing keeps its thin icons readable.
+        if ( VR::Active() && yw->_userUnit->_bact_type != BACT_TYPES_ROBO && (bzda.field_1D4 & 1) && bzda.IsOpen() )
+        {
+            if ( SDL_Surface *scr = GFX::Engine.Screen() )
+            {
+                const float sx = (float)scr->w / yw->_screenSize.x, sy = (float)scr->h / yw->_screenSize.y;
+                SDL_Rect r = { (int)((bzda.x - 4) * sx), (int)((bzda.y - 3) * sy), (int)((bzda.w + 8) * sx), (int)((bzda.h + 6) * sy) };
+                SDL_FillRect(scr, &r, SDL_MapRGBA(scr->format, 6, 8, 6, 190));
+            }
+        }
+#endif
         sb_0x4d7c08__sub0__sub1();
+        UA_VR_HUD_LAP(HUD_MISC);
+#ifdef UA_VR_ENABLED
+        yw_VRPointerAndCard(yw);
+#endif
+        UA_VR_HUD_LAP(HUD_CARD);
+#undef UA_VR_HUD_LAP
     }
 }
 
@@ -3775,6 +4331,21 @@ int ypaworld_func64__sub7__sub2__sub3(NC_STACK_ypaworld *yw, TInputState *inpt)
         break;
 
     case 24:
+#ifdef UA_VR_ENABLED
+        // menu: in VR the Menu button (sent as Esc) toggles the pause panel from
+        // anywhere - also in a vehicle, where the original first went back to the
+        // host station (bar button 4). Not while a confirm box is up.
+        if ( VRPause() )
+        {
+            if ( exit_menu.IsClosed() )
+                ypaworld_func64__sub7__sub2__sub8(yw);
+            else
+                ypaworld_func64__sub7__sub2__sub9(yw);
+            fprintf(stderr, "UAVR pause: menu %s\n", exit_menu.IsOpen() ? "open" : "closed");
+            inpt->HotKeyID = -1;
+            break;
+        }
+#endif
         if ( yw->_userRobo->_status == BACT_STATUS_DEAD || bzda.field_1D0 & 1 )
         {
             if ( yw->_userRobo == yw->_userUnit || yw->_userRobo->_status == BACT_STATUS_DEAD )
@@ -4005,6 +4576,9 @@ void ypaworld_func64__sub7__sub2__sub2(NC_STACK_ypaworld *yw)
             yw->_roboFinderStatus.Rect.y = squadron_manager.y;
             yw->_roboFinderStatus.Rect.w = squadron_manager.w;
             yw->_roboFinderStatus.Rect.h = squadron_manager.h;
+#ifdef UA_VR_ENABLED
+            VR::StationWindowsSaved(yw); // Command Deck auto-closed windows keep their saved state
+#endif
         }
         else
         {
@@ -6459,6 +7033,25 @@ void ypaworld_func64__sub7__sub6__sub3(NC_STACK_ypaworld *yw, int a2, int a4)
 
     FontUA::set_txtColor(&exit_menu.itemBlock, yw->_iniColors[68].r, yw->_iniColors[68].g, yw->_iniColors[68].b);
 
+#ifdef UA_VR_ENABLED
+    if ( VRPause() )
+    {
+        // menu: rows in the page's order; bit (0x100 << (id - 8)) = disabled / pressed
+        for (int r = 0; r < s_vrPauseRows; r++)
+        {
+            const int id = VRPauseRowId(r);
+            const int bit = 0x100 << (id - 8);
+            if ( s_vrPausePage && VRPauseHeaderRow(VRPageRow(s_vrPausePage, r)) )
+                VRPauseHeaderLine(yw, &exit_menu.itemBlock, VRPauseLabel(id)); // group header
+            else
+                sub_4DA8DC(yw, &exit_menu.itemBlock, s_vrPausePage ? 0 : (a4 & bit), a2 & bit, VRPauseLabel(id));
+        }
+        exit_menu.ItemsPostLayout(yw, &exit_menu.itemBlock, 0, "xyz");
+        FontUA::set_end(&exit_menu.itemBlock);
+        return;
+    }
+#endif
+
     sub_4DA8DC(yw, &exit_menu.itemBlock, a4 & 0x100, a2 & 0x100, Locale::Text::Common(Locale::CMN_EXITMISN));
     sub_4DA8DC(yw, &exit_menu.itemBlock, a4 & 0x200, a2 & 0x200, Locale::Text::Common(Locale::CMN_SAVE));
     sub_4DA8DC(yw, &exit_menu.itemBlock, a4 & 0x400, a2 & 0x400, Locale::Text::Common(Locale::CMN_LOAD));
@@ -6475,6 +7068,10 @@ void NC_STACK_ypaworld::ypaworld_func64__sub7__sub6(TInputState *inpt)
 {
     if ( exit_menu.IsClosed() )
     {
+#ifdef UA_VR_ENABLED
+        if ( VRPause() && (s_vrPausePage || s_vrPauseDirty) )
+            VRPauseClosed(this);
+#endif
         if ( _levelInfo.State != TLevelInfo::STATE_PLAYING )
         {
             if ( _levelInfo.State == TLevelInfo::STATE_SAVE )
@@ -6588,7 +7185,30 @@ void NC_STACK_ypaworld::ypaworld_func64__sub7__sub6(TInputState *inpt)
                 }
             }
 
-            switch ( inpt->ClickInf.selected_btnID )
+            int selId = inpt->ClickInf.selected_btnID;
+#ifdef UA_VR_ENABLED
+            // menu: the settings page's rows and the main page's extra rows
+            const int vid = selId;
+            if ( VRPause() && vid >= 8 && vid < 8 + VRPageRows(s_vrPausePage) && (s_vrPausePage || vid >= 13) )
+            {
+                if ( winpt->flag & (TClickBoxInf::FLAG_BTN_DOWN | TClickBoxInf::FLAG_BTN_HOLD) )
+                    a2 |= 0x100 << (vid - 8);
+                if ( winpt->flag & TClickBoxInf::FLAG_BTN_UP )
+                {
+                    if ( s_vrPausePage )
+                        VRPauseSettingClick(this, vid);
+                    else if ( vid == 13 )
+                        VRPauseSetPage(this, 1);
+                    else if ( vid == 14 )
+                    {
+                        s_vrPauseCard = !s_vrPauseCard;
+                        fprintf(stderr, "UAVR pause: controls card %s\n", s_vrPauseCard ? "shown" : "hidden");
+                    }
+                }
+                selId = -1; // handled: skip the original ids 8..12 below
+            }
+#endif
+            switch ( selId )
             {
             case 7:
                 if ( winpt->flag & TClickBoxInf::FLAG_BTN_UP )
@@ -7511,6 +8131,9 @@ void NC_STACK_ypaworld::VoiceMessagePlayFile(const std::string &flname, NC_STACK
         _voiceMessage.Priority = priority;
         _voiceMessage.Sample = v23;
         _voiceMessage.Unit = unit;
+#ifdef UA_VR_ENABLED
+        VRRadio::VoiceStarted(this, unit); // directional radio
+#endif
 
         VoiceMessageCalcPositionToUnit();
 
@@ -9088,6 +9711,13 @@ void sb_0x4d7c08__sub0__sub4(NC_STACK_ypaworld *yw)
     CmdStream buf;
     buf.reserve(1024);
 
+    // VR (cockpit): radar, compass, health/weapon info and the target life
+    // bar are on the cockpit's dash screens (vr_cockpit.cpp), not the panel.
+    bool vrDash = false;
+#ifdef UA_VR_ENABLED
+    vrDash = VR::CockpitOwnsHud();
+#endif
+
     if ( yw->_userUnit->_status == BACT_STATUS_DEAD )
     {
         std::string msg;
@@ -9110,8 +9740,21 @@ void sb_0x4d7c08__sub0__sub4(NC_STACK_ypaworld *yw)
 
             FontUA::FormateCenteredSkipableItem(yw->_guiTiles[15], &buf, msg, yw->_screenSize.x);
         }
+#ifdef UA_VR_ENABLED
+        // QUICK STATION: steady prompt under the
+        // blinking message while the own vehicle lies destroyed; A = back at once.
+        float vrLeft = 0;
+        if ( !msg.empty() && VR::QuickStationPrompt(&vrLeft) )
+        {
+            FontUA::select_tileset(&buf, 15);
+            FontUA::set_xpos(&buf, 0);
+            FontUA::set_center_ypos(&buf, yw->_fontH);
+            FontUA::set_txtColor(&buf, 255, 200, 90);
+            FontUA::FormateCenteredSkipableItem(yw->_guiTiles[15], &buf, fmt::sprintf("BACK TO STATION? A  (%d)", (int)ceilf(vrLeft)), yw->_screenSize.x);
+        }
+#endif
     }
-    else if ( yw->_userUnit != yw->_userRobo && yw->_hud.field_0 )
+    else if ( yw->_userUnit != yw->_userRobo && yw->_hud.field_0 && !vrDash )
     {
         yw_RenderHUDRadare(yw);
 
@@ -9141,7 +9784,7 @@ void sb_0x4d7c08__sub0__sub4(NC_STACK_ypaworld *yw)
         yw_RenderUnitLifeBar(yw, &buf, yw->_bactOnMouse);
     }
 
-    if ( yw->_guiVisor.field_18 )
+    if ( yw->_guiVisor.field_18 && !vrDash )
         yw_RenderUnitLifeBar(yw, &buf, yw->_guiVisor.field_18);
 
     yw_RenderOverlayCursors(yw, &buf);
@@ -9266,7 +9909,12 @@ void yw_RenderHUDTarget(NC_STACK_ypaworld *yw, sklt_wis *wis)
             yw_RenderVector2D(yw, hud_wure, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.99, 0.99, v14, NULL, NULL, true);
         }
 
-        if ( yw->_guiVisor.field_0 )
+        bool flatReticles = true;
+#ifdef UA_VR_ENABLED
+        flatReticles = !VR::HideFlatCrosshair();
+#endif
+
+        if ( yw->_guiVisor.field_0 && flatReticles )
         {
             if ( mg_wure )
             {
@@ -9298,7 +9946,7 @@ void yw_RenderHUDTarget(NC_STACK_ypaworld *yw, sklt_wis *wis)
             }
         }
 
-        if ( yw->_guiVisor.field_4 )
+        if ( yw->_guiVisor.field_4 && flatReticles )
         {
             float v51[2];
             wis_color_func func;
@@ -10973,6 +11621,13 @@ void NC_STACK_ypaworld::ypaworld_func64__sub21(TInputState *arg)
             {
                 v18 = World::DOACTION_5;
                 mousePointer = 8;
+#ifdef UA_VR_ENABLED
+                // VR: the original double-click "take control" (squad manager,
+                // map, 3D view) goes through the command layer's fade + dive.
+                if ( VR::Active() && _bactOnMouse && (VR::CommandDiveBlocked() || VR::CommandDive(_bactOnMouse->_gid, _bactOnMouse == _userRobo)) ) // blocked = swallowed
+                    v18 = World::DOACTION_0;
+                else
+#endif
                 arg->ClickInf.flag |= TClickBoxInf::FLAG_LM_DOWN;
             }
 
@@ -11056,8 +11711,22 @@ void NC_STACK_ypaworld::ypaworld_func64__sub21(TInputState *arg)
 
 
 
+uint32_t NC_STACK_ypaworld::InputPrefs() const
+{
+    uint32_t p = _preferences;
+#ifdef UA_VR_ENABLED
+    // VR: the controller mapping (src/winp.cpp) sends drive on joystick Y for ground units. The alt joystick
+    // layout moves Y to gun pitch, and the OpenUA package's default profile has "altjoystick = yes".
+    if ( VR::Active() )
+        p &= ~(World::PREF_ALTJOYSTICK | World::PREF_JOYDISABLE);
+#endif
+    return p;
+}
+
 void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
 {
+    const uint32_t inPrefs = InputPrefs();
+
     //Precompute input
     TClickBoxInf *winp = &inpt->ClickInf;
 
@@ -11073,7 +11742,7 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
 
     if ( _shellConfIsParsed )
     {
-        if ( _preferences & World::PREF_JOYDISABLE )
+        if ( inPrefs & World::PREF_JOYDISABLE )
             v38 = 1;
     }
 
@@ -11124,6 +11793,18 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
 
     if ( gui_lstvw.IsOpen() )
         inpt->Sliders[1] = 0;
+
+#ifdef UA_VR_ENABLED
+    // VR: the "mouse" is the laser pointer. Never capture it for mouse steering: a
+    // captured mouse turns a held left button into weapon fire (below) and pointer
+    // motion into steering. The right-click that toggles capture is a no-op in VR.
+    if ( VR::Active() && _mouseGrabbed )
+    {
+        _mouseGrabbed = false;
+        if ( getenv("UA_VR_AIM_LOG") )
+            fprintf(stderr, "UAVR pointer: mouse capture suppressed (right click outside the map / squad windows)\n");
+    }
+#endif
 
     if ( _mouseGrabbed ) // If grabbed mouse
     {
@@ -11194,7 +11875,7 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
         {
             if ( v13 )
             {
-                if ( (_preferences & World::PREF_ALTJOYSTICK ) && inpt->Sliders[5] != 0.0 )
+                if ( (inPrefs & World::PREF_ALTJOYSTICK ) && inpt->Sliders[5] != 0.0 )
                     _joyIgnoreY = 1;
                 else if ( inpt->Sliders[4] != 0.0 )
                     _joyIgnoreY = 1;
@@ -11212,7 +11893,7 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
         {
             if ( v13 )
             {
-                if ( (_preferences & World::PREF_ALTJOYSTICK) && inpt->Sliders[4] != 0.0 )
+                if ( (inPrefs & World::PREF_ALTJOYSTICK) && inpt->Sliders[4] != 0.0 )
                     _joyIgnoreZ = 1;
             }
             else if ( !v34 && inpt->Sliders[2] != 0.0 )
@@ -11249,7 +11930,7 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
         {
             if ( v13 )
             {
-                if ( _preferences & World::PREF_ALTJOYSTICK )
+                if ( inPrefs & World::PREF_ALTJOYSTICK )
                 {
                     if ( inpt->Sliders[16] != 0.0 )
                         inpt->Sliders[5] += inpt->Sliders[16];
@@ -11277,7 +11958,7 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
         {
             if ( v13 )
             {
-                if ( _preferences & World::PREF_ALTJOYSTICK )
+                if ( inPrefs & World::PREF_ALTJOYSTICK )
                 {
                     if ( inpt->Sliders[4] != 0.0 )
                     {

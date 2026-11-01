@@ -1,0 +1,25 @@
+# UA Reforged VR: every address the app downloads from (setup/setup_flow.cpp). Tab separated.
+# The same addresses and rules as the desktop app (packaging/macos/downloads.txt): before a download the app reads
+# links_url (the site's links.json) and, if it is valid, its values win. links.json URLs must be https on an allow_host.
+links_url	https://uareforged.pages.dev/release/links.json
+help_url	https://uareforged.pages.dev/downloads/#nogame-h
+pack_help_url	https://uareforged.pages.dev/downloads/#install-h
+# "Get the game": the OpenUA Standalone Package, fetched straight from the Metropolis Dawn community's own server
+# onto the player's headset (UA Reforged never hosts, mirrors or ships it). No checksum: the package gets updated.
+game_url	https://metropolisdawn.de/filebase/download/5/
+game_min_bytes	100000000
+game_max_bytes	5000000000
+allow_host	metropolisdawn.de
+allow_host	metropolisdawn.com
+allow_host	metropolisdawn.net
+allow_host	metropolisdawn.org
+allow_host	uareforged.pages.dev
+# allow_host	<the R2 download host, added at release>
+# Quest pack: url = the folder that holds it, next to the desktop pack parts (PACK-URL-NOT-SET = no download offered;
+# set at release). One zip with the Reforge pack's files the headset uses (models, menus, ground; no desktop DDS maps,
+# sharp textures or videos) + ASTC textures for the Quest GPU (tools/vr/make_quest_full_pack.py).
+# quest_part = file name, size in bytes, SHA-256. The app refuses a file whose checksum differs. The desktop pack parts
+# (packaging/macos/downloads.txt part lines, links.json pack_parts) are not downloaded on the headset.
+version	0.9.0 (2026-11-02)
+url	https://PACK-URL-NOT-SET/
+quest_part	UA-Reforged-Quest-pack-0.9.0.zip	712134306	e2b5447e831dfd75afa0ba1c0b193546e4fa9bce330860fb130faaa52f1dfb78

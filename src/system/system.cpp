@@ -306,6 +306,42 @@ static bool HiddenWindowSize(Common::Point *out)
     return parsed > 0;
 }
 
+#ifdef __ANDROID__
+// Quest (NativeActivity + OpenXR): the shell owns the activity, EGL and the
+// frame loop (platform/quest). SDL is only used for its non-window services
+// (surfaces, events queue, timers, threads, RWops, SDL_image/ttf/net); its
+// video, joystick and haptic subsystems would need SDLActivity's JNI side and
+// are never initialised. The shell's EGL context is already current here.
+void Init(bool oldGL)
+{
+    (void)oldGL;
+    EventHandlers.clear();
+
+    SDL_SetMainReady();
+    if (SDL_Init(SDL_INIT_EVENTS | SDL_INIT_TIMER) < 0)
+    {
+        printf("Couldn't initialize SDL: %s\n", SDL_GetError());
+        return;
+    }
+
+    winRes = ResRatio(1280, 720); // replaced by the VR panel size (SetVirtualResolution)
+    printf("GL context (shell EGL): version '%s', renderer '%s', GLSL '%s'\n",
+           (const char *)glGetString(GL_VERSION), (const char *)glGetString(GL_RENDERER),
+           (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION));
+
+    TTF_Init();
+    ScanFonts();
+    IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG);
+    SDLNet_Init();
+}
+
+void Deinit()
+{
+    IMG_Quit();
+    FontsList.clear();
+    SDL_Quit();
+}
+#else
 void Init(bool oldGL)
 {
     EventHandlers.clear();
@@ -316,6 +352,16 @@ void Init(bool oldGL)
         return;
     }
     
+#ifdef UA_GLES
+    // Mac ANGLE test build of the Quest renderer path: an OpenGL ES 3.0 context
+    // through EGL (SDL's Cocoa backend switches to EGL for the ES profile; the
+    // libraries come from UA_ANGLE_DIR, see tools/vr/build_angle.sh).
+    (void)oldGL;
+    SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#else
     if (oldGL)
     {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
@@ -327,6 +373,7 @@ void Init(bool oldGL)
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
     }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#endif
 
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
@@ -416,6 +463,7 @@ void Deinit()
 
     SDL_Quit();
 }
+#endif // __ANDROID__
 
 
 bool ProcessEvents()
@@ -464,24 +512,52 @@ bool ProcessEvents()
     return false;
 }
 
+// VR (src/vr): while a VR backend is active the engine's "screen" is an
+// offscreen 2D panel of a fixed size, and presentation is the backend's job.
+// Both stay unset (and these functions unchanged) when VR is off.
+static Common::Point virtualRes(0, 0);
+static bool (*presentHook)() = NULL;
+
+void SetVirtualResolution(const Common::Point &res)
+{
+    virtualRes = res;
+}
+
+void SetPresentHook(bool (*hook)())
+{
+    presentHook = hook;
+}
+
 ResRatio GetRResolution()
 {
+    if (virtualRes.x > 0 && virtualRes.y > 0)
+        return ResRatio(virtualRes.x, virtualRes.y);
     return winRes;
 }
 
 Common::Point GetResolution()
 {
+    if (virtualRes.x > 0 && virtualRes.y > 0)
+        return virtualRes;
     return Common::Point(winRes.W, winRes.H);
 }
 
 void Flip()
 {
+    if (presentHook && presentHook())
+        return;
+#ifndef __ANDROID__ // no window on Quest; the VR backend always presents
     SDL_GL_SwapWindow(window);
+#endif
 }
 
 void SetVideoMode(const Common::Point &requested, uint32_t full, SDL_DisplayMode *mode)
 {
     Common::Point sz = requested;
+#ifdef __ANDROID__
+    (void)full; (void)mode;
+    return; // no window: the 2D canvas is the VR panel
+#endif
 
     if (window)
     {
@@ -530,12 +606,19 @@ void SetVideoMode(const Common::Point &requested, uint32_t full, SDL_DisplayMode
 
 void RestoreWindow()
 {
+#ifdef __ANDROID__
+    return;
+#endif
     SDL_RestoreWindow(window);
     SDL_Delay(250);
 }
 
 void SetReleativeMouse(bool mode)
 {
+#ifdef __ANDROID__
+    curRelMouse = mode;
+    return;
+#endif
     if (mode != curRelMouse)
     {
         if (mode)

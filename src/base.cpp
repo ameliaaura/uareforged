@@ -17,6 +17,15 @@
 #include "system/inivals.h"
 #include "particle.h"
 
+#ifdef UA_VR_ENABLED
+// VR diorama: a second render of a unit (the hover glow) must not advance
+// its particle emitters again (Emit adds time + particles).
+bool g_vrNoEmit = false;
+#define UA_VR_EMIT_OK (!g_vrNoEmit)
+#else
+#define UA_VR_EMIT_OK true
+#endif
+
 
 size_t NC_STACK_base::Init(IDVList &stak)
 {
@@ -570,7 +579,7 @@ size_t NC_STACK_base::Render(baseRender_msg *arg, Instance * inst, bool doCopy /
             GFX::GFXEngine::Instance.QueueRenderMesh(&rend);
         }
 
-        if (inst)
+        if (inst && UA_VR_EMIT_OK)
         {
             for (NC_STACK_ade::InstanceOpts *ade : inst->Particles)
             {
@@ -658,7 +667,7 @@ size_t NC_STACK_base::RenderImmediately(baseRender_msg *arg, Instance * inst)
             GFX::GFXEngine::Instance.RenderNode(&rend);
         }
         
-        if (inst)
+        if (inst && UA_VR_EMIT_OK)
         {
             for (NC_STACK_ade::InstanceOpts *ade : inst->Particles)
             {

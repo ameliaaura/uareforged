@@ -1,3 +1,9 @@
+#ifdef UA_VR_ENABLED
+#include "vr/vr.h"
+// Tunnel-vision value when the Settings page was entered (Cancel restores it).
+static int s_vrVignetteOnEntry = -1;
+static int s_vrCockpitOnEntry = -1; // cockpit setting, restored by Cancel
+#endif
 #include <inttypes.h>
 #include <string.h>
 
@@ -23,6 +29,17 @@
 #include "gfxsettings.h"
 #include "reforge_sky.h"
 #include "system/atmos.h"
+#ifdef UA_VR_ENABLED
+// VR controls rows (yw.cpp): labels + values restored by Cancel.
+std::string VRControlLabel(int id);
+void VRRefreshControlRows(NC_STACK_button *page);
+static int s_vrGripsOnEntry = -1, s_vrXhairOnEntry = -1, s_vrBoardOnEntry = -1, s_vrTurnOnEntry = -1;
+static int s_vrFrameOnEntry = -1, s_vrHzOnEntry = -1; // rows
+static int s_vrFpsOnEntry = -1; // menu row
+static int s_vrSnapDegOnEntry = -1, s_vrCardOnEntry = -1;
+static int s_vrModeOnEntry = -1, s_vrExtraOnEntry[VR::MODE_EXTRA_COUNT] = {-1, -1, -1, -1, -1, -1}, s_vrPanelsOnEntry = -1; // // (pause panel rows; restored by Cancel after RESTORE)
+static bool s_vrResRestorePending = false; // RESTORE VR DEFAULTS clicked; OK commits the full resolution reset
+#endif
 
 extern int vertMenuSpace;
 extern int dword_5A50B2;
@@ -1083,6 +1100,13 @@ void UserData::sb_0x46aa8c()
         if ( _gfxMode != p_YW->_gfxMode && _gfxMode)
             p_YW->_gfxMode = _gfxMode;
     }
+#ifdef UA_VR_ENABLED
+    // RESTORE VR DEFAULTS also resets "videomode" (_gameDefaultRes),
+    // which the resolution list never touches.
+    if ( s_vrResRestorePending )
+        yw_VRResetResolution(p_YW);
+    s_vrResRestorePending = false;
+#endif
 
     if ( _settingsChangeOptions & 0x1000 )
     {
@@ -1190,7 +1214,7 @@ void UserData::sb_0x46aa8c()
             if ( yw->_gfxMode == nod )
             {
                 _gfxModeIndex = v24;
-                video_button->SetText(1156, nod.name);
+                video_button->SetText(1156, yw_ShellResCaption(nod));
 
                 break;
             }
@@ -1477,6 +1501,10 @@ void UserData::ShowToolTip(int id)
         break;
 
     case 1172:
+#ifdef UA_VR_ENABLED
+        if ( VR::Active() )
+            break; // the row is VR MODE in VR (no "SELECT 3D DEVICE" tip)
+#endif
         p_YW->SetShowingTooltip(Locale::TIP_MENU_SEL3DDEV);
         break;
 
@@ -1593,6 +1621,10 @@ void UserData::GfxMenuRefresh()
 {
     if ( !video_button )
         return;
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+        return; // in VR the page's right half holds the VR rows (ids 1176-1180 are theirs); LOOK is a pause-panel row
+#endif
     const int f = confGfxRow;
     std::string p = confGfxPreset < 0 ? std::string("LAUNCHER") : GfxSettings::PresetName(confGfxPreset);
     bool custom = false;
@@ -2026,7 +2058,7 @@ void UserData::sub_46C5F0()
         _gfxModeIndex = video_listvw.selectedEntry;
 
         _gfxMode = GFX::GFXEngine::Instance.GetAvailableModes().at(_gfxModeIndex);
-        video_button->SetText(1156, _gfxMode.name);
+        video_button->SetText(1156, yw_ShellResCaption(_gfxMode));
     }
 }
 
@@ -2047,7 +2079,7 @@ void UserData::sub_46A3C0()
     _gfxModeIndex = gfxId;
     _gfxMode = p_YW->_gfxMode;
 
-    video_button->SetText(1156, _gfxMode.name);
+    video_button->SetText(1156, yw_ShellResCaption(_gfxMode));
 
     video_button->SetText(1172, win3d_name);
 
@@ -2106,6 +2138,47 @@ void UserData::sub_46A3C0()
     tmp = video_button->GetSliderData(1152);
     tmp->value = soundVolume;
     video_button->Refresh(1152);
+
+#ifdef UA_VR_ENABLED
+    // Cancel: back to the tunnel-vision value from before the page was opened.
+    if ( s_vrVignetteOnEntry >= 0 )
+        VR::SetComfortVignettePercent(s_vrVignetteOnEntry);
+    if ( s_vrCockpitOnEntry >= 0 )
+        VR::SetCockpitShellsOn(s_vrCockpitOnEntry != 0);
+    if ( s_vrGripsOnEntry >= 0 )
+    {
+        VR::SetGroundGripMode(s_vrGripsOnEntry);
+        VR::SetCrosshairColour(s_vrXhairOnEntry);
+        VR::SetMapBoardOn(s_vrBoardOnEntry != 0);
+        VR::SetStationSnapTurn(s_vrTurnOnEntry != 0);
+        VR::SetCockpitFrame(s_vrFrameOnEntry);
+        VR::SetDisplayRateSetting(s_vrHzOnEntry);
+        VR::SetFpsCounterOn(s_vrFpsOnEntry > 0);
+        s_vrResRestorePending = false; // Cancel drops a pending resolution reset
+        if ( s_vrSnapDegOnEntry > 0 )
+            VR::SetStationSnapDeg(s_vrSnapDegOnEntry);
+        if ( s_vrCardOnEntry >= 0 )
+            VR::SetControlsCardAuto(s_vrCardOnEntry != 0);
+        if ( s_vrModeOnEntry >= 0 )
+        {
+            VR::SetCommandDeck(s_vrModeOnEntry != 0);
+            for (int i = 0; i < VR::MODE_EXTRA_COUNT; i++)
+                VR::SetModeExtraRaw(i, s_vrExtraOnEntry[i]);
+        }
+        if ( s_vrPanelsOnEntry >= 0 )
+            VR::SetPanelsFree(s_vrPanelsOnEntry != 0); //
+    }
+    if ( VR::Active() )
+    {
+        video_button->SetText(1178, VR::CockpitShellsOn() ? "COCKPIT: ON" : "COCKPIT: OFF (PANEL)");
+        VRRefreshControlRows(video_button);
+    }
+    if ( NC_STACK_button::Slider *vrSl = video_button->GetSliderData(1177) )
+    {
+        vrSl->value = VR::ComfortVignettePercent();
+        video_button->Refresh(1177);
+    }
+#endif
 
     tmp = video_button->GetSliderData(1154);
     tmp->value = musicVolume;
@@ -3252,6 +3325,20 @@ void UserData::GameShellUiHandleInput()
         if ( r.btn )
             ShowToolTip(r.btn);
 
+#ifdef UA_VR_ENABLED
+        if ( r.code == 1100 && VR::Active() )
+        {
+            // the resolution is fixed in VR (yw_VRDefaultMode); the list stays closed.
+            NC_STACK_button::button_66arg vrRes;
+            vrRes.butID = 1156;
+            vrRes.field_4 = 2;
+            video_button->SetState(&vrRes);
+            video_button->SetText(1156, yw_ShellResCaption(_gfxMode));
+            Input->ClickInf.flag &= ~TClickBoxInf::FLAG_LM_DOWN;
+            fprintf(stderr, "UAVR settings: display resolution is fixed in VR (%s)\n", yw_ShellResCaption(_gfxMode).c_str());
+        }
+        else
+#endif
         if ( r.code == 1100 )
         {
             p_YW->GuiWinOpen( &video_listvw );
@@ -3417,7 +3504,78 @@ void UserData::GameShellUiHandleInput()
             confWallSigEnabled = false;
             _settingsChangeOptions |= 0x8000;
         }
-        else if ( r.code >= 1142 && r.code <= 1146 )
+#ifdef UA_VR_ENABLED
+        else if ( VR::Active() && r.code == 1142 ) // 1142-1146 = the Graphics rows when VR is off
+        {
+            // VR tunnel-vision preset button: Off -> Low -> High (applied live)
+            const int pct = VR::CycleComfortVignette();
+            if ( NC_STACK_button::Slider *sl = video_button->GetSliderData(1177) )
+            {
+                sl->value = pct;
+                video_button->Refresh(1177);
+            }
+        }
+        else if ( VR::Active() && r.code == 1146 )
+        {
+            // cockpit shells on/off (applied live; off = the flat HUD panel)
+            VR::SetCockpitShellsOn(!VR::CockpitShellsOn());
+            video_button->SetText(1178, VR::CockpitShellsOn() ? "COCKPIT: ON" : "COCKPIT: OFF (PANEL)");
+        }
+        else if ( r.code == 1190 )
+        {
+            // VR MODE (the Direct3D Device row in VR). Applied live; Cancel restores it.
+            VR::SetCommandDeck(!VR::CommandDeck());
+            video_button->SetText(1172, VRControlLabel(1195));
+            fprintf(stderr, "UAVR settings: %s\n", VRControlLabel(1190).c_str());
+        }
+        else if ( r.code == 1189 )
+        {
+            // RESTORE VR DEFAULTS: every VR row + the game resolution (pending until
+            // OK, like a resolution picked in the list; Cancel undoes all of it).
+            yw_VRRestoreDefaults();
+            const GFX::GfxMode def = yw_VRDefaultMode();
+            const int idx = GFX::GFXEngine::Instance.GetGfxModeIndex(def);
+            _gfxModeIndex = idx < 0 ? 0 : idx;
+            video_listvw.selectedEntry = _gfxModeIndex;
+            _gfxMode = def;
+            _settingsChangeOptions |= 1;
+            s_vrResRestorePending = true;
+            video_button->SetText(1156, yw_ShellResCaption(_gfxMode));
+            if ( NC_STACK_button::Slider *sl = video_button->GetSliderData(1177) )
+            {
+                sl->value = VR::ComfortVignettePercent();
+                video_button->Refresh(1177);
+            }
+            video_button->SetText(1178, VRControlLabel(1178));
+            VRRefreshControlRows(video_button);
+        }
+        else if ( r.code >= 1180 && r.code <= 1186 )
+        {
+            // VR controls rows: each click cycles the value (applied live)
+            if ( r.code == 1180 )
+                VR::SetGroundGripMode((VR::GroundGripMode() + 1) % VR::GRIP_COUNT);
+            else if ( r.code == 1181 )
+                VR::SetCrosshairColour((VR::CrosshairColour() + 1) % VR::XHAIR_COUNT);
+            else if ( r.code == 1182 )
+                VR::SetMapBoardOn(!VR::MapBoardOn());
+            else if ( r.code == 1183 )
+                VR::CycleStationTurn(); // SNAP 30 -> 45 -> 20 -> SMOOTH
+            else if ( r.code == 1184 )
+                VR::SetCockpitFrame((VR::CockpitFrameSetting() + 1) % VR::FRAME_COUNT); //: open -> open+rim -> classic
+            else if ( r.code == 1185 )
+                VR::SetDisplayRateSetting(VR::NextDisplayRateSetting(VR::DisplayRateSetting())); //
+            else
+                VR::SetFpsCounterOn(!VR::FpsCounterOn()); // menu
+            const int id = r.code - 1;
+            video_button->SetText(id, VRControlLabel(id));
+            fprintf(stderr, "UAVR settings: %s\n", VRControlLabel(id).c_str());
+        }
+#endif
+        else if ( r.code >= 1142 && r.code <= 1146
+#ifdef UA_VR_ENABLED
+                  && !VR::Active() // in VR 1143/1144 are the vignette slider's codes
+#endif
+                )
             GfxMenuCode(r.code);
         else if ( r.code == 1250 )
             p_YW->_helpURL = Locale::Text::Help(Locale::HELP_SETTINGS);
@@ -3468,6 +3626,41 @@ void UserData::GameShellUiHandleInput()
 
         d3d_listvw.Formate(p_YW);
     }
+
+#ifdef UA_VR_ENABLED
+    // VR tunnel-vision slider (VR sessions only): live value + preset label.
+    if ( EnvMode != ENVMODE_SETTINGS )
+        s_vrVignetteOnEntry = VR::ComfortVignettePercent();
+    if ( EnvMode != ENVMODE_SETTINGS )
+    {
+        s_vrCockpitOnEntry = VR::CockpitShellsOn() ? 1 : 0;
+        s_vrGripsOnEntry = VR::GroundGripMode();
+        s_vrXhairOnEntry = VR::CrosshairColour();
+        s_vrBoardOnEntry = VR::MapBoardOn() ? 1 : 0;
+        s_vrTurnOnEntry = VR::StationSnapTurn() ? 1 : 0;
+        s_vrFrameOnEntry = VR::CockpitFrameSetting();
+        s_vrHzOnEntry = VR::DisplayRateSetting();
+        s_vrFpsOnEntry = VR::FpsCounterOn() ? 1 : 0;
+        s_vrSnapDegOnEntry = VR::StationSnapDeg();
+        s_vrCardOnEntry = VR::ControlsCardAuto() ? 1 : 0;
+        s_vrModeOnEntry = VR::CommandDeck() ? 1 : 0;
+        s_vrPanelsOnEntry = VR::PanelsFree() ? 1 : 0; //
+        for (int i = 0; i < VR::MODE_EXTRA_COUNT; i++)
+            s_vrExtraOnEntry[i] = VR::ModeExtraRaw(i);
+        s_vrResRestorePending = false;
+    }
+    if ( NC_STACK_button::Slider *vrSl = video_button->GetSliderData(1177) )
+    {
+        // only a slider MOVE sets the value (a profile load must not be
+        // overwritten by a stale slider; UpdateGameShell resyncs the slider)
+        static int vrSeen = -1;
+        if ( vrSeen >= 0 && vrSl->value != vrSeen )
+            VR::SetComfortVignettePercent(vrSl->value);
+        vrSeen = vrSl->value;
+        const int pct = VR::ComfortVignettePercent();
+        video_button->SetText(1176, fmt::sprintf("TUNNEL VISION: %s %d%%", VR::ComfortVignettePreset(pct), pct));
+    }
+#endif
 
     NC_STACK_button::Slider *v67 = video_button->GetSliderData(1159);
     

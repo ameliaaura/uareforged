@@ -24,7 +24,7 @@
 #include <strings.h>
 #include <vector>
 
-#include <SDL2/SDL_opengl.h>
+#include "glapi.h" // GLES on the Quest / ANGLE, desktop GL otherwise
 #include <SDL2/SDL_timer.h>
 
 #include "gfx.h"
@@ -287,6 +287,35 @@ float Ss(float e0, float e1, float x)
     return t * t * (3.0f - 2.0f * t);
 }
 
+// Reads one level of a bound-or-not GL_TEXTURE_2D as RGBA8 (the caller sets GL_PACK_ALIGNMENT). Desktop GL:
+// glGetTexImage. GLES (the Quest build) has none: the level is attached to a temporary FBO and read back; a
+// texture that cannot be a colour attachment (e.g. compressed) returns false (= no lit windows on that atlas).
+// Leaves GL_TEXTURE_2D bound to `tex`.
+static bool ReadTexLevel(GLuint tex, int lv, int w, int h, uint8_t *out)
+{
+#ifdef UA_GLES
+    GLint prevFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, lv);
+    const bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (ok)
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out);
+    glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
+    glDeleteFramebuffers(1, &fbo);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    return ok;
+#else
+    (void)w;
+    (void)h;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glGetTexImage(GL_TEXTURE_2D, lv, GL_RGBA, GL_UNSIGNED_BYTE, out);
+    return true;
+#endif
+}
+
 GLuint BuildWindowMask(const ResBitmap *bm)
 {
     GLint w = 0, h = 0, lv = 0;
@@ -308,7 +337,11 @@ GLuint BuildWindowMask(const ResBitmap *bm)
     glGetIntegerv(GL_PACK_ALIGNMENT, &packA);
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackA);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glGetTexImage(GL_TEXTURE_2D, lv, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    if (!ReadTexLevel(bm->hwTex, lv, w, h, px.data()))
+    {
+        glPixelStorei(GL_PACK_ALIGNMENT, packA);
+        return 0;
+    }
     glPixelStorei(GL_PACK_ALIGNMENT, packA);
     // luminance (stored encoding = display), summed-area table for box means
     std::vector<double> sat((size_t)(w + 1) * (h + 1), 0.0);
@@ -448,8 +481,10 @@ GLuint BuildV2TrimMask(const ResBitmap *bm, const std::string &path)
         GLint packA = 4;
         glGetIntegerv(GL_PACK_ALIGNMENT, &packA);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glGetTexImage(GL_TEXTURE_2D, haveLv ? lv : 0, GL_RGBA, GL_UNSIGNED_BYTE, src.data()); // sRGB: stored encoding
+        const bool got = ReadTexLevel(bm->hwTex, haveLv ? lv : 0, haveLv ? w : w0, haveLv ? h : h0, src.data()); // sRGB: stored encoding
         glPixelStorei(GL_PACK_ALIGNMENT, packA);
+        if (!got)
+            return 0;
         if (haveLv)
             px.swap(src);
         else
@@ -982,9 +1017,13 @@ void GFXEngine::AtmosDrawWeather(float dtSec)
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+#ifndef UA_GLES // GLES: gl_PointSize always applies
     glEnable(GL_PROGRAM_POINT_SIZE);
+#endif
     glDrawArrays(_wxKind == Atmos::W_RAIN ? GL_LINES : GL_POINTS, 0, _wxCount);
+#ifndef UA_GLES
     glDisable(GL_PROGRAM_POINT_SIZE);
+#endif
 
     Glext::GLBindVertexArray(prevVao);
     Glext::GLBindBuffer(GL_ARRAY_BUFFER, 0);

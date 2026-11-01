@@ -4,6 +4,20 @@
 namespace GFX
 {
 
+// VR diorama (VR builds only): four clip planes in view space cut the miniature's
+// terrain at the slab edge. All zero (the default, and every non-diorama frame) = no clip.
+#ifdef UA_VR_ENABLED
+#define UA_DIO_VS_DECL "uniform vec4 DioClip[4];\nout vec4 dioDist;\n"
+#define UA_DIO_VS_CALC "dioDist = vec4(dot(DioClip[0], tformed), dot(DioClip[1], tformed), dot(DioClip[2], tformed), dot(DioClip[3], tformed));\n"
+#define UA_DIO_FS_DECL "in vec4 dioDist;\n"
+#define UA_DIO_FS_TEST "if (any(lessThan(dioDist, vec4(0.0)))) discard;\n"
+#else
+#define UA_DIO_VS_DECL ""
+#define UA_DIO_VS_CALC ""
+#define UA_DIO_FS_DECL ""
+#define UA_DIO_FS_TEST ""
+#endif
+
 const std::string GFXEngine:: _stdPShaderText =
 "\
 #version 410 core\n\
@@ -22,8 +36,10 @@ in vec4 smoothColor;\
 flat in vec4 flatColor;\
 in vec2 texCoords;\
 out vec4 fragColor;\
+" UA_DIO_FS_DECL "\
 void main()\
 {\
+    " UA_DIO_FS_TEST "\
     vec4 clr;\
     if (Flat) clr = flatColor; else clr = smoothColor;\
     if (Textured)\
@@ -54,10 +70,12 @@ in vec2 vUV;\
 out vec4 smoothColor;\
 flat out vec4 flatColor;\
 out vec2 texCoords;\
+" UA_DIO_VS_DECL "\
 void main()\
 {\
     vec4 tformed = MView * vec4(vPos, 1.0);\
     gl_Position = MProj * tformed;\
+    " UA_DIO_VS_CALC "\
 \
     vec4 clr;\
     if (Fog.x != 0.0)\
@@ -111,10 +129,12 @@ out vec4 vsTan;
 out vec2 texCoords;
 out vec4 baseColor;
 out float fogMul;
+)GLSL" UA_DIO_VS_DECL R"GLSL(
 void main()
 {
     vec4 tformed = MView * vec4(vPos, 1.0);
     gl_Position = MProj * tformed;
+)GLSL" UA_DIO_VS_CALC R"GLSL(
     mat3 m = mat3(MView);
     mat3 nm = transpose(inverse(m));
     vsPos = tformed.xyz;
@@ -180,6 +200,7 @@ in vec2 texCoords;
 in vec4 baseColor;
 in float fogMul;
 out vec4 fragColor;
+)GLSL" UA_DIO_FS_DECL R"GLSL(
 const float PI = 3.14159265;
 vec3 toLin(vec3 c)
 {
@@ -211,6 +232,7 @@ vec3 neutralTonemap(vec3 color, bool toe)
 }
 void main()
 {
+)GLSL" UA_DIO_FS_TEST R"GLSL(
     vec4 alb = vec4(baseColor.rgb, 1.0);
     vec3 albedo;
     if (AlbedoLinear != 0)

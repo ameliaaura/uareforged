@@ -3,14 +3,8 @@
 
 #include <string>
 
-#if defined(__APPLE__) && defined(__MACH__)
-#include <OpenGL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
-
+#include "glapi.h"
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_opengl.h>
 #include <SDL2/SDL_ttf.h>
 
 #include "common/common.h"
@@ -63,6 +57,9 @@ namespace System
     
     // Return drawable area sizes
     ResRatio GetRResolution();
+    // VR (src/vr) only: fixed 2D canvas size and a replacement for Flip().
+    void SetVirtualResolution(const Common::Point &res);
+    void SetPresentHook(bool (*hook)());
     Common::Point GetResolution();
     
     std::vector<std::string>& GetCmdLineArray();

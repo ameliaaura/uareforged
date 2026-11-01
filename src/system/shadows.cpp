@@ -50,11 +50,13 @@
 // (multiview would draw the map once for both eyes).
 
 #include "../gfxsettings.h"
-#include <SDL2/SDL_opengl.h>
+#include "glapi.h" // GLES on the Quest / ANGLE, desktop GL otherwise
+#ifndef UA_GLES // (glapi.h has the GLES headers)
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/glext.h>
 #else
 #include <GL/glext.h>
+#endif
 #endif
 #include <algorithm>
 #include <cmath>
@@ -587,7 +589,11 @@ void GFXEngine::ShadowsInit()
     Glext::GLGenFramebuffers(1, &gS.fbo);
     Glext::GLBindFramebuffer(GL_FRAMEBUFFER, gS.fbo);
     Glext::GLFrameBufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gS.tex, 0);
+#ifdef UA_GLES
+    { const GLenum none = GL_NONE; glDrawBuffers(1, &none); } // GLES: no glDrawBuffer
+#else
     glDrawBuffer(GL_NONE);
+#endif
     glReadBuffer(GL_NONE);
     GLenum st = Glext::GLCheckFramebufferStatus(GL_FRAMEBUFFER);
     Glext::GLBindFramebuffer(GL_FRAMEBUFFER, prevFbo);

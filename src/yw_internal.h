@@ -75,6 +75,21 @@ void sub_46D0F8(const std::string &path);
 
 
 int yw_write_callSign(NC_STACK_ypaworld *yw, const char *filename, const char *callsign);
+#ifdef UA_VR_ENABLED
+std::vector<std::string> yw_VRProfileLines();
+// rewrite only the;#!vr_* lines (ywRes != NULL also the resolution lines)
+bool yw_VRPatchProfile(const std::string &userName, NC_STACK_ypaworld *ywRes = NULL);
+bool yw_VRPatchProfileFile(const std::string &path, NC_STACK_ypaworld *ywRes);
+// profile version, migration, defaults, VR resolution lock
+const int YW_VR_CFGVER = 1;
+extern int yw_vrProfileCfgVer;
+void yw_VRProfileMigrate(NC_STACK_ypaworld *yw, const std::string &saveFile);
+void yw_VRRestoreDefaults();
+GFX::GfxMode yw_VRDefaultMode();
+void yw_VRResetResolution(NC_STACK_ypaworld *yw);
+#endif
+// Options page "Display Resolution" caption (VR sessions show the fixed VR mode).
+std::string yw_ShellResCaption(const GFX::GfxMode &m);
 int yw_write_user(FSMgr::FileHandle *fil, UserData *usr);
 int yw_write_input(FSMgr::FileHandle *fil, UserData *usr);
 int yw_write_sound(FSMgr::FileHandle *fil, UserData *usr);
