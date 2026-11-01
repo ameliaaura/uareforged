@@ -34,6 +34,9 @@
 #include "perf.h"
 #include "glfuncs.h"
 #include "tform.h"
+#ifdef _WIN32
+#include "../winport.h"
+#endif
 
 // ATMOSPHERE night windows: the sets' building facade atlases (berud = ruins + the panel-block towers).
 // n = normalised file name (lower case, no path).

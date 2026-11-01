@@ -12,6 +12,12 @@
 #include "system/perf.h"
 #include <cmath>
 #include <algorithm>
+#ifdef _WIN32
+#include "winport.h"
+#define UA_ABSPATH(s) uaIsAbsPath(s)
+#else
+#define UA_ABSPATH(s) ((s)[0] == '/')
+#endif
 
 
 NC_STACK_Obj3D::NC_STACK_Obj3D()
@@ -266,10 +272,10 @@ bool NC_STACK_Obj3D::ParseMtl(const std::string &filename)
 {
     // Disk-path OBJ (reforge test hook / hd-models loaded by absolute path):
     // the .mtl and every map live beside it on disk, outside the game VFS.
-    if (!fname.empty() && fname[0] == '/')
+    if (!fname.empty() && UA_ABSPATH(fname))
     {
         std::string dir = fname.substr(0, fname.find_last_of('/') + 1);
-        std::string disk = (!filename.empty() && filename[0] == '/') ? filename : dir + filename;
+        std::string disk = (!filename.empty() && UA_ABSPATH(filename)) ? filename : dir + filename;
         FSMgr::FileHandle dfil(disk, "r");
         if (!dfil.OK())
             return false;
@@ -414,8 +420,8 @@ bool NC_STACK_Obj3D::ParseMtlStream(FSMgr::FileHandle *filp, const std::string &
             if (current && !mtlDir.empty())
             {
                 std::string nm = MapFileToken(tokens);
-                std::string dp = (!nm.empty() && nm[0] == '/') ? nm : mtlDir + nm;
-                FILE *probe = (!dp.empty() && dp[0] == '/') ? fopen(dp.c_str(), "rb") : NULL;
+                std::string dp = (!nm.empty() && UA_ABSPATH(nm)) ? nm : mtlDir + nm;
+                FILE *probe = (!dp.empty() && UA_ABSPATH(dp)) ? fopen(dp.c_str(), "rb") : NULL;
                 if (probe)
                 {
                     fclose(probe);
@@ -859,8 +865,8 @@ ResBitmap *NC_STACK_Obj3D::LoadMap(const std::string &mtlDir, const std::string 
 
     lumTracy = lumTracy && LumTracyConvOn();
     SDL_Surface *surf = NULL;
-    std::string path = (name[0] == '/') ? name : mtlDir + name;
-    const bool onDisk = !path.empty() && path[0] == '/';
+    std::string path = UA_ABSPATH(name) ? name : mtlDir + name;
+    const bool onDisk = !path.empty() && UA_ABSPATH(path);
     const std::string cacheKey = path + (srgb ? "|srgb" : "|lin") + (lumTracy ? "|lum" : "");
 
     if (onDisk && MapCacheOn())
@@ -949,7 +955,7 @@ ResBitmap *NC_STACK_Obj3D::LoadMap(const std::string &mtlDir, const std::string 
     // ends the chain; the levels below the last authored one are generated
     // from it. No _mip1 file = the plain upload (identical to before).
     std::vector<SDL_Surface *> mips;
-    if (path[0] == '/')
+    if (UA_ABSPATH(path))
     {
         size_t slash = path.rfind('/');
         size_t dot = path.rfind('.');

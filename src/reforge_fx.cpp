@@ -34,6 +34,9 @@
 #include "system/gfx.h"
 #include "system/tform.h"
 #include "world/consts.h"
+#ifdef _WIN32
+#include "winport.h"
+#endif
 
 namespace ReforgeFx
 {

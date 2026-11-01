@@ -101,6 +101,9 @@
 #include "system/gfx.h"
 #include "system/system.h"
 #include "fmtlib/printf.h"
+#ifdef _WIN32
+#include "winport.h"
+#endif
 
 namespace Reforge
 {

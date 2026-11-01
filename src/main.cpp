@@ -1209,6 +1209,11 @@ extern "C" int UA_main(int argc, char *argv[])
 int main(int argc, char *argv[])
 #endif
 {
+#ifdef _WIN32
+    // Windows: the launcher pipes the console output into engine.log; unbuffered, so nothing is lost on a crash.
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+#endif
     // Line-buffer stdout/stderr so logs are visible when redirected to a file
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IOLBF, 0);

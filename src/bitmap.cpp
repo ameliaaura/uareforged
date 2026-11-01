@@ -14,6 +14,9 @@
 #include <set>
 #include <vector>
 #include "fmtlib/printf.h"
+#ifdef _WIN32
+#include "winport.h"
+#endif
 
 // ---- HD texture foundation -------------------------------------------------
 // Dump mode: set UA_TEX_DUMP=1 in the environment and every texture the

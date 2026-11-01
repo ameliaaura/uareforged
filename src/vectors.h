@@ -2,6 +2,9 @@
 #define VECTORS_H_INCLUDED
 
 #include <math.h>
+#ifdef _WIN32
+#include <stdint.h>
+#endif
 
 
 template <typename T> struct Tvec2d;

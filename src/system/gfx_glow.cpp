@@ -30,6 +30,17 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#ifdef _WIN32
+#include <SDL2/SDL_video.h>
+// opengl32.dll exports only GL 1.1; glBlendColor (GL 1.4) comes from the driver.
+static void uaBlendColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
+{
+    static PFNGLBLENDCOLORPROC fn = (PFNGLBLENDCOLORPROC)SDL_GL_GetProcAddress("glBlendColor");
+    if (fn)
+        fn(r, g, b, a);
+}
+#define glBlendColor uaBlendColor
+#endif
 
 #include "gfx.h"
 #include "../gfxsettings.h"
