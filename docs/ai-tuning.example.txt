@@ -1,0 +1,137 @@
+# ai-tuning.txt — Urban Assault: Reforged commander tuning
+# =================================================================
+#
+# HOW TO USE
+#   Copy this file as "ai-tuning.txt" into the directory the engine runs from
+#   (the game-data dir, e.g. gamedata/fullgame/ — the same place the SAVE/ and
+#   DATA/ folders live). It is read once at startup.
+#
+#   No file present  -> the engine uses the compiled-in 1998 values and the
+#                       CLASSIC commander: behavior is bit-identical to the
+#                       0.5 build. Saves are never touched by any of this.
+#   File present     -> keys below override the defaults. Every key is
+#                       optional; anything omitted keeps its default.
+#
+#   Format: "key = value", one per line. "#" starts a comment. Unknown keys
+#   are ignored with a warning on stderr.
+#
+#   Debugging: run with UA_AI_DEBUG=1 to dump every effective value and log
+#   commander decisions ("[UA_AI] ..." on stderr). UA_AI_TUNING=<path> loads
+#   a different file (testing aid).
+#
+#   Every default below is the exact value from the original engine, with the
+#   source location in UA_source/src for the curious.
+
+# -----------------------------------------------------------------------------
+# COMMANDER BRAIN
+# -----------------------------------------------------------------------------
+# Which commander runs the enemy host stations:
+#   influence — the 1998 utility commander plus an influence map: it prefers
+#               attacking frontier sectors where it already outguns you, avoids
+#               suiciding into strongholds, and weights defence toward sectors
+#               under sustained pressure. Campaign budgets/difficulty (.ldf)
+#               are untouched — this only changes WHERE force goes, not HOW
+#               MUCH force exists.
+#   classic   — the verbatim 1998 target selection.
+# When this file exists the default is influence; delete the file (not just
+# this line) to get the byte-for-byte 1998 experience.
+commander = influence
+
+# Influence-map internals (only used when commander = influence).
+influence.tick_ms = 500          # rebuild cadence, ms — the strategic tick
+influence.spread = 0.4           # how far power bleeds into neighbor sectors (0..1)
+influence.threat_decay = 0.95    # threat memory per tick; 0.95 ~ 14 s half-life
+influence.threat_norm = 10000    # energy at which a sector counts as "half threatened"
+influence.conquer_weight = 40    # conquer-score shift at total local dominance (+/-)
+influence.defense_weight = 100   # defense-score bonus at full threat saturation
+
+# -----------------------------------------------------------------------------
+# COMMANDER ECONOMY (yparobo.cpp AllocForce)
+# -----------------------------------------------------------------------------
+commander.reserve_fraction = 0.2   # the robo never spends its last 20% energy (:2382)
+commander.price_surcharge = 0.05   # each vehicle costs +5% of the faction's total
+                                   # fielded energy — anti-snowball tax (:2375)
+commander.delay_scale = 1.0        # multiplies every desire's cool-down:
+                                   # delay = timeline * (100 - budget)/100 * this.
+                                   # 0.5 = commander acts twice as often. The
+                                   # per-level budgets stay in the .ldf files.
+
+# -----------------------------------------------------------------------------
+# FORCE SIZING (yparobo.cpp buildConquer/buildDefense/buildRobo/buildReconnoitre)
+# -----------------------------------------------------------------------------
+force.conquer_floor = 15000    # minimum conquest force before the 20000 clamp (:2598)
+force.conquer_min = 20000      # hard minimum energy of a conquest squad (:2667)
+force.defense_floor = 15000    # minimum defense force (:2709)
+force.defense_cap = 40000      # maximum defense force (:2758)
+force.robo_floor = 120000      # minimum strike force sent at an enemy host station
+force.recon_energy = 10        # recon "force" — one cheap scout (:2907)
+
+# -----------------------------------------------------------------------------
+# SQUAD AGGRESSION AS HANDED OUT BY THE COMMANDER (0..100)
+# -----------------------------------------------------------------------------
+aggr.conquer = 60                # conquest squads (:2677)
+aggr.conquer_powerstation = 49   # squads sent at power stations: 1 under the
+                                 # engage threshold = "capture quietly" (:2675)
+aggr.defense = 60                # defense + anti-robo squads (:2765, :2849)
+aggr.recon = 25                  # scouts — look, don't fight (:2908)
+aggr.new_unit = 60               # default for a freshly beamed vehicle (:2506)
+
+# -----------------------------------------------------------------------------
+# AGGRESSION THRESHOLD SEMANTICS (ypabact.cpp — what the 0..100 dial MEANS)
+# The player's squad-aggression UI moves in steps of 25; keep these on that
+# lattice unless you know what you're doing. keep_primary < engage_secondary <
+# opportunist_capture < berserk must stay ordered.
+# -----------------------------------------------------------------------------
+aggr.keep_primary = 25         # below this a squad abandons ordered fights (:6253)
+aggr.engage_secondary = 50     # at/above: picks up threats on its own (:1166)
+aggr.opportunist_capture = 75  # exactly this: also grabs sectors it flies over (:1185)
+aggr.berserk = 100             # attack anything, ignore morale (:6263, :5810)
+
+# -----------------------------------------------------------------------------
+# MORALE (ypabact.cpp GetFightMotivation — own/enemy energy ratio in the
+# 3x3 neighbourhood; hysteresis so squads don't flip-flop)
+# -----------------------------------------------------------------------------
+morale.fight_ratio = 0.2   # fight while ratio > this (:5841)
+morale.rally_ratio = 0.5   # once fleeing, need this to turn around (:5837)
+
+# -----------------------------------------------------------------------------
+# UNIT-BRAIN CADENCES, milliseconds (ypabact.cpp)
+# Lower = sharper reactions ("inside your decision loop"), higher = lazier,
+# more 1998. Keep >= ~50 — these run for every vehicle on the map.
+# -----------------------------------------------------------------------------
+cadence.layer1_ms = 250       # lifecycle / order-relay tick (:965)
+cadence.layer2_ms = 250       # target-acquisition tick (:1091)
+cadence.threat_scan_ms = 500  # sector threat scan (:1131)
+
+# -----------------------------------------------------------------------------
+# DESIRE SCORER WEIGHTS (yparobo.cpp — the eight-desire utility commander)
+# -----------------------------------------------------------------------------
+# Conquer: enemy/neutral sectors score base/distance, then bonuses. (:3780)
+desire.conquer.base = 1000
+desire.conquer.self = 1500          # score of the cell the robo stands on
+desire.conquer.purpose_flat = 20    # special-purpose sector flat score
+desire.conquer.gate_bonus = 40      # the beam gate
+desire.conquer.power_bonus = 50     # power stations
+desire.conquer.adj_friendly = 3     # per adjacent own sector (expansion glue)
+desire.conquer.enemy_robo = 100     # per enemy host station sighted there
+desire.conquer.enemy_unit = 5       # per enemy unit sighted there
+
+# Defense: enemy near the station is an emergency; otherwise squads score
+# base/distance (2x base at zero) + a bonus inside own territory. (:3986, :3968)
+desire.defense.station_threat = 500
+desire.defense.base = 100
+desire.defense.territory_bonus = 100
+
+# Radar: build where the map is dark. (:3616, gate :4417)
+desire.radar.unseen_neighbor = 10   # per fogged neighbor sector
+desire.radar.coverage_div = 64      # build while unseen-sectors/div > own radars
+
+# Recon: fly at the fog. (:3661)
+desire.recon.unseen_neighbor = 5
+
+# Power stations: prefer needy spots, avoid doubling up. (:3726)
+desire.power.adjacent_factor = 0.7  # score multiplier if one is already adjacent
+desire.power.unit_penalty = 5       # per unit loitering in the build sector
+
+# Flak ("safety"): next to own building clusters. (:3684)
+desire.safety.adj_building = 5

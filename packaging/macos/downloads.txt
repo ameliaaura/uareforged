@@ -1,0 +1,23 @@
+# UA Reforged: every address the app downloads from (packaging/macos/downloads.sh). Tab separated.
+# Built-in values; before a download the app reads links_url (the site's links.json) and, if it is valid, its
+# values win, so a broken link can be fixed without a new app. links.json URLs must be https on an allow_host.
+links_url	https://uareforged.pages.dev/release/links.json
+help_url	https://uareforged.pages.dev/downloads/#nogame-h
+pack_help_url	https://uareforged.pages.dev/downloads/#install-h
+# "Get the game": the OpenUA Standalone Package, fetched straight from the Metropolis Dawn community's own server
+# on the player's Mac (UA Reforged never hosts, mirrors or ships it). No checksum: the package gets updated.
+game_url	https://metropolisdawn.de/filebase/download/5/
+game_min_bytes	100000000
+game_max_bytes	5000000000
+allow_host	metropolisdawn.de
+allow_host	metropolisdawn.com
+allow_host	metropolisdawn.net
+allow_host	metropolisdawn.org
+allow_host	uareforged.pages.dev
+# allow_host	<the R2 download host, added at release>
+# Reforge pack: url = the folder that holds the parts (PACK-URL-NOT-SET = no download offered; set at release).
+# part = file name, size in bytes, SHA-256. The app refuses a part whose checksum differs.
+version	0.8.0 (2026-11-01)
+url	https://PACK-URL-NOT-SET/
+part	UA-Reforged-pack-0.8.0-1of2.zip	699598021	afb815b7de26a078097d9ef0fd2190f2434655232f4e903d3e822019b3eca98f
+part	UA-Reforged-pack-0.8.0-2of2.zip	914081357	3854c505647ea9e4939ad55a29a76aea159069eeb081c02be8a9bf767f9bec4c

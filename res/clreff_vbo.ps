@@ -1,0 +1,27 @@
+#version 410 core
+
+layout(std140) uniform Parameters
+{
+    mat4 MProj;
+    mat4 MView;
+    vec3 Fog;
+    vec3 AlphaFog;
+    bool Textured;
+    bool Flat;
+    bool ATest;
+};
+
+uniform sampler2D texSample;
+in vec4 smoothColor;
+in vec2 texCoords;
+
+uniform vec3 normclr;
+uniform vec3 invclr;
+
+out vec4 fragColor;
+
+void main()
+{
+    vec4 clr = texture(texSample, texCoords);
+    fragColor = vec4( clr.xyz * normclr + (1.0 - clr.xyz) * invclr, clr.w);
+}

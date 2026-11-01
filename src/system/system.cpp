@@ -1,0 +1,597 @@
+#include <string>
+#include <list>
+#include <cstdlib>
+#include <cstring>
+#include <dirent.h>
+#include <SDL2/SDL_image.h>
+#include <SDL2/SDL_net.h>
+#include "../fmtlib/printf.h"
+
+#include "system.h"
+#include "fsmgr.h"
+#include "inivals.h"
+#include "../utils.h"
+#include "../version.h"
+
+
+namespace System
+{
+static std::vector<std::string> CommandLine;
+
+    
+struct FontNode
+{
+    std::string Path;
+    std::string Name;
+    std::string Style;
+    
+    FontNode() {};
+    FontNode(const std::string &p, const std::string &n, const std::string &s)
+    : Path(p)
+    , Name(n)
+    , Style(s)
+    {};
+    
+    FontNode(const FontNode &&fnt)
+    {
+        Path = std::move(fnt.Path);
+        Name = std::move(fnt.Name);
+        Style = std::move(fnt.Style);
+    };
+};
+
+struct TFontLookup
+{
+    const std::string Name; // Font name or part
+    const std::string Alt1;
+    const std::string Alt2;
+};
+
+
+ResRatio::ResRatio()
+{}
+
+ResRatio::ResRatio(const Common::Point &p)
+: W(p.x), H(p.y)
+{
+    R = (float)W / (float)H;
+}
+
+ResRatio::ResRatio(int32_t w, int32_t h)
+: W(w), H(h)
+{
+    R = (float)W / (float)H;
+}
+
+bool ResRatio::operator==(const ResRatio &b) const
+{
+    if (W != b.W || H != b.H)
+        return false;
+    return true;
+}
+
+bool ResRatio::operator!=(const ResRatio &b) const
+{
+    if (W == b.W || H == b.H)
+        return false;
+    return true;
+}
+
+ResRatio::operator Common::Point() const
+{
+    return Common::Point(W, H);
+}
+
+void ResRatio::Set(int32_t w, int32_t h)
+{
+    W = w;
+    H = h;
+    R = (float)W / (float)H;
+}
+
+
+static std::list< SDL_EventFilter > EventHandlers;
+static std::list< FontNode > FontsList;
+
+static TFontLookup FontsLookup[]
+{
+    {"arial", "liberation sans", ""},
+    {"dungeon", "xolonium bold", "xolonium regular"},
+    {"ms sans serif", "microsoft sans serif", "liberation serif"},
+    {"courier", "liberation mono", ""},
+    {"small font", "press start 2p", ""},
+    {"ＭＳ Ｐゴシック", "MS PGothic", "Textar"},
+    {"MS PGothic", "Textar", ""}
+};
+    
+    
+static SDL_Window *window = NULL;
+static SDL_GLContext cont = NULL;
+static ResRatio winRes(640, 480);
+static bool curRelMouse = false;
+
+void ScanFonts()
+{
+    FontsList.clear();
+
+    FSMgr::DirIter dir = FSMgr::iDir::readDir("fonts/");
+    if (dir)
+    {
+        FSMgr::iNode *nod = NULL;
+        while(dir.getNext(&nod))
+        {
+            if (nod && nod->getType() == FSMgr::iNode::NTYPE_FILE)
+            {
+                std::string tmp = nod->getName();
+                for (size_t i = 0; i < tmp.length(); i++)
+                    tmp[i] = std::tolower(tmp[i]);
+
+                if( tmp.find(".ttf") != std::string::npos || tmp.find(".otf") != std::string::npos || tmp.find(".fon") != std::string::npos )
+                {
+                    TTF_Font *fnt = TTF_OpenFont(nod->getPath().c_str(), 12);
+                    if (fnt)
+                    {
+                        FontsList.push_back( FontNode(nod->getPath(), TTF_FontFaceFamilyName(fnt), TTF_FontFaceStyleName(fnt)) );
+
+                        TTF_CloseFont(fnt);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void AddFontDir(const std::string &dir)
+{
+    static std::list<std::string> done;
+    for (const std::string &d : done)
+        if (d == dir)
+            return;
+    done.push_back(dir);
+    DIR *dp = opendir(dir.c_str());
+    if (!dp)
+        return;
+    std::string base = dir;
+    if (!base.empty() && base.back() != '/')
+        base += "/";
+    while (struct dirent *e = readdir(dp))
+    {
+        std::string tmp = e->d_name;
+        for (size_t i = 0; i < tmp.length(); i++)
+            tmp[i] = std::tolower(tmp[i]);
+        if (tmp.find(".ttf") == std::string::npos && tmp.find(".otf") == std::string::npos)
+            continue;
+        const std::string path = base + e->d_name;
+        TTF_Font *fnt = TTF_OpenFont(path.c_str(), 12);
+        if (fnt)
+        {
+            FontsList.push_back( FontNode(path, TTF_FontFaceFamilyName(fnt), TTF_FontFaceStyleName(fnt)) );
+            TTF_CloseFont(fnt);
+        }
+    }
+    closedir(dp);
+}
+
+std::string FindFont(const std::string &fontName)
+{
+    for(const FontNode &fnt : FontsList )
+    {
+        if (StriCmp(fontName, fnt.Name) == 0)
+            return fnt.Path;
+        else
+        {
+            std::string ttmp = fnt.Name;
+            ttmp += " ";
+            ttmp += fnt.Style;
+
+            if (StriCmp(fontName, ttmp) == 0)
+                return fnt.Path;
+        }
+    }
+
+    return std::string();
+}
+
+
+TTF_Font *LoadFont(const std::string &fontname, int height)
+{
+    std::string tmp2 = fontname;
+    for (size_t i = 0; i < tmp2.length(); i++)
+        tmp2[i] = std::tolower(tmp2[i]);
+
+    TTF_Font *fnt = NULL;
+
+    std::string filename = FindFont(tmp2);
+
+    if (filename.empty())
+    {
+        for( const TFontLookup &lookup : FontsLookup )
+        {
+            if ( !StriCmp(tmp2, lookup.Name) )
+            {
+                filename = FindFont(lookup.Alt1);
+
+                if (!filename.empty())
+                    break;
+
+                filename = FindFont(lookup.Alt2);
+
+                if (!filename.empty())
+                    break;
+            }
+        }
+    }
+
+    if (filename.empty())
+    {
+        for( const TFontLookup &lookup : FontsLookup )
+        {
+            if ( tmp2.find(lookup.Name) != std::string::npos )
+            {
+                filename = FindFont(lookup.Alt1);
+
+                if (!filename.empty())
+                    break;
+
+                filename = FindFont(lookup.Alt2);
+
+                if (!filename.empty())
+                    break;
+            }
+        }
+    }
+
+    if (!filename.empty())
+        fnt = TTF_OpenFont(filename.c_str(), height);
+
+    if (!fnt)
+        fmt::printf("Can't load font %s %d\n", fontname, height);
+
+    return fnt;
+}
+
+
+// Dev aid: UA_WINDOW_HIDDEN=1 creates the window with SDL_WINDOW_HIDDEN and
+// pins it to windowed mode, so automated passes (texture dumps, screenshot
+// verification) never steal the screen on a machine somebody is using. The GL
+// context, rendering and the framebuffer read-back all keep working — only the
+// on-screen presentation is gone.
+bool WindowHidden()
+{
+    static int hidden = -1;
+
+    if ( hidden < 0 )
+    {
+        const char *v = getenv("UA_WINDOW_HIDDEN");
+        hidden = ( v && v[0] && strcmp(v, "0") != 0 ) ? 1 : 0;
+    }
+
+    return hidden != 0;
+}
+
+// Dev aid, hidden mode only: UA_WINDOW_SIZE=WxH pins the off-screen window to a
+// chosen size.
+//
+// WHY: WindowHidden() forces windowed mode just above, so a fullscreen-desktop
+// request collapses to SDL_SetWindowSize() with the *logical* mode size — 640x480
+// out of ENV/vid.def. A real fullscreen run instead ends up with a desktop-sized
+// drawable, because SDL_WINDOW_FULLSCREEN_DESKTOP resizes the window to the
+// display. So an automated pass measures anything drawable-relative (movie
+// geometry, 3D aspect correction) against a window no real run ever has. Pinning
+// the size restores that fidelity without putting a window on somebody's screen.
+//
+// Opt-in only: unset, hidden runs behave exactly as before.
+static bool HiddenWindowSize(Common::Point *out)
+{
+    static int parsed = -1;
+    static Common::Point size;
+
+    if ( parsed < 0 )
+    {
+        parsed = 0;
+
+        const char *v = getenv("UA_WINDOW_SIZE");
+        int w = 0, h = 0;
+
+        if ( v && sscanf(v, "%dx%d", &w, &h) == 2 && w > 0 && h > 0 )
+        {
+            size = Common::Point(w, h);
+            parsed = 1;
+        }
+    }
+
+    if ( parsed > 0 && out )
+        *out = size;
+
+    return parsed > 0;
+}
+
+void Init(bool oldGL)
+{
+    EventHandlers.clear();
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0)
+    {
+        printf("Couldn't initialize SDL: %s", SDL_GetError());
+        return;
+    }
+    
+    if (oldGL)
+    {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    }
+    else
+    {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    }
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+    // MSAA on the default framebuffer (smooths 3D geometry edges).
+    // Note: has no effect on the offscreen color-effects FBO path.
+    int msaa = IniConf::GfxMSAA.Get<int32_t>();
+    if (msaa > 1)
+    {
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, msaa);
+    }
+
+    // Window title carries the port identity so a screenshot always says
+    // which build produced it (same string as the title-screen label).
+    const std::string winTitle = "Urban Assault - " + Common::PortIdentity();
+
+    uint32_t winFlags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+
+    if (WindowHidden())
+    {
+        winFlags |= SDL_WINDOW_HIDDEN;
+        printf("UA_WINDOW_HIDDEN: window created hidden, fullscreen disabled\n");
+
+        Common::Point forced;
+
+        if (HiddenWindowSize(&forced))
+        {
+            winRes = ResRatio(forced.x, forced.y);
+            printf("UA_WINDOW_SIZE: off-screen window pinned to %dx%d\n", forced.x, forced.y);
+        }
+    }
+
+    window = SDL_CreateWindow(winTitle.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, winRes.W, winRes.H, winFlags);
+
+    if (!window && msaa > 1)
+    {
+        printf("Window creation with %dx MSAA failed (%s), retrying without\n", msaa, SDL_GetError());
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
+        window = SDL_CreateWindow(winTitle.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, winRes.W, winRes.H, winFlags);
+    }
+
+    if (!window)
+    {
+        printf("Couldn't create window and renderer: %s", SDL_GetError());
+        return;
+    }
+
+    cont = SDL_GL_CreateContext(window);
+
+    if (!cont)
+    {
+        printf("SDL_GL_CreateContext failed: %s\n", SDL_GetError());
+    }
+    else
+    {
+        int maj = 0, min = 0, prof = 0;
+        SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &maj);
+        SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &min);
+        SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &prof);
+        printf("GL context obtained: %d.%d (profile mask %d), version '%s', renderer '%s'\n",
+               maj, min, prof,
+               (const char *)glGetString(GL_VERSION),
+               (const char *)glGetString(GL_RENDERER));
+    }
+
+    TTF_Init();
+
+    ScanFonts();
+
+    IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG | IMG_INIT_TIF | IMG_INIT_WEBP);
+
+    SDLNet_Init();
+}
+
+void Deinit()
+{
+    IMG_Quit();
+
+    FontsList.clear();
+
+    if (!cont)
+        SDL_GL_DeleteContext(cont);
+
+    if (!window)
+        SDL_DestroyWindow(window);
+
+    SDL_Quit();
+}
+
+
+bool ProcessEvents()
+{
+    SDL_Event event;
+    while (SDL_PollEvent(&event))
+    {
+        switch(event.type)
+        {
+        case SDL_WINDOWEVENT:
+        {
+            switch(event.window.event)
+            {
+            case SDL_WINDOWEVENT_RESIZED:
+            case SDL_WINDOWEVENT_SIZE_CHANGED:
+
+                int w, h;
+                SDL_GL_GetDrawableSize(window, &w, &h);
+                winRes = ResRatio(w, h);
+                break;
+
+            case SDL_WINDOWEVENT_CLOSE:
+                return true;
+
+            default:
+                break;
+            }
+
+        }
+        break;
+        
+        case SDL_QUIT:
+            return true;
+
+        default:
+            break;
+        }
+        
+        for(SDL_EventFilter &e : EventHandlers)
+        {
+            if ( (e)(NULL, &event) == 0 )
+                break;
+        }
+    }
+
+    return false;
+}
+
+ResRatio GetRResolution()
+{
+    return winRes;
+}
+
+Common::Point GetResolution()
+{
+    return Common::Point(winRes.W, winRes.H);
+}
+
+void Flip()
+{
+    SDL_GL_SwapWindow(window);
+}
+
+void SetVideoMode(const Common::Point &requested, uint32_t full, SDL_DisplayMode *mode)
+{
+    Common::Point sz = requested;
+
+    if (window)
+    {
+        if (WindowHidden())
+        {
+            // Going fullscreen would put the window back on screen.
+            full = 0;
+            mode = NULL;
+
+            // ...which would otherwise shrink the drawable to the logical mode
+            // size. Keep the pinned size if one was asked for.
+            HiddenWindowSize(&sz);
+        }
+
+        SDL_SetWindowFullscreen(window, full);
+
+        if (full != 0 && mode)
+        {
+            SDL_Delay(250);
+            SDL_SetWindowDisplayMode(window, mode);
+        }
+        else
+        {
+            if (winRes != sz)
+            {
+                if (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED)
+                {
+                    SDL_RestoreWindow(window);
+                    SDL_Delay(250);
+                    
+                    SDL_SetWindowSize(window, sz.x, sz.y);
+                    
+                    SDL_MaximizeWindow(window);
+                    SDL_Delay(250);
+                }
+                else
+                    SDL_SetWindowSize(window, sz.x, sz.y);
+            }
+        }
+        
+        int w, h;
+        SDL_GL_GetDrawableSize(window, &w, &h);
+        winRes = ResRatio(w, h);
+    }
+}
+
+void RestoreWindow()
+{
+    SDL_RestoreWindow(window);
+    SDL_Delay(250);
+}
+
+void SetReleativeMouse(bool mode)
+{
+    if (mode != curRelMouse)
+    {
+        if (mode)
+            SDL_SetRelativeMouseMode(SDL_TRUE);
+        else
+        {
+            SDL_SetRelativeMouseMode(SDL_FALSE);
+
+            int WW = 0, WH = 0;
+            SDL_GetWindowSize(window, &WW, &WH);
+            SDL_WarpMouseInWindow(window, WW / 2, WH / 2);
+        }
+
+        curRelMouse = mode;
+    }
+}
+
+void EventsAddHandler(SDL_EventFilter func, bool first)
+{
+    if (first)
+        EventHandlers.push_front(func);
+    else
+        EventHandlers.push_back(func);
+}
+
+void EventsDeleteHandler(SDL_EventFilter func)
+{
+    EventHandlers.remove(func);
+}
+
+void PostQuitMessage()
+{
+    SDL_Event event;
+    event.type = SDL_QUIT;
+    SDL_PushEvent(&event);
+}
+
+std::vector<std::string>& GetCmdLineArray()
+{
+    return CommandLine;
+}
+
+void AddCmdLine(const std::string &arg)
+{
+    CommandLine.push_back(arg);
+}
+
+int32_t FindCmdLineArg(const std::string &arg)
+{
+    for (size_t i = 0; i < CommandLine.size(); i++)
+    {
+        if (StriCmp(CommandLine[i], arg) == 0)
+            return i;
+    }
+    return -1;
+}
+
+
+}
