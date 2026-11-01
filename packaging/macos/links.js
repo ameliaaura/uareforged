@@ -39,7 +39,7 @@ function run(argv) {
     }
 
     var out = [];
-    ['game_url', 'pack_url', 'help_url', 'pack_help_url'].forEach(function (k) {
+    ['game_url', 'pack_url', 'help_url', 'pack_help_url', 'quest_apk_url', 'quest_help_url'].forEach(function (k) {
         if (k in j) out.push(k + '\t' + url(k));
     });
     if ('game_min_bytes' in j) {
@@ -63,5 +63,28 @@ function run(argv) {
             out.push('part\t' + x.name + '\t' + x.bytes + '\t' + x.sha256);
         });
     }
+    function sha(v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); }
+    function bytes(v) { return typeof v === 'number' && v % 1 === 0 && v >= 1 && v <= 1e10; }
+    if ('quest_apk' in j) {
+        var a = j.quest_apk;
+        if (a === null || typeof a !== 'object' || Array.isArray(a)) fail('quest_apk: not an object');
+        if (typeof a.name !== 'string' || !/^[A-Za-z0-9._-]{1,80}\.apk$/.test(a.name) || a.name.indexOf('..') >= 0) fail('quest_apk.name');
+        if (!bytes(a.bytes)) fail('quest_apk.bytes');
+        if (!sha(a.sha256)) fail('quest_apk.sha256');
+        if (typeof a.version_code !== 'number' || a.version_code % 1 !== 0 || a.version_code < 1 || a.version_code > 2100000000) fail('quest_apk.version_code');
+        if (typeof a.version !== 'string' || !/^[0-9A-Za-z.+-]{1,32}$/.test(a.version)) fail('quest_apk.version');
+        out.push('quest_apk\t' + a.name + '\t' + a.bytes + '\t' + a.sha256 + '\t' + a.version_code + '\t' + a.version);
+    }
+    ['adb_mac', 'adb_win'].forEach(function (k) {
+        if (!(k in j)) return;
+        var a = j[k];
+        if (a === null || typeof a !== 'object' || Array.isArray(a)) fail(k + ': not an object');
+        j[k + '.url'] = a.url;
+        var u = url(k + '.url');
+        if (!/\.zip$/.test(u)) fail(k + '.url: not a zip');
+        if (!bytes(a.bytes)) fail(k + '.bytes');
+        if (!sha(a.sha256)) fail(k + '.sha256');
+        out.push(k + '\t' + u + '\t' + a.bytes + '\t' + a.sha256);
+    });
     return out.join('\n');
 }

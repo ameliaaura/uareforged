@@ -22,6 +22,9 @@
 # community OpenUA Standalone Package from the Metropolis Dawn community's own server instead of a folder.
 # Both live in downloads.sh; every address is in Contents/Resources/downloads.txt (+ the site's links.json).
 #
+# "Install on my Quest" (quest.sh): installs UA Reforged VR on a Meta Quest plugged in by USB. Offered when one is
+# plugged in at launch; hold the Option key while opening the app (or pass --quest) to choose it at any time.
+#
 # Environment (for testing): UA_GAME_DIR=<folder> skips the folder picker,
 # UA_CAMPAIGN=base|ghor|taer skips the campaign picker. Arguments go to the engine.
 
@@ -47,16 +50,27 @@ mkdir -p "$RUN" || fail "Could not create $RUN"
 exec >>"$LOG" 2>&1
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') launch from $CONTENTS"
 
+# the Option key held while opening the app, or --quest: offer "Install on my Quest" this time
+QUEST_ASKED=0
+ARGS=()
+for a in "$@"; do if [ "$a" = --quest ]; then QUEST_ASKED=1; else ARGS+=("$a"); fi; done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+[ "$(/usr/bin/osascript -l JavaScript -e 'ObjC.import("AppKit"); ($.NSEvent.modifierFlags & 524288) ? "1" : "0"' 2>/dev/null)" = 1 ] && QUEST_ASKED=1
+
 is_game_dir() { [ -d "$1/DATA" ] && [ -d "$1/LEVELS" ]; }
 
 GAME="${UA_GAME_DIR:-}"
 [ -z "$GAME" ] && [ -f "$CONF" ] && GAME="$(cat "$CONF")"
 # downloads the app can make: "Get the game" (from the Metropolis Dawn community) and the Reforge pack
 . "$CONTENTS/Resources/downloads.sh"
+# "Install on my Quest": UA Reforged VR onto a Meta Quest over USB
+. "$CONTENTS/Resources/quest.sh"
 # no game folder yet: "I have the game - choose folder" or "Get the game"
 game_choose
 [ -n "${UA_GAME_DIR:-}" ] || printf '%s\n' "$GAME" > "$CONF"
 echo "game folder: $GAME"
+# a Meta Quest plugged in (or Option held): offer to install UA Reforged VR on it
+quest_offer
 
 # writable state: copied once from the player's folder
 for name in $WRITABLE; do

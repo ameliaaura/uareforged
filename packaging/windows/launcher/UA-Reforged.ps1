@@ -23,6 +23,8 @@
 # Environment (for testing): UA_GAME_DIR=<folder> skips the folder picker, UA_CAMPAIGN=base|ghor|taer skips the
 # campaign picker, UA_DATA_DIR=<folder> uses that folder instead of %LOCALAPPDATA%\UA Reforged.
 # Arguments go to the engine. "-UaPurge" (used by the uninstaller) removes %LOCALAPPDATA%\UA Reforged safely.
+# "-UaQuest" (the Start menu shortcut "Install UA Reforged VR on my Quest") runs only "Install on my Quest" (quest.ps1);
+# holding Shift while starting UA Reforged offers it too, and so does a Meta Quest plugged in at launch.
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -49,6 +51,8 @@ try { $script:ICON = [System.Drawing.Icon]::ExtractAssociatedIcon((Join-Path $IN
 
 # shared helpers (Log, Alert, junction-safe Remove-Tree, hard links) and the downloads
 . (Join-Path $HERE 'downloads.ps1')
+# "Install on my Quest": UA Reforged VR onto a Meta Quest over USB
+. (Join-Path $HERE 'quest.ps1')
 
 # ---------------------------------------------------------------- uninstall: remove our data folder
 if ($args.Count -ge 1 -and $args[0] -eq '-UaPurge') {
@@ -61,16 +65,24 @@ Log ("=== {0} launch from {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $INS
 if (-not [IO.File]::Exists($ENGINE)) { Fail "UA Reforged is incomplete (the engine is missing). Please install it again." }
 
 
+# Shift held while starting, or the Start menu shortcut (-UaQuest): "Install on my Quest" this time
+$questOnly = ($args -contains '-UaQuest')
+$questAsked = (([Windows.Forms.Control]::ModifierKeys -band [Windows.Forms.Keys]::Shift) -ne 0)
+
 $script:GAME = ''
 if ($env:UA_GAME_DIR) { $script:GAME = $env:UA_GAME_DIR }
 elseif ([IO.File]::Exists($CONF)) { $script:GAME = ([IO.File]::ReadAllText($CONF)).Trim() }
 
 try {
+    # the Start menu shortcut: only "Install on my Quest" (the game folder, if any, is offered for copying)
+    if ($questOnly) { Quest-Offer $false $true }
     # no game folder yet: "I have the game - choose folder" or "Get the game"
     Game-Choose
     $GAME = [IO.Path]::GetFullPath($script:GAME).TrimEnd('\')
     if (-not $env:UA_GAME_DIR) { [IO.File]::WriteAllText($CONF, $GAME + "`r`n") }
     Log "game folder: $GAME"
+    # a Meta Quest plugged in (or Shift held): offer to install UA Reforged VR on it
+    Quest-Offer $questAsked $false
 
     # what the last launch linked: removed and made again, so a changed game folder or pack is picked up
     if ([IO.File]::Exists($LINKED)) {
@@ -166,7 +178,7 @@ try {
 }
 
 $campaign = '' + $env:UA_CAMPAIGN
-$engineArgs = @($args)
+$engineArgs = @($args | Where-Object { $_ -ne '-UaQuest' })
 $hasEnvArg = $engineArgs -contains '-env'
 if (-not $campaign -and -not $hasEnvArg) {
     $choice = ''

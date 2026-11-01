@@ -56,6 +56,7 @@ links_load() {
     L_GAME_MAX="$(conf game_max_bytes | head -1)"
     L_PACK_URL="$(conf url | head -1)"; L_PACK_PARTS="$(conf part)"
     L_HELP="$(conf help_url | head -1)"; L_PACK_HELP="$(conf pack_help_url | head -1)"; L_MESSAGE=""
+    L_QUEST_APK_URL=""; L_QUEST_APK=""; L_QUEST_HELP=""; L_ADB_MAC=""
     local src="${UA_LINKS_URL:-$(conf links_url | head -1)}" tmp="$SUPPORT/links.json.tmp" out proto="=https"
     local allow; allow="$(conf allow_host | tr '\n' ' ')"
     local loc=0; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && { loc=1; proto="=https,http"; }
@@ -68,6 +69,8 @@ links_load() {
                 case "$k" in
                     game_url) L_GAME_URL="$v" ;; game_min_bytes) L_GAME_MIN="$v" ;; pack_url) L_PACK_URL="$v" ;;
                     help_url) L_HELP="$v" ;; pack_help_url) L_PACK_HELP="$v" ;; message) L_MESSAGE="$v" ;;
+                    quest_apk_url) L_QUEST_APK_URL="$v" ;; quest_apk) L_QUEST_APK="$v" ;; quest_help_url) L_QUEST_HELP="$v" ;;
+                    adb_mac) L_ADB_MAC="$v" ;;
                     part) parts="$parts$v"$'\n' ;;
                 esac
             done <<< "$out"
@@ -82,6 +85,7 @@ links_load() {
     rm -f "$tmp"
     [ -n "${UA_GAME_URL:-}" ] && L_GAME_URL="$UA_GAME_URL"
     [ -n "${UA_PACK_URL:-}" ] && L_PACK_URL="$UA_PACK_URL"
+    [ -n "${UA_QUEST_APK_URL:-}" ] && L_QUEST_APK_URL="$UA_QUEST_APK_URL"
     case "$L_PACK_URL" in */) ;; *) L_PACK_URL="$L_PACK_URL/" ;; esac
     LINKS_DONE=1
 }

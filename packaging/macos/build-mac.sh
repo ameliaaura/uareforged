@@ -35,7 +35,8 @@ MINOS=11.0
 JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"
 export MACOSX_DEPLOYMENT_TARGET=$MINOS
 FORCE="${FORCE:-0}"
-VERSION="$(sed -n 's/.*PortVersion *= *"\([^"]*\)".*/\1/p' "$ROOT/src/version.h")"
+# the desktop version (version.h also holds the Quest app's, first, under UA_VR_NEWLOOK)
+VERSION="$(sed -n 's/.*PortVersion *= *"\([^"]*\)".*/\1/p' "$ROOT/src/version.h" | tail -1)"
 ZIP="$OUT/UA-Reforged-$VERSION-macOS-arm64.zip"
 SOURCE_URL="https://github.com/ameliaaura/uareforged"   # the public engine repository (GPL source offer)
 RELEASE_DATE="${UA_RELEASE_DATE:-2026-11-01}"
@@ -179,7 +180,7 @@ build_app() {
     cp "$PKGDIR/launcher.sh" "$C/MacOS/$APPNAME"; chmod 755 "$C/MacOS/$APPNAME"
     # "Get the game" + one-click Reforge pack download: the code, its progress window, the links.json check and
     # the addresses + pack checksum list
-    cp "$PKGDIR/downloads.sh" "$PKGDIR/downloads.txt" "$PKGDIR/progress.js" "$PKGDIR/links.js" "$R/"
+    cp "$PKGDIR/downloads.sh" "$PKGDIR/downloads.txt" "$PKGDIR/progress.js" "$PKGDIR/links.js" "$PKGDIR/quest.sh" "$R/"
     sed -e "s/@VERSION@/$VERSION/" -e "s/@BUILD@/$VERSION/" -e "s/@MINOS@/$MINOS/" "$PKGDIR/Info.plist.in" > "$C/Info.plist"
     cp "$PKGDIR/AppIcon.icns" "$R/AppIcon.icns"
     mkdir -p "$R/licenses"

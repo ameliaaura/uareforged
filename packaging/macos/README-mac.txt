@@ -56,6 +56,19 @@ Things the pack does not cover keep their 1998 look (the campaign map always
 does).
 
 
+INSTALL ON MY QUEST (UA REFORGED VR)
+-----------------------------------
+UA Reforged VR is the Meta Quest app. To install it from this Mac: turn on
+Developer Mode for the headset (once, in the Meta Horizon phone app), plug the
+headset in with a USB-C cable, and open UA Reforged. It sees the headset and
+offers "Install on my Quest" (or hold the Option key while opening the app).
+It downloads the VR app and, the first time, Google's Android platform tools
+(adb) from Google, checks both, installs or updates the app, and can copy your
+game files to the headset so it does not download the game again. Nothing
+else on the headset changes. In the headset: App Library > Unknown Sources >
+UA Reforged VR. Help: https://uareforged.pages.dev/downloads/#quest-computer-h
+
+
 GRAPHICS
 --------
 Options > Graphics: Original (the 1998 look), Low, Medium, High, Ultra.

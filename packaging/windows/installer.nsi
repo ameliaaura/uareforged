@@ -66,6 +66,7 @@ Section "${APPNAME} (required)" SecMain
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
   SetOutPath "$INSTDIR"
   CreateShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\${STUB}" "" "$INSTDIR\${STUB}" 0
+  CreateShortCut "$SMPROGRAMS\${APPNAME}\Install UA Reforged VR on my Quest.lnk" "$INSTDIR\${STUB}" "-UaQuest" "$INSTDIR\${STUB}" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME} - Read me.lnk" "$INSTDIR\README-Windows.txt"
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk" "$INSTDIR\Uninstall.exe"
 

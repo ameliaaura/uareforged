@@ -248,7 +248,7 @@ function Test-LinksJson([string]$path, [string[]]$hosts, [bool]$local) {
         return $u
     }
     $out = New-Object System.Collections.Generic.List[string]
-    foreach ($k in @('game_url', 'pack_url', 'help_url', 'pack_help_url')) {
+    foreach ($k in @('game_url', 'pack_url', 'help_url', 'pack_help_url', 'quest_apk_url', 'quest_help_url')) {
         if ($props.ContainsKey($k)) { $out.Add("$k`t" + (& $checkUrl $k)) }
     }
     if ($props.ContainsKey('game_min_bytes')) {
@@ -274,6 +274,31 @@ function Test-LinksJson([string]$path, [string[]]$hosts, [bool]$local) {
             $out.Add("part`t" + $nm.Value + "`t" + ([long]$by.Value).ToString($script:INV) + "`t" + $sh.Value)
         }
     }
+    $isSha = { param($v) ($v -is [string]) -and ($v -cmatch '^[0-9a-f]{64}$') }
+    $isBytes = { param($v) (IsInt $v) -and [double]$v -ge 1 -and [double]$v -le 1e10 }
+    if ($props.ContainsKey('quest_apk')) {
+        $x = $props['quest_apk']
+        if ($null -eq $x -or $x -isnot [Management.Automation.PSCustomObject]) { throw 'quest_apk: not an object' }
+        $g = @{}; foreach ($q in $x.PSObject.Properties) { $g[$q.Name] = $q.Value }
+        if ($g['name'] -isnot [string] -or $g['name'] -cnotmatch '^[A-Za-z0-9._-]{1,80}\.apk$' -or $g['name'].Contains('..')) { throw 'quest_apk.name' }
+        if (-not (& $isBytes $g['bytes'])) { throw 'quest_apk.bytes' }
+        if (-not (& $isSha $g['sha256'])) { throw 'quest_apk.sha256' }
+        if (-not (IsInt $g['version_code']) -or [double]$g['version_code'] -lt 1 -or [double]$g['version_code'] -gt 2100000000) { throw 'quest_apk.version_code' }
+        if ($g['version'] -isnot [string] -or $g['version'] -cnotmatch '^[0-9A-Za-z.+-]{1,32}$') { throw 'quest_apk.version' }
+        $out.Add("quest_apk`t" + $g['name'] + "`t" + ([long]$g['bytes']).ToString($script:INV) + "`t" + $g['sha256'] + "`t" + ([long]$g['version_code']).ToString($script:INV) + "`t" + $g['version'])
+    }
+    foreach ($k in @('adb_mac', 'adb_win')) {
+        if (-not $props.ContainsKey($k)) { continue }
+        $x = $props[$k]
+        if ($null -eq $x -or $x -isnot [Management.Automation.PSCustomObject]) { throw "${k}: not an object" }
+        $g = @{}; foreach ($q in $x.PSObject.Properties) { $g[$q.Name] = $q.Value }
+        $props["$k.url"] = $g['url']
+        $u = & $checkUrl "$k.url"
+        if ($u -notmatch '\.zip$') { throw "$k.url: not a zip" }
+        if (-not (& $isBytes $g['bytes'])) { throw "$k.bytes" }
+        if (-not (& $isSha $g['sha256'])) { throw "$k.sha256" }
+        $out.Add("$k`t$u`t" + ([long]$g['bytes']).ToString($script:INV) + "`t" + $g['sha256'])
+    }
     return $out.ToArray()
 }
 
@@ -281,6 +306,7 @@ function Links-Load {
     $script:L_GAME_URL = Conf1 'game_url'; $script:L_GAME_MIN = Conf1 'game_min_bytes'; $script:L_GAME_MAX = Conf1 'game_max_bytes'
     $script:L_PACK_URL = Conf1 'url'; $script:L_PACK_PARTS = @(Conf 'part')
     $script:L_HELP = Conf1 'help_url'; $script:L_PACK_HELP = Conf1 'pack_help_url'; $script:L_MESSAGE = ''
+    $script:L_QUEST_APK_URL = ''; $script:L_QUEST_APK = ''; $script:L_QUEST_HELP = ''; $script:L_ADB_WIN = ''
     $src = if ($env:UA_LINKS_URL) { $env:UA_LINKS_URL } else { Conf1 'links_url' }
     $tmp = Join-Path $SUPPORT 'links.json.tmp'
     $allow = @(Conf 'allow_host')
@@ -302,6 +328,8 @@ function Links-Load {
                     'game_url' { $script:L_GAME_URL = $v } 'game_min_bytes' { $script:L_GAME_MIN = $v } 'pack_url' { $script:L_PACK_URL = $v }
                     'help_url' { $script:L_HELP = $v } 'pack_help_url' { $script:L_PACK_HELP = $v } 'message' { $script:L_MESSAGE = $v }
                     'part' { $parts.Add($v) }
+                    'quest_apk_url' { $script:L_QUEST_APK_URL = $v } 'quest_apk' { $script:L_QUEST_APK = $v }
+                    'quest_help_url' { $script:L_QUEST_HELP = $v } 'adb_win' { $script:L_ADB_WIN = $v }
                 }
             }
             if ($parts.Count -gt 0) { $script:L_PACK_PARTS = $parts.ToArray() }

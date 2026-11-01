@@ -222,7 +222,9 @@ waldev::waldev()
 
     if (AudioMuted())
     {
-#if !(defined(__APPLE__) && defined(__MACH__))
+#if defined(_WIN32)
+        _putenv_s("ALSOFT_DRIVERS", "null");
+#elif !(defined(__APPLE__) && defined(__MACH__))
         setenv("ALSOFT_DRIVERS", "null", 1);
 #endif
         printf("OpenAL: UA_MUTE set - null output, gain 0\n");

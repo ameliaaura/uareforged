@@ -21,7 +21,8 @@ SYSROOT="$DEPS/sysroot"
 EBUILD="$OUT/engine-build"
 STAGE="$OUT/stage/UA Reforged"
 GEN="$OUT/stage-gen"
-VERSION="$(sed -n 's/.*PortVersion *= *"\([^"]*\)".*/\1/p' "$ROOT/src/version.h")"
+# the desktop version (version.h also holds the Quest app's, first, under UA_VR_NEWLOOK)
+VERSION="$(sed -n 's/.*PortVersion *= *"\([^"]*\)".*/\1/p' "$ROOT/src/version.h" | tail -1)"
 SOURCE_URL="https://github.com/ameliaaura/uareforged"   # the public engine repository (GPL source offer)
 FIXED_TIME="202611010000"   # every staged file and zip entry gets this time (touch -t format, UTC)
 SETUP="$OUT/UA-Reforged-$VERSION-Windows-Setup.exe"
@@ -106,7 +107,7 @@ PY
     cp -R "$ROOT/res" "$ROOT/fonts" "$E/"
     find "$STAGE" -name '.DS_Store' -delete
     # launcher: the script, the downloads code and the addresses + pack checksum list (shared with the Mac app)
-    cp "$PKG/launcher/UA-Reforged.ps1" "$PKG/launcher/downloads.ps1" "$STAGE/launcher/"
+    cp "$PKG/launcher/UA-Reforged.ps1" "$PKG/launcher/downloads.ps1" "$PKG/launcher/quest.ps1" "$STAGE/launcher/"
     cp "$ROOT/packaging/macos/downloads.txt" "$STAGE/launcher/downloads.txt"
     LC_ALL=C grep -n '[^ -~	]' "$STAGE/launcher/"*.ps1 && die "the launcher scripts must be plain ASCII (Windows PowerShell 5.1)"
 
