@@ -58,3 +58,7 @@ the app at `Contents/Resources/licenses/`.
 
 Everyone whose pull request is merged is listed in the release notes of the version that includes it, and in
 the repository's contributor graph. Thank you.
+
+---
+
+UA Reforged is made in Cape Town, South Africa, with thanks to everyone above.

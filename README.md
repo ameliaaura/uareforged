@@ -195,6 +195,8 @@ anything sold. Including us.
 
 ---
 
+<p><img src="docs/media/flag-za.svg" alt="" width="18" height="12"> <sub><b>Made in Cape Town, South Africa.</b></sub></p>
+
 <sub>UA Reforged is an unofficial fan project. It is not affiliated with, endorsed, sponsored or approved by
 Microsoft. UA Reforged was created under Microsoft's
 "[Game Content Usage Rules](https://www.xbox.com/en-US/developers/rules)" using assets from Urban Assault, and it
