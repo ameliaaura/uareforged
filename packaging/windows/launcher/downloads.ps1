@@ -16,11 +16,20 @@
 # (resuming where the server allows it). Any break cleans up the partial files and shows a plain notice with
 # "Open help page" (the site's help) or another way on; the app is never left half set up.
 #
+# First launch is one step ("Set up everything", Setup-First): one dialog for the game + the Reforge pack (or "I
+# already have the game", a checkbox to skip the pack, "Install on my Quest"), then one progress window for both
+# downloads. Every later start shows a small launcher (Play-Menu): the campaign, Play, Install on my Quest, and Get the
+# Reforge pack while none is installed. Dialogs never show file paths (a player's path holds their account name);
+# launcher.log does.
+#
 # Testing only: UA_LINKS_URL, UA_GAME_URL, UA_PACK_URL override addresses (UA_LINKS_ALLOW_LOCAL=1 also accepts
-# http://127.0.0.1 in links.json); UA_GAME_AUTO=get answers the first-launch choice; UA_PACK_AUTO=yes|no answers
-# the pack offer; UA_NOTICE_AUTO=help|folder|later answers the notices (and opens no browser); UA_PACK_NOUI=1 shows
-# no progress window. Windows only: UA_DIALOG_SNAP=<folder> saves every dialog and progress window as a PNG there
-# and answers each dialog with its default button (opens no browser).
+# http://127.0.0.1 in links.json); UA_SETUP_AUTO=everything|game-only|folder|folder-only|quest|quit answers the
+# first-launch dialog (UA_GAME_AUTO=get = "everything", with the pack unless UA_PACK_AUTO=no; UA_TEST_FOLDER=<dir>
+# answers the folder picker); UA_PACK_AUTO=yes|no answers the pack offer; UA_NOTICE_AUTO=help|folder|later answers
+# the notices (and opens no browser); UA_PLAY_AUTO=play|quest|pack|quit answers the launcher once (UA_CAMPAIGN skips
+# it); UA_PACK_NOUI=1 shows no progress window. UA_DIALOG_SNAP=<folder> saves every dialog and progress window as a
+# PNG there and answers each dialog with its default button (opens no browser). UA_TEST_CANCEL_MB=<n> presses Cancel
+# once a download passes n MB.
 
 # ---------------------------------------------------------------- shared helpers (also used by UA-Reforged.ps1)
 function Log([string]$msg) {
@@ -127,6 +136,8 @@ $script:DL_PROGRESS = $null
 $script:DL_DIR = ''
 $script:DL_MAXSIZE = $null
 $script:CURL_ERR = ''
+$script:SETUP_ON = $false; $script:SETUP_BASE = 0; $script:SETUP_SPAN = 100; $script:SETUP_STEP = ''
+$script:PACK_ASKED = $false
 $script:L_GAME_URL = ''; $script:L_GAME_MIN = ''; $script:L_GAME_MAX = ''; $script:L_PACK_URL = ''; $script:L_PACK_PARTS = @()
 $script:L_HELP = ''; $script:L_PACK_HELP = ''; $script:L_MESSAGE = ''
 $script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''; $script:DL_WHY = ''
@@ -174,17 +185,48 @@ function Snap-Form($form, [string]$what) {
 
 # Ask <text> <default button> <buttons>: a dialog; returns the button (empty when closed).
 function Ask([string]$text, [string]$default, [string[]]$buttons) {
+    return (Ask-Ex '' $text $default $buttons '' $false '' @() 0).Button
+}
+
+# Ask-Ex <heading> <text> <default> <buttons> <checkbox label> <checkbox on> <menu label> <menu items> <menu index>:
+# the dialog with an optional bold heading, checkbox and drop-down. Returns @{ Button; Check; Index }.
+function Ask-Ex([string]$heading, [string]$text, [string]$default, [string[]]$buttons, [string]$checkText, [bool]$checkOn,
+                [string]$menuLabel, [string[]]$menuItems, [int]$menuSel) {
     $f = New-Object Windows.Forms.Form
     $f.Text = 'UA Reforged'; $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $false
     $f.StartPosition = 'CenterScreen'; $f.TopMost = $true; $f.AutoSize = $true; $f.AutoSizeMode = 'GrowAndShrink'
     $f.Font = New-Object Drawing.Font('Segoe UI', 9.5); $f.KeyPreview = $true
     if ($script:ICON) { $f.Icon = $script:ICON }
     $tbl = New-Object Windows.Forms.TableLayoutPanel
-    $tbl.AutoSize = $true; $tbl.AutoSizeMode = 'GrowAndShrink'; $tbl.ColumnCount = 1; $tbl.RowCount = 2
+    $tbl.AutoSize = $true; $tbl.AutoSizeMode = 'GrowAndShrink'; $tbl.ColumnCount = 1; $tbl.RowCount = 5
     $tbl.Padding = New-Object Windows.Forms.Padding(16, 16, 16, 12)
+    $row = 0
+    if ($heading) {
+        $h = New-Object Windows.Forms.Label; $h.Text = $heading; $h.AutoSize = $true
+        $h.Font = New-Object Drawing.Font('Segoe UI', 11, [Drawing.FontStyle]::Bold); $h.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 10)
+        [void]$tbl.Controls.Add($h, 0, $row); $row++
+    }
     $lbl = New-Object Windows.Forms.Label
-    $lbl.Text = $text; $lbl.AutoSize = $true; $lbl.MaximumSize = New-Object Drawing.Size(480, 0)
+    $lbl.Text = $text; $lbl.AutoSize = $true; $lbl.MaximumSize = New-Object Drawing.Size(520, 0)
     $lbl.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 16)
+    [void]$tbl.Controls.Add($lbl, 0, $row); $row++
+    $script:AskCombo = $null; $script:AskCheck = $null
+    if ($menuLabel -and $menuItems.Count -gt 0) {
+        $mr = New-Object Windows.Forms.FlowLayoutPanel; $mr.AutoSize = $true; $mr.WrapContents = $false; $mr.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 12)
+        $ml = New-Object Windows.Forms.Label; $ml.Text = $menuLabel; $ml.AutoSize = $true; $ml.Margin = New-Object Windows.Forms.Padding(0, 6, 8, 0)
+        $cb = New-Object Windows.Forms.ComboBox; $cb.DropDownStyle = 'DropDownList'; $cb.Width = 260
+        foreach ($m in $menuItems) { [void]$cb.Items.Add($m) }
+        $cb.SelectedIndex = [math]::Min([math]::Max(0, $menuSel), $menuItems.Count - 1)
+        [void]$mr.Controls.Add($ml); [void]$mr.Controls.Add($cb)
+        [void]$tbl.Controls.Add($mr, 0, $row); $row++
+        $script:AskCombo = $cb
+    }
+    if ($checkText) {
+        $ck = New-Object Windows.Forms.CheckBox; $ck.Text = $checkText; $ck.AutoSize = $true; $ck.Checked = $checkOn
+        $ck.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 14)
+        [void]$tbl.Controls.Add($ck, 0, $row); $row++
+        $script:AskCheck = $ck
+    }
     $flow = New-Object Windows.Forms.FlowLayoutPanel
     $flow.AutoSize = $true; $flow.AutoSizeMode = 'GrowAndShrink'; $flow.FlowDirection = 'LeftToRight'; $flow.WrapContents = $false
     $flow.Anchor = 'Right'; $flow.Margin = New-Object Windows.Forms.Padding(0)
@@ -200,15 +242,34 @@ function Ask([string]$text, [string]$default, [string[]]$buttons) {
     }
     $f.Add_KeyDown({ if ($_.KeyCode -eq 'Escape') { $script:AskResult = ''; $this.Close() } })
     $f.Add_Shown({ $this.Activate(); if ($script:AskDefault) { [void]$script:AskDefault.Focus() } })
-    if ($env:UA_DIALOG_SNAP) {
-        $script:AskDefaultText = $default
-        $f.Add_Shown({ Pump; Snap-Form $this 'dialog'; $script:AskResult = $script:AskDefaultText; $this.Close() })
-    }
-    [void]$tbl.Controls.Add($lbl, 0, 0); [void]$tbl.Controls.Add($flow, 0, 1)
+    [void]$tbl.Controls.Add($flow, 0, $row)
     [void]$f.Controls.Add($tbl)
-    [void]$f.ShowDialog()
+    if ($env:UA_DIALOG_SNAP) {
+        # testing: the dialog is laid out and drawn into a PNG, never shown; the default button answers it
+        $null = $f.Handle; $f.PerformLayout(); $f.Size = $f.PreferredSize
+        Snap-Form $f 'dialog'; $script:AskResult = $default
+    } else {
+        [void]$f.ShowDialog()
+    }
+    $res = @{ Button = $script:AskResult; Check = [bool]($script:AskCheck -and $script:AskCheck.Checked); Index = $(if ($script:AskCombo) { [int]$script:AskCombo.SelectedIndex } else { 0 }) }
     $f.Dispose()
-    return $script:AskResult
+    return $res
+}
+
+# No-Paths <text>: what a dialog may show. A player's paths hold their account name (it shows when they stream or share
+# a screenshot), so our folders get friendly names and any other path is left out.
+function No-Paths([string]$t) {
+    if (-not $t) { return $t }
+    foreach ($pair in @(@($SUPPORT, "UA Reforged's folder"), @($script:INST, 'the UA Reforged program folder'), @($env:USERPROFILE, 'your user folder'))) {
+        if ($pair[0]) { $t = $t.Replace($pair[0], $pair[1]) }
+    }
+    return ($t -replace '[A-Za-z]:\\[^ ,;:)"'']*', 'a file on this PC')
+}
+
+# Show-InExplorer <file or folder>: open an Explorer window with it selected (the player sees it; no path in our text)
+function Show-InExplorer([string]$p) {
+    if ($env:UA_NOTICE_AUTO -or $env:UA_DIALOG_SNAP) { Log "show in Explorer: $p (test run: not opened)"; return }
+    try { Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList ('/select,"{0}"' -f $p) } catch { Log "could not open Explorer: $_" }
 }
 
 function Open-Help([string]$url) {
@@ -397,11 +458,18 @@ function Curl-LastError {
 # ---------------------------------------------------------------- progress window + cancel
 function Pump { if ($script:UI) { [Windows.Forms.Application]::DoEvents() } }
 
+# During "Set up everything" (SETUP_ON) one window stays open for every step: each step's 0-100 % is mapped into its
+# share of the whole (SETUP_BASE + SETUP_SPAN) and SETUP_STEP is the stage line.
 function Dl-Status([int]$pct, [string]$text) {
-    $script:DL_TEXT = $text
+    if ($script:SETUP_ON) {
+        if ($text -eq 'done') { return }
+        $pct = $script:SETUP_BASE + [int]($pct * $script:SETUP_SPAN / 100)
+    }
+    $script:DL_TEXT = $text; $script:DL_PCT = $pct
     if ($script:UI) {
         $script:UI_BAR.Value = [math]::Max(0, [math]::Min(100, $pct))
         $script:UI_TEXT.Text = $text
+        $script:UI_STAGE.Text = $(if ($script:SETUP_ON) { $script:SETUP_STEP } else { '' })
         Pump
         if ($env:UA_DIALOG_SNAP -and $text -like 'Downloading*' -and -not $script:UI_SNAPPED) { $script:UI_SNAPPED = $true; Snap-Form $script:UI 'progress' }
     }
@@ -409,30 +477,35 @@ function Dl-Status([int]$pct, [string]$text) {
 
 function Dl-UiStart([string]$title) {
     $script:DL_CANCEL = $false
+    if ($script:SETUP_ON -and $script:UI) { Dl-Status 0 'Checking the download link...'; return }
     $script:UI = $null; $script:UI_SNAPPED = $false
     if (-not $env:UA_PACK_NOUI) {
         $f = New-Object Windows.Forms.Form
         $f.Text = 'UA Reforged'; $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $true
-        $f.StartPosition = 'CenterScreen'; $f.ClientSize = New-Object Drawing.Size(460, 150)
+        $f.StartPosition = 'CenterScreen'; $f.ClientSize = New-Object Drawing.Size(460, 172)
         $f.Font = New-Object Drawing.Font('Segoe UI', 9.5)
         if ($script:ICON) { $f.Icon = $script:ICON }
         $t = New-Object Windows.Forms.Label; $t.Text = $title; $t.AutoSize = $false
         $t.SetBounds(16, 14, 428, 22); $t.Font = New-Object Drawing.Font('Segoe UI', 10, [Drawing.FontStyle]::Bold)
-        $s = New-Object Windows.Forms.Label; $s.AutoSize = $false; $s.SetBounds(16, 42, 428, 22)
-        $bar = New-Object Windows.Forms.ProgressBar; $bar.SetBounds(16, 70, 428, 20); $bar.Minimum = 0; $bar.Maximum = 100
-        $c = New-Object Windows.Forms.Button; $c.Text = 'Cancel'; $c.SetBounds(348, 104, 96, 30)
+        $g = New-Object Windows.Forms.Label; $g.AutoSize = $false; $g.SetBounds(16, 40, 428, 20); $g.ForeColor = [Drawing.SystemColors]::GrayText
+        $s = New-Object Windows.Forms.Label; $s.AutoSize = $false; $s.SetBounds(16, 62, 428, 22)
+        $bar = New-Object Windows.Forms.ProgressBar; $bar.SetBounds(16, 90, 428, 20); $bar.Minimum = 0; $bar.Maximum = 100
+        $c = New-Object Windows.Forms.Button; $c.Text = 'Cancel'; $c.SetBounds(348, 126, 96, 30)
         $c.Add_Click({ $script:DL_CANCEL = $true; $script:UI_TEXT.Text = 'Stopping...' })
         $f.Add_FormClosing({ param($s2, $e2) if (-not $script:UI_CLOSING) { $e2.Cancel = $true; $script:DL_CANCEL = $true } })
-        $f.Controls.AddRange(@($t, $s, $bar, $c))
+        $f.Controls.AddRange(@($t, $g, $s, $bar, $c))
         $f.CancelButton = $c
-        $script:UI_TEXT = $s; $script:UI_BAR = $bar; $script:UI_CLOSING = $false
+        $script:UI_TEXT = $s; $script:UI_STAGE = $g; $script:UI_BAR = $bar; $script:UI_CLOSING = $false
         $script:UI = $f
-        $f.Show(); $f.Activate()
+        # testing (UA_DIALOG_SNAP): drawn into a PNG mid-download, never shown
+        if ($env:UA_DIALOG_SNAP) { $null = $f.Handle } else { $f.Show(); $f.Activate() }
     }
     Dl-Status 0 'Checking the download link...'
 }
 
-function Dl-UiEnd {
+# Dl-UiEnd: a step is over (the setup window stays open for the next step); Dl-UiClose: the window goes now
+function Dl-UiEnd { if (-not $script:SETUP_ON) { Dl-UiClose } }
+function Dl-UiClose {
     if ($script:UI) { $script:UI_CLOSING = $true; $script:UI.Close(); $script:UI.Dispose(); $script:UI = $null }
 }
 
@@ -451,6 +524,8 @@ function File-Size([string]$f) { if ([IO.File]::Exists($f)) { return (New-Object
 
 function Dl-Progress {
     $now = $script:DL_BASE + (File-Size $script:DL_FILE)
+    # testing only: UA_TEST_CANCEL_MB=<n> presses Cancel once this download step has passed n MB
+    if ($env:UA_TEST_CANCEL_MB -and $now -ge [long]$env:UA_TEST_CANCEL_MB * 1000000) { $script:DL_CANCEL = $true }
     if ($script:DL_TOTAL -gt 0) { Dl-Status ([int]($now * 90 / $script:DL_TOTAL)) ("{0}: {1} of {2}" -f $script:DL_WHAT, (Human $now), (Human $script:DL_TOTAL)) }
     else { Dl-Status 5 ("{0}: {1}" -f $script:DL_WHAT, (Human $now)) }
 }
@@ -649,12 +724,12 @@ function Free-Bytes([string]$p) {
 # or 3 (choose a folder instead)
 function Game-Broken([string]$why) {
     try { Remove-Tree $script:GAME_DL } catch { Log "cleanup: $_" }
-    Dl-UiEnd
+    Dl-UiClose
     Log "get the game: broken - $why"
     $b = '' + $env:UA_NOTICE_AUTO
-    if (-not $b) {
-        $b = Ask ("The game download link isn't working right now (it's hosted by the Metropolis Dawn community). We'll open the UA Reforged help page with other ways to get it.`r`n`r`nWhat went wrong: $why.") 'Open help page' @('Choose a folder instead', 'Open help page')
-    }
+    $msg = "The game download link isn't working right now (it's hosted by the Metropolis Dawn community). We'll open the UA Reforged help page with other ways to get it.`r`n`r`nWhat went wrong: $(No-Paths $why)."
+    Log ('notice: ' + ($msg -replace '\s+', ' '))
+    if (-not $b) { $b = Ask $msg 'Open help page' @('Choose a folder instead', 'Open help page') }
     if ($b -eq 'folder' -or $b -eq 'Choose a folder instead') { return 3 }
     $u = if ($script:L_HELP) { $script:L_HELP } else { 'https://uareforged.pages.dev/downloads/#nogame-h' }
     Open-Help $u; return 2
@@ -668,8 +743,9 @@ function Game-Get {
     $min = [long]100000000; $max = [long]5000000000
     if ($script:L_GAME_MIN) { $min = [long]$script:L_GAME_MIN }
     if ($script:L_GAME_MAX) { $max = [long]$script:L_GAME_MAX }
-    if (-not $env:UA_GAME_AUTO) {
-        $note = "UA Reforged will download the OpenUA Standalone Package (the full original game plus the Metropolis Dawn add-on, about 445 MB) straight from the Metropolis Dawn community's server. It is hosted by the Metropolis Dawn community, not by UA Reforged, and the game files belong to Microsoft.`r`n`r`nIt goes to $($script:GAME_ORIG)."
+    # "Set up everything" is the consent; on its own Game-Get asks here
+    if (-not $env:UA_GAME_AUTO -and -not $script:SETUP_ON -and -not $env:UA_SETUP_AUTO) {
+        $note = "UA Reforged will download the OpenUA Standalone Package (the full original game plus the Metropolis Dawn add-on, about $(Human (Game-Bytes))) straight from the Metropolis Dawn community's server. It is hosted by the Metropolis Dawn community, not by UA Reforged, and the game files belong to Microsoft.`r`n`r`nIt is saved in UA Reforged's own folder."
         if ($script:L_MESSAGE) { $note += "`r`n`r`n" + $script:L_MESSAGE }
         if ((Ask $note 'Download' @('Cancel', 'Download')) -ne 'Download') { return 1 }
     }
@@ -681,7 +757,7 @@ function Game-Get {
     $f = Join-Path $script:DL_DIR 'openua-package.zip'
     $script:DL_WHAT = 'Downloading the game'; $script:DL_BASE = [long]0; $script:DL_TOTAL = $script:PC_SIZE; $script:DL_MAXSIZE = $max
     $rc = Dl-Fetch $url $f; $script:DL_MAXSIZE = $null
-    if ($rc -eq 130) { Dl-UiEnd; Log 'get the game: cancelled (the part stays for a resume)'; return 1 }
+    if ($rc -eq 130) { Dl-UiClose; Log 'get the game: cancelled (the part stays for a resume)'; return 1 }
     if ($rc -ne 0) { return (Game-Broken $script:DL_WHY) }
     $got = File-Size $f
     if ($got -lt $min) { return (Game-Broken "the downloaded file is far too small ($(Human $got))") }
@@ -689,7 +765,7 @@ function Game-Get {
     $unpack = Join-Path $script:DL_DIR 'unpack'
     Remove-Tree $unpack
     $rc = Expand-Zip $f $unpack
-    if ($rc -eq 130) { Remove-Tree $unpack; Dl-UiEnd; return 1 }
+    if ($rc -eq 130) { Remove-Tree $unpack; Dl-UiClose; Log 'get the game: cancelled while unpacking (the download stays)'; return 1 }
     if ($rc -ne 0) { return (Game-Broken 'the downloaded file is damaged (it does not unpack)') }
     $root = ''
     $cands = @($unpack) + @(Get-ChildItem -LiteralPath $unpack -Directory -Recurse -Depth 3 -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
@@ -702,7 +778,7 @@ function Game-Get {
         Move-Dir $unpack $script:GAME_ORIG
     } catch { Log "get the game: $($_.Exception.Message)"; return (Game-Broken 'the game folder could not be created') }
     $script:GAME = $script:GAME_ORIG + $rel
-    Dl-Status 100 'done'; Start-Sleep -Milliseconds 500; Dl-UiEnd; Remove-Tree $script:GAME_DL
+    Dl-Status 100 'done'; if (-not $script:SETUP_ON) { Start-Sleep -Milliseconds 500 }; Dl-UiEnd; Remove-Tree $script:GAME_DL
     Log "get the game: installed in $($script:GAME)"
     return 0
 }
@@ -710,12 +786,12 @@ function Game-Get {
 # ======================================================================== Reforge pack
 function Pack-Broken([string]$why) { # explain, offer the help page; the game always starts (1998 look)
     try { Remove-Tree $script:PACK_DL } catch { Log "cleanup: $_" }
-    Dl-UiEnd
+    Dl-UiClose
     Log "reforge pack: broken - $why"
     $b = '' + $env:UA_NOTICE_AUTO
-    if (-not $b) {
-        $b = Ask ("The Reforge pack download isn't working right now. The game starts with its 1998 look; UA Reforged offers the pack again on a later start.`r`n`r`nWhat went wrong: $why.") 'Open help page' @('Try again later', 'Open help page')
-    }
+    $msg = "The Reforge pack download isn't working right now. The game starts with its 1998 look; UA Reforged offers the pack again on a later start.`r`n`r`nWhat went wrong: $(No-Paths $why)."
+    Log ('notice: ' + ($msg -replace '\s+', ' '))
+    if (-not $b) { $b = Ask $msg 'Open help page' @('Try again later', 'Open help page') }
     if ($b -eq 'help' -or $b -eq 'Open help page') {
         $u = if ($script:L_PACK_HELP) { $script:L_PACK_HELP } else { 'https://uareforged.pages.dev/downloads/#install-h' }
         Open-Help $u
@@ -742,7 +818,7 @@ function Pack-Download {
     foreach ($p in $parts) {
         if ([IO.File]::Exists((Join-Path $script:DL_DIR ($p.Name + '.ok')))) { continue }
         if (-not (Dl-Precheck ($script:L_PACK_URL + $p.Name) 0 0 $p.Bytes)) { return (Pack-Broken $script:PC_WHY) }
-        if ($script:DL_CANCEL) { Dl-UiEnd; return 130 }
+        if ($script:DL_CANCEL) { Dl-UiClose; return 130 }
     }
     foreach ($p in $parts) {
         $f = Join-Path $script:DL_DIR $p.Name
@@ -753,12 +829,12 @@ function Pack-Download {
         $script:DL_WHAT = 'Downloading the Reforge pack'; $script:DL_BASE = $done; $script:DL_TOTAL = $total
         if ((File-Size $f) -lt $p.Bytes) {
             $rc = Dl-Fetch ($script:L_PACK_URL + $p.Name) $f
-            if ($rc -eq 130) { Dl-UiEnd; return 130 }
+            if ($rc -eq 130) { Dl-UiClose; return 130 }
             if ($rc -ne 0) { return (Pack-Broken $script:DL_WHY) }
         }
         Dl-Status ([int](($done + $p.Bytes) * 90 / $total)) "Checking $($p.Name)..."
         $got = Get-Sha256 $f
-        if ($script:DL_CANCEL) { Dl-UiEnd; return 130 }
+        if ($script:DL_CANCEL) { Dl-UiClose; return 130 }
         if ($got -ne $p.Sum) { return (Pack-Broken "a downloaded part is damaged or not the expected file ($($p.Name))") }
         [IO.File]::WriteAllText($f + '.ok', ''); $done += $p.Bytes
     }
@@ -768,14 +844,14 @@ function Pack-Download {
     Remove-Tree $unpack
     foreach ($p in $parts) {
         $rc = Expand-Zip (Join-Path $script:DL_DIR $p.Name) $unpack
-        if ($rc -eq 130) { Remove-Tree $unpack; Dl-UiEnd; return 130 }
+        if ($rc -eq 130) { Remove-Tree $unpack; Dl-UiClose; return 130 }
         if ($rc -ne 0) { return (Pack-Broken "a downloaded part does not unpack ($($p.Name))") }
     }
     $new = Join-Path $unpack 'reforge-pack'
     if (-not [IO.File]::Exists((Join-Path $new 'install-links.sh'))) { return (Pack-Broken 'the download is not a Reforge pack') }
     Dl-Status 95 'Setting up the pack (about a minute)...'
     $ok = Install-PackLinks $new $true
-    if ($script:DL_CANCEL) { Remove-Tree $unpack; Dl-UiEnd; return 130 }
+    if ($script:DL_CANCEL) { Remove-Tree $unpack; Dl-UiClose; return 130 }
     if (-not $ok) { return (Pack-Broken "the pack's files did not check out") }
     [IO.File]::WriteAllText((Join-Path $new 'PACK-VERSION'), (Conf1 'version') + "`n")
     try {
@@ -783,7 +859,7 @@ function Pack-Download {
     } catch { return (Pack-Broken 'the old pack folder could not be replaced') }
     try { Move-Dir $new $PACK } catch { return (Pack-Broken 'the pack folder could not be created') }
     Remove-Tree "$PACK.old"
-    Dl-Status 100 'done'; Start-Sleep -Milliseconds 500; Dl-UiEnd; Remove-Tree $script:PACK_DL
+    Dl-Status 100 'done'; if (-not $script:SETUP_ON) { Start-Sleep -Milliseconds 500 }; Dl-UiEnd; Remove-Tree $script:PACK_DL
     Log ("reforge pack: installed " + ([IO.File]::ReadAllText((Join-Path $PACK 'PACK-VERSION'))).Trim())
     return 0
 }
@@ -791,6 +867,7 @@ function Pack-Download {
 # Offer the pack when none is installed. Never fatal: every failure starts the game with the 1998 look.
 function Pack-Offer {
     if ([IO.Directory]::Exists((Join-Path $PACK 'hd-models'))) { return }
+    if ($script:PACK_ASKED) { return }
     if (-not [IO.File]::Exists($script:DL_CONF)) { return }
     if ([IO.File]::Exists($script:PACK_OFF) -and -not $env:UA_PACK_AUTO) { return }
     if (-not $script:LINKS_DONE) { Links-Load }
@@ -805,54 +882,186 @@ function Pack-Offer {
         } else {
             $msg = "Download the Reforge pack ($(Human $total))? It adds the new look: remastered units, buildings and skies, HD textures, restored videos and sharp menus. Without it the game keeps its 1998 look."
         }
-        $msg += "`r`n`r`nIt goes to $SUPPORT. Your Urban Assault folder is not changed."
+        $msg += "`r`n`r`nIt is saved in UA Reforged's own folder ($(Human (Pack-DiskBytes)) once installed). Your Urban Assault folder is not changed."
         $r = Ask $msg $verb @("Don't ask again", 'Not now', $verb)
         if ($r -eq "Don't ask again") { [IO.File]::WriteAllText($script:PACK_OFF, ''); Log 'reforge pack: offer turned off'; return }
         if ($r -eq $verb) { $answer = 'yes' } else { $answer = 'no' }
     }
     if ($answer -ne 'yes') { Log 'reforge pack: not now'; return }
+    [void](Pack-Get)
+}
+
+# Pack-Get: download + install now (the offer, the launcher's "Get the Reforge pack", or "Set up everything")
+function Pack-Get {
+    $script:PACK_ASKED = $true
     if ([IO.File]::Exists($script:PACK_OFF)) { [IO.File]::Delete($script:PACK_OFF) }
     $rc = Pack-Download
     if ($rc -eq 130) {
         Log 'reforge pack: download cancelled (the parts stay for a resume)'
-        if (-not $env:UA_PACK_AUTO) { [void](Ask 'Download stopped. The game starts with the 1998 look; next time UA Reforged offers to resume the download.' 'OK' @('OK')) }
+        if (-not "$env:UA_PACK_AUTO$env:UA_SETUP_AUTO$env:UA_PLAY_AUTO$env:UA_GAME_AUTO") { [void](Ask 'Download stopped. The game starts with the 1998 look; next time UA Reforged offers to resume the download.' 'OK' @('OK')) }
     } elseif ($rc -ne 0) {
         Log 'reforge pack: not installed (1998 look)'
     }
+    return $rc
 }
 
-# First launch with no game folder: "I have the game" (the folder picker) or "Get the game".
+# ======================================================================== Set up everything (first launch)
+# Sizes for the dialogs come from downloads.txt (docs/SIZES.md is the table they come from).
+function Game-Bytes { $b = Conf1 'game_bytes'; if ($b) { return [long]$b } return [long]445000000 }
+function Pack-DiskBytes { $b = Conf1 'pack_disk_bytes'; if ($b) { return [long]$b } return [long]2400000000 }
+function Pack-Ready { # the pack can be downloaded: this build (or links.json) has an address for it
+    if (-not [IO.File]::Exists($script:DL_CONF)) { return $false }
+    if (-not $script:LINKS_DONE) { Links-Load }
+    if (-not $script:L_PACK_URL -or $script:L_PACK_URL -like '*PACK-URL-NOT-SET*') { return $false }
+    return (@($script:L_PACK_PARTS).Count -gt 0)
+}
+function Test-Answers { return [bool]("$env:UA_SETUP_AUTO$env:UA_GAME_AUTO") }
+
+# Setup-First: the first launch with no game folder. One dialog (Set up everything / I already have the game /
+# Install on my Quest / Quit, and a checkbox for the Reforge pack), then one progress window for every download.
 # Sets GAME, or exits the launcher cleanly (nothing half set up: the next start asks again).
-function Game-Choose {
+function Setup-First {
+    if (Is-GameDir $script:GAME) { return }
+    if (-not $script:LINKS_DONE) { Links-Load }
+    $canPack = (Pack-Ready) -and -not [IO.Directory]::Exists((Join-Path $PACK 'hd-models'))
     while (-not (Is-GameDir $script:GAME)) {
-        $pick = '' + $env:UA_GAME_AUTO
-        if (-not $pick) {
-            $pick = Ask ("UA Reforged needs the original Urban Assault game files.`r`n`r`nDo you have the game on this PC? If not, UA Reforged can fetch the community OpenUA Standalone Package (about 445 MB) from the Metropolis Dawn community for you.") 'Get the game' @('Quit', 'I have the game - choose folder', 'Get the game')
+        $pick = '' + $env:UA_SETUP_AUTO; $withPack = $true
+        if (-not $pick -and $env:UA_GAME_AUTO) {
+            if ($env:UA_GAME_AUTO -eq 'get' -or $env:UA_GAME_AUTO -eq 'Get the game') { $pick = if ($env:UA_PACK_AUTO -eq 'no') { 'game-only' } else { 'everything' } } else { $pick = 'quit' }
         }
-        switch -exact ($pick) {
-            { $_ -eq 'get' -or $_ -eq 'Get the game' } {
-                $r = Game-Get
-                if ($r -eq 1 -and $env:UA_GAME_AUTO) { exit 0 }
-                if ($r -eq 2) { Log 'stopped: help page opened, nothing set up'; exit 0 }
-                if ($r -eq 3) { if (-not (Game-Pick) -and $env:UA_GAME_AUTO) { exit 0 } }
+        if ($pick) {
+            if ($pick -eq 'game-only' -or $pick -eq 'folder-only') { $withPack = $false }
+            Log "setup: test answer $pick"
+        } else {
+            $check = ''
+            $text = "UA Reforged needs the original Urban Assault game files. It can fetch everything for you:`r`n`r`n" +
+                "- The game: the free OpenUA Standalone Package ($(Human (Game-Bytes))), the full 1998 game plus the Metropolis Dawn add-on, straight from the Metropolis Dawn community's server. They host it, not UA Reforged; the game files belong to Microsoft."
+            if ($canPack) {
+                $text += "`r`n- The Reforge pack ($(Human (Pack-Total))): the new look, with remastered units, buildings and skies, HD textures, restored videos and sharp menus."
+                $check = "Include the Reforge pack ($(Human (Pack-Total)) download, $(Human (Pack-DiskBytes)) installed)"
+            }
+            $text += "`r`n`r`nEverything is saved in UA Reforged's own folder. Already have the game? Choose its folder instead."
+            if ($script:L_MESSAGE) { $text += "`r`n`r`n" + $script:L_MESSAGE }
+            if (Q-UsbSeen) { $text += "`r`n`r`nA Meta Quest is plugged in: choose Install on my Quest to put UA Reforged VR on it." }
+            $r = Ask-Ex 'Set up UA Reforged' $text 'Set up everything' @('Set up everything', 'I already have the game', 'Install on my Quest...', 'Quit') $check $true '' @() 0
+            $withPack = $r.Check
+            Log "setup: chose [$(if ($r.Button) { $r.Button } else { 'closed' })], pack $([int]$withPack)"
+            switch ($r.Button) { 'Set up everything' { $pick = 'everything' } 'I already have the game' { $pick = 'folder' } 'Install on my Quest...' { $pick = 'quest' } default { $pick = 'quit' } }
+        }
+        if (-not $canPack) { $withPack = $false }
+        switch ($pick) {
+            { $_ -eq 'everything' -or $_ -eq 'game-only' } {
+                $rc = Setup-Run 'get' $withPack
+                if ($rc -eq 1 -and (Test-Answers)) { exit 0 }
+                if ($rc -eq 2) { Log 'stopped: help page opened, nothing set up'; exit 0 }
+                if ($rc -eq 3) { if (Game-Pick) { [void](Setup-Run 'folder' $withPack) } elseif (Test-Answers) { exit 0 } }
                 break
             }
-            'I have the game - choose folder' { [void](Game-Pick); break }
+            { $_ -eq 'folder' -or $_ -eq 'folder-only' } {
+                if (Game-Pick) { [void](Setup-Run 'folder' $withPack) } elseif ($env:UA_SETUP_AUTO) { exit 0 }
+                break
+            }
+            'quest' {
+                $rc = Quest-Install
+                if ($rc -eq 2) { Log 'stopped after the Quest install'; exit 0 }
+                if ($env:UA_SETUP_AUTO) { Log 'stopped after the Quest install (test run)'; exit 0 }
+                break
+            }
             default { Log 'stopped at the first-launch choice'; exit 0 }
         }
     }
 }
+function Game-Choose { Setup-First }   # (the older name)
+
+# Setup-Run get|folder <pack>: the downloads in one progress window with the overall progress and the current step.
+# Returns like Game-Get (0 ok, 1 cancelled, 2 help page opened, 3 choose a folder instead). The pack never stops the
+# game: on a problem it shows its own notice and the game starts with the 1998 look.
+function Setup-Run([string]$kind, [bool]$withPack) {
+    $gb = [long]0; $pb = [long]0; $steps = 0; $n = 0
+    if ($kind -eq 'get') { $gb = Game-Bytes }
+    if ($withPack) { $pb = Pack-Total }
+    if (-not $withPack -and -not [IO.Directory]::Exists((Join-Path $PACK 'hd-models')) -and (Pack-Ready)) {
+        [IO.File]::WriteAllText($script:PACK_OFF, ''); $script:PACK_ASKED = $true; Log 'setup: Reforge pack skipped (the launcher offers it)'
+    }
+    if ($gb -gt 0) { $steps++ }; if ($pb -gt 0) { $steps++ }
+    if ($steps -eq 0) { return 0 }
+    $total = $gb + $pb
+    $script:SETUP_ON = $true; $script:SETUP_BASE = 0; $script:SETUP_SPAN = 100; $script:SETUP_STEP = ''
+    Dl-UiStart 'Setting up UA Reforged'
+    if ($gb -gt 0) {
+        $n++; $script:SETUP_STEP = "Step $n of ${steps}: the game ($(Human $gb))"; $script:SETUP_BASE = 0; $script:SETUP_SPAN = [int]($gb * 100 / $total)
+        Log "setup: $($script:SETUP_STEP)"
+        $rc = Game-Get
+        if ($rc -ne 0) { $script:SETUP_ON = $false; Dl-UiClose; return $rc }
+    }
+    if ($pb -gt 0) {
+        $n++; $script:SETUP_STEP = "Step $n of ${steps}: the Reforge pack ($(Human $pb))"; $script:SETUP_BASE = [int]($gb * 100 / $total); $script:SETUP_SPAN = 100 - $script:SETUP_BASE
+        Log "setup: $($script:SETUP_STEP)"
+        [void](Pack-Get)
+    }
+    $script:SETUP_ON = $false; Dl-UiClose
+    Log 'setup: done'
+    return 0
+}
+
+# ======================================================================== the launcher (every start)
+# Play-Menu: the campaign (when the game has Metropolis Dawn; the last choice is remembered), Play, Install on my
+# Quest, and Get the Reforge pack while none is installed (Resume after a stopped download). The launcher is the pack
+# offer, so Pack-Offer asks nothing more this launch. Returns base|ghor|taer, or exits (Quit).
+function Play-Menu {
+    $script:PACK_ASKED = $true
+    $md = [IO.Directory]::Exists((Join-Path $script:GAME 'Ghor_env')) -or [IO.Directory]::Exists((Join-Path $RUN 'Ghor_env'))
+    $items = @(); $label = ''
+    if ($md) { $label = 'Campaign:'; $items = @('Urban Assault', 'Metropolis Dawn: Ghorkov', 'Metropolis Dawn: Taerkasten') }
+    $sel = 0; $cf = Join-Path $SUPPORT 'campaign.txt'
+    if ([IO.File]::Exists($cf)) { switch (([IO.File]::ReadAllText($cf)).Trim()) { 'ghor' { $sel = 1 } 'taer' { $sel = 2 } } }
+    $auto = '' + $env:UA_PLAY_AUTO
+    while ($true) {
+        $canPack = -not [IO.Directory]::Exists((Join-Path $PACK 'hd-models')) -and (Pack-Ready)
+        $have = [long]0; $pbtn = 'Get the Reforge pack...'
+        if ($canPack) {
+            foreach ($p in @(Pack-Parts)) { $have += File-Size (Join-Path $script:PACK_DL $p.Name) }
+            if ($have -gt 0) { $pbtn = 'Resume the Reforge pack...' }
+        }
+        $idx = $sel
+        if ($auto) {
+            $b = $auto; Log "launcher: test answer $b"; $auto = 'play'   # a test run answers once, then plays
+        } else {
+            $text = if ($md) { 'Ready to play. Metropolis Dawn is the expansion, with two more campaigns.' } else { 'Ready to play.' }
+            if ($canPack -and $have -gt 0) { $text += "`r`n`r`nThe Reforge pack download stopped at $(Human $have) of $(Human (Pack-Total)). Resume it to get the new look; until then the game has its 1998 look." }
+            elseif ($canPack) { $text += "`r`n`r`nThe Reforge pack is not installed, so the game has its 1998 look. Get the Reforge pack adds the new look ($(Human (Pack-Total)) download)." }
+            $btns = @('Play', 'Install on my Quest...'); if ($canPack) { $btns += $pbtn }; $btns += 'Quit'
+            $r = Ask-Ex 'UA Reforged' $text 'Play' $btns '' $false $label $items $sel
+            $b = $r.Button; $idx = $r.Index
+            Log "launcher: chose [$(if ($b) { $b } else { 'closed' })]"
+        }
+        if ($b -eq 'Play' -or $b -eq 'play') { break }
+        elseif ($b -eq 'Install on my Quest...' -or $b -eq 'quest') { if ((Quest-Install) -eq 2) { Log 'stopped after the Quest install'; exit 0 } }
+        elseif ($b -eq 'Get the Reforge pack...' -or $b -eq 'Resume the Reforge pack...' -or $b -eq 'pack') { [void](Pack-Get) }
+        else { Log 'stopped at the launcher'; exit 0 }
+        $sel = $idx
+    }
+    $c = 'base'
+    if ($md) { if ($idx -eq 1) { $c = 'ghor' } elseif ($idx -eq 2) { $c = 'taer' } }
+    [IO.File]::WriteAllText($cf, $c + "`r`n")
+    return $c
+}
 
 function Game-Pick {
-    if ($env:UA_NOTICE_AUTO) { Log 'folder picker (test run: skipped)'; exit 0 }
-    $dlg = New-Object Windows.Forms.FolderBrowserDialog
-    $dlg.Description = 'Choose your Urban Assault folder (it contains DATA and LEVELS). UA Reforged only reads it.'
-    $dlg.ShowNewFolderButton = $false
-    $owner = New-Object Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false
-    $r = $dlg.ShowDialog($owner); $owner.Dispose()
-    if ($r -ne [Windows.Forms.DialogResult]::OK) { return $false }
-    $g = $dlg.SelectedPath.TrimEnd('\')
+    if ($env:UA_TEST_FOLDER) {
+        $g = $env:UA_TEST_FOLDER.TrimEnd('\'); Log 'folder picker (test run): a folder was chosen'
+    } else {
+        if ($env:UA_NOTICE_AUTO) { Log 'folder picker (test run: skipped)'; exit 0 }
+        $dlg = New-Object Windows.Forms.FolderBrowserDialog
+        $dlg.Description = 'Choose your Urban Assault folder (it contains DATA and LEVELS). UA Reforged only reads it.'
+        $dlg.ShowNewFolderButton = $false
+        $owner = New-Object Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false
+        $r = $dlg.ShowDialog($owner); $owner.Dispose()
+        if ($r -ne [Windows.Forms.DialogResult]::OK) { return $false }
+        $g = $dlg.SelectedPath.TrimEnd('\')
+    }
     if (Is-GameDir $g) { $script:GAME = $g; return $true }
+    if ($env:UA_TEST_FOLDER) { Log 'folder picker (test run): not a game folder'; return $false }
     [void](Ask 'That folder has no DATA and LEVELS folders. Pick the folder of your Urban Assault install.' 'OK' @('OK'))
     return $false
 }

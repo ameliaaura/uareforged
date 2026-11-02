@@ -38,14 +38,15 @@ shadows and the remastered city.
 
 ## Play in 3 steps
 
-You need the original game files (`DATA` and `LEVELS`). No copy? The app's **Get the game** button fetches the
-community OpenUA Standalone Package from the Metropolis Dawn community's own server. We never host the game.
+UA Reforged needs the original game files (`DATA` and `LEVELS`). The app fetches the free community OpenUA
+Standalone Package for you, straight from the Metropolis Dawn community's own server; already have the game?
+Choose its folder instead. We never host or ship Microsoft's game files.
 
 | | macOS | Windows | Meta Quest 3 |
 |---|---|---|---|
 | **1** | [Download](https://uareforged.pages.dev/downloads/#install-h) the zip, drag *UA Reforged* to Applications | [Download](https://uareforged.pages.dev/downloads/) and run the installer | Turn on [Developer Mode](https://uareforged.pages.dev/downloads/#quest-devmode-h) and plug the headset into your Mac or PC |
-| **2** | First open: Control-click > **Open** (or *Privacy & Security > Open Anyway*) | SmartScreen: **More info > Run anyway** | Start UA Reforged on the computer and choose **[Install on my Quest](https://uareforged.pages.dev/downloads/#quest-computer-h)** |
-| **3** | Choose your game folder or **Get the game**, then say yes to the **Reforge pack** | Choose your game folder or **Get the game**, then say yes to the **Reforge pack** | In the headset: *Unknown Sources > UA Reforged VR*, then **Get the game** and the pack |
+| **2** | First open: *System Settings > Privacy & Security >* **Open Anyway** (needs an admin password) | SmartScreen: **More info > Run anyway** | Start UA Reforged on the computer and click **[Install on my Quest](https://uareforged.pages.dev/downloads/#quest-computer-h)** |
+| **3** | Click **Set up everything** (the game + the Reforge pack in one step), then **Play** | Click **Set up everything** (the game + the Reforge pack in one step), then **Play** | In the headset: *Unknown Sources > UA Reforged VR*, then **Get the game** and the pack |
 | ▶ | [Install video](https://uareforged.pages.dev/downloads/#video-mac) | [Install video](https://uareforged.pages.dev/downloads/#video-windows) | [Install video](https://uareforged.pages.dev/downloads/#video-quest) |
 
 Full steps, troubleshooting and uninstalling: **[docs/INSTALL.md](docs/INSTALL.md)**.
@@ -64,8 +65,9 @@ Full steps, troubleshooting and uninstalling: **[docs/INSTALL.md](docs/INSTALL.m
   90 Hz.
 - **Install on my Quest**: plug your headset into your Mac or PC and the desktop app installs or updates the VR
   app, and can copy your game files across.
-- **Safe first launch**: *Get the game*, resumable downloads, size and checksum checks, plain-language help when a
-  link breaks. Your game folder is only read, never changed.
+- **One-step first launch**: *Set up everything* fetches the game and the Reforge pack in one progress window,
+  with resumable downloads, size and checksum checks, and plain-language help when a link breaks. Your game folder
+  is only read, never changed, and no dialog shows a file path.
 - **Sharp UI text**, DualSense and other game controllers, and the Metropolis Dawn campaigns (Ghorkov,
   Taerkasten) with the expansion data.
 
@@ -78,11 +80,11 @@ Full steps, troubleshooting and uninstalling: **[docs/INSTALL.md](docs/INSTALL.m
 
 | | Minimum | Notes |
 |---|---|---|
-| **macOS** | Apple Silicon (M1 or later), macOS 11 | Not notarised: *Open Anyway* once. Intel Macs not supported |
+| **macOS** | Apple Silicon (M1 or later), macOS 11 | Not notarised: *Privacy & Security > Open Anyway* once (admin password). Intel Macs not supported |
 | **Windows** | Windows 10 1803+ or 11, 64-bit, OpenGL 4.1 GPU | Installs per user, no admin rights |
 | **Meta Quest** | Quest 3 | Quest 3S should work (untested). Sideloaded with Developer Mode |
-| **Disk** | the game: about 445 MB download; the Reforge pack: about 1.6 GB download, 2.4 GB installed | The Quest downloads its own, smaller pack |
-| **Game files** | your own *Urban Assault*, or *Get the game* | See [GAME-DATA.md](docs/GAME-DATA.md) |
+| **Disk** | the game: 445 MB download, 675 MB on disk; the Reforge pack: 1.6 GB download, 2.4 GB on disk | The Quest downloads its own pack (712 MB). All sizes: [SIZES.md](docs/SIZES.md) |
+| **Game files** | fetched by *Set up everything*, or your own *Urban Assault* | See [GAME-DATA.md](docs/GAME-DATA.md) |
 
 ## FAQ
 

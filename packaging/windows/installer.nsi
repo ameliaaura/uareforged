@@ -19,6 +19,8 @@ OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\${APPNAME}"
 InstallDirRegKey HKCU "${UNINSTKEY}" "InstallLocation"
 BrandingText "${APPNAME} ${VERSION}"
+ShowInstDetails nevershow
+ShowUninstDetails nevershow
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "FileDescription" "${APPNAME} installer"
@@ -33,7 +35,7 @@ VIAddVersionKey "LegalCopyright" "Engine: GPL-2.0 (OpenUA / UA_source)"
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TEXT "This installs ${APPNAME} ${VERSION} for your Windows account only (no administrator rights needed).$\r$\n$\r$\n${APPNAME} is the 1998 game Urban Assault on the open-source OpenUA engine, with modern graphics. Unofficial, free, non-commercial fan project.$\r$\n$\r$\nIt contains no game files. On first start it asks for your Urban Assault folder, or fetches the community OpenUA Standalone Package for you from the Metropolis Dawn community."
+!define MUI_WELCOMEPAGE_TEXT "This installs ${APPNAME} ${VERSION} for your Windows account only (no administrator rights needed).$\r$\n$\r$\n${APPNAME} is the 1998 game Urban Assault on the open-source OpenUA engine, with modern graphics. Unofficial, free, non-commercial fan project.$\r$\n$\r$\nIt contains no game files. On first start one step sets everything up: it fetches the free community OpenUA Standalone Package from the Metropolis Dawn community and the Reforge pack for you, or uses your own Urban Assault folder."
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Start ${APPNAME} now"
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchGame
@@ -43,7 +45,8 @@ VIAddVersionKey "LegalCopyright" "Engine: GPL-2.0 (OpenUA / UA_source)"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_COMPONENTS
-!insertmacro MUI_PAGE_DIRECTORY
+; no folder page and no file list: both would show the player's account folder (it shows when they stream or share
+; a screenshot). It always installs to the per-user Programs folder; the zip is there for any other place.
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -105,7 +108,7 @@ Section "Uninstall"
   ${IfNot} ${Errors}
     StrCpy $0 "purge"
   ${ElseIf} ${FileExists} "${DATADIR}\*.*"
-    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete your UA Reforged saved games and settings, the downloaded game and the Reforge pack?$\r$\n$\r$\n(${DATADIR})$\r$\n$\r$\nYour own Urban Assault folder is not touched." /SD IDNO IDNO keepdata
+    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete your UA Reforged saved games and settings, the downloaded game and the Reforge pack (UA Reforged's own data folder)?$\r$\n$\r$\nYour own Urban Assault folder is not touched." /SD IDNO IDNO keepdata
     StrCpy $0 "purge"
     keepdata:
   ${EndIf}

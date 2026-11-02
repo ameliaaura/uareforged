@@ -59,7 +59,8 @@ log is `launcher.log` there. Useful switches for development (environment variab
 | `UA_AUTOSTART_LEVEL=<n>` | Start straight into level *n* |
 | `UA_WINDOW_SIZE=1920x1080` | Window size |
 
-Hold the Option key while opening the app (or pass `--quest`) for *Install on my Quest*.
+*Install on my Quest* is a button on the first-launch dialog and on the launcher (`packaging/macos/dialog.js`); the
+Option key while opening the app (or `--quest`) still works.
 
 ## Notes
 

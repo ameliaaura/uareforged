@@ -4,9 +4,9 @@
 # copy this Mac's game files over too, so the headset does not download the game again. Nothing else on the
 # headset is touched: no other app is removed, no setting is changed.
 #
-# How it is offered: when a Meta Quest is plugged in at launch (seen on USB, no tools needed) and it does not
-# have this version yet; hold the Option key while opening the app to get the choice at any time; or start the
-# app with --quest.
+# How it is offered: the "Install on my Quest" button on the first-launch dialog and on the launcher shown at every
+# start (downloads.sh); by itself when a Meta Quest is plugged in at launch (seen on USB, no tools needed) and it does
+# not have this version yet; the Option key held while opening the app, or --quest.
 #
 # adb: Google's Android SDK Platform-Tools. Google's licence for them does not allow passing them on, so they are
 # not in the app: on first use the app downloads Google's own zip from dl.google.com (a pinned release, checked
@@ -71,14 +71,13 @@ q_links() {
 
 # q_broken <why>: the failsafe notice (help page or back to the game). returns 2 if the help page was opened
 q_broken() {
-    dl_ui_end 2>/dev/null
+    dl_ui_close 2>/dev/null
     echo "quest: broken - $1"
-    local b="${UA_NOTICE_AUTO:-}"
-    if [ -z "$b" ]; then
-        b="$(ask "UA Reforged VR could not be installed on your headset. Nothing on the headset was changed.
+    local b="${UA_NOTICE_AUTO:-}" msg="UA Reforged VR could not be installed on your headset. Nothing on the headset was changed.
 
-What went wrong: $1." "Open help page" "Play on this Mac" "Open help page")"
-    fi
+What went wrong: $(no_paths "$1")."
+    echo "notice: $msg" | tr '\n' ' '; echo
+    [ -n "$b" ] || b="$(ask "$msg" "Open help page" "Play on this Mac" "Open help page")"
     case "$b" in help|"Open help page") open_help "$Q_HELP"; return 2 ;; esac
     return 1
 }
@@ -282,7 +281,7 @@ Then UA Reforged VR does not need to download the game again (about 445 MB). It 
         0) Q_COPIED=1 ;;
         130) echo "quest: game copy cancelled" ;;
         *) echo "quest: game copy failed - $Q_WHY"
-           [ -z "${UA_NOTICE_AUTO:-}" ] && ask "The game files could not be copied: $Q_WHY.
+           [ -z "${UA_NOTICE_AUTO:-}" ] && ask "The game files could not be copied: $(no_paths "$Q_WHY").
 
 The VR app is installed. On its first start it offers to download the game instead." "OK" "OK" >/dev/null ;;
     esac
@@ -402,7 +401,7 @@ quest_offer() {
 
 Install UA Reforged VR on it? It takes a minute; nothing else on the headset changes." "Install on my Quest" "Don't ask again" "Not now" "Install on my Quest")" in
             "Install on my Quest") mode=install ;;
-            "Don't ask again") : > "$Q_OFF"; echo "quest: offer turned off (hold Option at launch to install later)"; [ -n "$stop" ] && exit 0; return 0 ;;
+            "Don't ask again") : > "$Q_OFF"; echo "quest: offer turned off (the launcher's Install on my Quest still works)"; [ -n "$stop" ] && exit 0; return 0 ;;
             *) echo "quest: not now"; [ -n "$stop" ] && exit 0; return 0 ;;
         esac
     fi

@@ -13,10 +13,18 @@
 # (resuming where the server allows it). Any break cleans up the partial files and shows a plain notice with
 # "Open help page" (the site's help) or another way on; the app is never left half set up.
 #
+# First launch is one step ("Set up everything", setup_first): one dialog for the game + the Reforge pack (or "I already
+# have the game", a checkbox to skip the pack, "Install on my Quest"), then one progress window for both downloads.
+# Every later start shows a small launcher (play_menu): the campaign, Play, Install on my Quest, and Get the Reforge
+# pack while none is installed. Dialogs never show file paths (a player's path holds their account name); the log does.
+#
 # Testing only: UA_LINKS_URL, UA_GAME_URL, UA_PACK_URL override addresses (UA_LINKS_ALLOW_LOCAL=1 also accepts
-# http://127.0.0.1 in links.json); UA_GAME_AUTO=get answers the first-launch choice; UA_PACK_AUTO=yes|no answers
-# the pack offer; UA_NOTICE_AUTO=help|folder|later answers the notices (and opens no browser); UA_PACK_NOUI=1 shows
-# no progress window.
+# http://127.0.0.1 in links.json); UA_SETUP_AUTO=everything|game-only|folder|folder-only|quest|quit answers the
+# first-launch dialog (UA_GAME_AUTO=get = "everything", with the pack unless UA_PACK_AUTO=no; UA_TEST_FOLDER=<dir>
+# answers the folder picker); UA_PACK_AUTO=yes|no answers the pack offer; UA_NOTICE_AUTO=help|folder|later answers
+# the notices (and opens no browser); UA_PLAY_AUTO=play|quest|pack|quit answers the launcher once (UA_CAMPAIGN skips
+# it); UA_PACK_NOUI=1 shows no progress window; UA_DIALOG_SNAP=<folder> saves each setup/launcher dialog as a PNG
+# there and answers it with its default.
 
 DL_CONF="$CONTENTS/Resources/downloads.txt"
 PACK_DL="$SUPPORT/reforge-pack-download"
@@ -24,6 +32,11 @@ GAME_DL="$SUPPORT/game-download"
 GAME_ORIG="$SUPPORT/game-original"
 PACK_OFF="$SUPPORT/reforge-pack-offer-off"
 DL_UA="UA-Reforged (macOS)"
+
+SETUP_PROGRESS="$SUPPORT/setup-progress"
+SETUP_ON=""        # set while "Set up everything" runs: one progress window for every step
+PACK_ASKED=""      # the pack was offered (or chosen) this launch: no second offer
+ICON="$CONTENTS/Resources/AppIcon.icns"
 
 conf() { awk -F'\t' -v k="$1" '$1 == k { sub(/^[^\t]*\t/, ""); print }' "$DL_CONF"; }
 human() { awk -v b="$1" 'BEGIN { if (b >= 1e9) printf "%.1f GB", b / 1e9; else if (b >= 1e6) printf "%d MB", b / 1e6; else printf "%d KB", (b + 999) / 1000 }'; }
@@ -44,6 +57,19 @@ on run argv
 end run
 EOF
 }
+
+# no_paths <text>: what a dialog may show. A player's paths hold their account name (it shows when they stream or share
+# a screenshot), so our folders get friendly names and any other path under the home folder is left out.
+no_paths() {
+    local t="$1" a="UA Reforged's folder" b="the UA Reforged app" c="your home folder"
+    t="${t//"$SUPPORT"/$a}"; t="${t//"$CONTENTS"/$b}"; t="${t//"$HOME"/$c}"
+    printf '%s' "$t" | sed -E 's#/(Users|Volumes|private|var|tmp)/[^ ,;:)"]*#a file on this Mac#g'
+}
+# dlg <heading> <text> <check label> <check 0|1> <menu label> <menu items> <menu index> <buttons...>:
+# the larger dialog (dialog.js). Prints "<button>\t<check>\t<menu index>".
+dlg() { /usr/bin/osascript -l JavaScript "$CONTENTS/Resources/dialog.js" "$ICON" "$@" 2>/dev/null </dev/null; }
+# show_in_finder <file or folder>: reveal it in a Finder window (the player sees it; no path in our text)
+show_in_finder() { [ -n "${UA_NOTICE_AUTO:-}" ] && { echo "show in Finder: $1 (test run: not opened)"; return; }; /usr/bin/open -R "$1"; }
 
 open_help() {
     if [ -n "${UA_NOTICE_AUTO:-}" ]; then echo "help page: $1 (test run: not opened)"; return; fi
@@ -91,19 +117,31 @@ links_load() {
 }
 
 # ---------------------------------------------------------------- progress window + cancel
-dl_status() { printf '%s\t%s\n' "$1" "$2" > "$DL_DIR/status.tmp" && mv -f "$DL_DIR/status.tmp" "$DL_DIR/status"; }
+# The window reads $UI_DIR/status. During "Set up everything" (SETUP_ON) one window stays open for every step: each
+# step's 0-100 % is mapped into its share of the whole (SETUP_BASE + SETUP_SPAN) and SETUP_STEP is the stage line.
+dl_status() {
+    local p="$1" t="$2" line
+    if [ -n "$SETUP_ON" ]; then
+        [ "$t" = done ] && return 0
+        p=$(( SETUP_BASE + p * SETUP_SPAN / 100 )); line="$p"$'\t'"$t"$'\t'"$SETUP_STEP"
+    else line="$p"$'\t'"$t"; fi
+    mkdir -p "$UI_DIR" && printf '%s\n' "$line" > "$UI_DIR/status.tmp" && mv -f "$UI_DIR/status.tmp" "$UI_DIR/status"
+}
 dl_ui_start() { # dl_ui_start <title>
-    UI_PID=""; rm -f "$DL_DIR/cancel"; dl_status 0 "Checking the download link..."
+    if [ -n "$SETUP_ON" ] && [ -n "${UI_PID:-}" ]; then dl_status 0 "Checking the download link..."; return 0; fi
+    UI_PID=""; [ -n "$SETUP_ON" ] || UI_DIR="$DL_DIR"; rm -f "$UI_DIR/cancel"; dl_status 0 "Checking the download link..."
     if [ -z "${UA_PACK_NOUI:-}" ]; then
-        /usr/bin/osascript -l JavaScript "$CONTENTS/Resources/progress.js" "$DL_DIR" "$1" >/dev/null 2>&1 </dev/null &
-        UI_PID=$!
+        /usr/bin/osascript -l JavaScript "$CONTENTS/Resources/progress.js" "$UI_DIR" "$1" >/dev/null 2>&1 </dev/null &
+        UI_PID=$!; disown "$UI_PID" 2>/dev/null
     fi
 }
-dl_ui_end() { [ -n "${UI_PID:-}" ] && kill "$UI_PID" 2>/dev/null; UI_PID=""; rm -f "$DL_DIR/status" "$DL_DIR/cancel"; }
+# dl_ui_end: a step is over (the setup window stays open for the next step); dl_ui_close: the window goes now
+dl_ui_end() { [ -n "$SETUP_ON" ] && return 0; dl_ui_close; }
+dl_ui_close() { [ -n "${UI_PID:-}" ] && kill "$UI_PID" 2>/dev/null; UI_PID=""; [ -n "${UI_DIR:-}" ] && rm -f "$UI_DIR/status" "$UI_DIR/cancel"; return 0; }
 dl_wait() { # wait for a background job; 130 = the player pressed Cancel
     local pid=$1
     while kill -0 "$pid" 2>/dev/null; do
-        if [ -f "$DL_DIR/cancel" ]; then kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return 130; fi
+        if [ -f "$UI_DIR/cancel" ]; then kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return 130; fi
         [ -n "${DL_PROGRESS:-}" ] && "$DL_PROGRESS"
         sleep 0.5
     done
@@ -195,14 +233,13 @@ game_valid() {
 # game_broken <why>: clean up, explain, offer the help page. returns 2 (help page opened: the launcher stops)
 # or 3 (choose a folder instead)
 game_broken() {
-    rm -rf "$GAME_DL"; dl_ui_end
+    rm -rf "$GAME_DL"; dl_ui_close
     echo "get the game: broken - $1"
-    local b="${UA_NOTICE_AUTO:-}"
-    if [ -z "$b" ]; then
-        b="$(ask "The game download link isn't working right now (it's hosted by the Metropolis Dawn community). We'll open the UA Reforged help page with other ways to get it.
+    local b="${UA_NOTICE_AUTO:-}" msg="The game download link isn't working right now (it's hosted by the Metropolis Dawn community). We'll open the UA Reforged help page with other ways to get it.
 
-What went wrong: $1." "Open help page" "Choose a folder instead" "Open help page")"
-    fi
+What went wrong: $(no_paths "$1")."
+    echo "notice: $msg" | tr '\n' ' '; echo
+    [ -n "$b" ] || b="$(ask "$msg" "Open help page" "Choose a folder instead" "Open help page")"
     case "$b" in folder|"Choose a folder instead") return 3 ;; esac
     open_help "${L_HELP:-https://uareforged.pages.dev/downloads/#nogame-h}"; return 2
 }
@@ -212,10 +249,11 @@ What went wrong: $1." "Open help page" "Choose a folder instead" "Open help page
 game_get() {
     [ -n "${LINKS_DONE:-}" ] || links_load
     local url="$L_GAME_URL" min="${L_GAME_MIN:-100000000}" max="${L_GAME_MAX:-5000000000}"
-    if [ -z "${UA_GAME_AUTO:-}" ]; then
-        local note="UA Reforged will download the OpenUA Standalone Package (the full original game plus the Metropolis Dawn add-on, about 445 MB) straight from the Metropolis Dawn community's server. It is hosted by the Metropolis Dawn community, not by UA Reforged, and the game files belong to Microsoft.
+    # "Set up everything" is the consent; on its own game_get asks here
+    if [ -z "${UA_GAME_AUTO:-}" ] && [ -z "$SETUP_ON" ] && [ -z "${UA_SETUP_AUTO:-}" ]; then
+        local note="UA Reforged will download the OpenUA Standalone Package (the full original game plus the Metropolis Dawn add-on, about $(game_size)) straight from the Metropolis Dawn community's server. It is hosted by the Metropolis Dawn community, not by UA Reforged, and the game files belong to Microsoft.
 
-It goes to ~/Library/Application Support/UA Reforged/game-original."
+It is saved in UA Reforged's own folder."
         [ -n "$L_MESSAGE" ] && note="$note
 
 $L_MESSAGE"
@@ -229,7 +267,7 @@ $L_MESSAGE"
     local f="$DL_DIR/openua-package.zip"
     DL_WHAT="Downloading the game"; DL_BASE=0; DL_TOTAL="$PC_SIZE"; DL_MAXSIZE="$max"
     dl_fetch "$url" "$f"; local rc=$?; DL_MAXSIZE=""
-    if [ $rc -eq 130 ]; then dl_ui_end; echo "get the game: cancelled (the part stays for a resume)"; return 1; fi
+    if [ $rc -eq 130 ]; then dl_ui_close; echo "get the game: cancelled (the part stays for a resume)"; return 1; fi
     [ $rc -eq 0 ] || { game_broken "$DL_WHY"; return $?; }
     local got; got=$(stat -f %z "$f" 2>/dev/null || echo 0)
     [ "$got" -ge "$min" ] || { game_broken "the downloaded file is far too small ($(human $got))"; return $?; }
@@ -237,7 +275,7 @@ $L_MESSAGE"
     rm -rf "$DL_DIR/unpack"; mkdir -p "$DL_DIR/unpack"
     /usr/bin/ditto -x -k "$f" "$DL_DIR/unpack" </dev/null 2>>"$DL_DIR/curl.err" &
     dl_wait $!; rc=$?
-    if [ $rc -eq 130 ]; then rm -rf "$DL_DIR/unpack"; dl_ui_end; return 1; fi
+    if [ $rc -eq 130 ]; then rm -rf "$DL_DIR/unpack"; dl_ui_close; echo "get the game: cancelled while unpacking (the download stays)"; return 1; fi
     [ $rc -eq 0 ] || { game_broken "the downloaded file is damaged (it does not unpack)"; return $?; }
     local root="" d
     while IFS= read -r d; do
@@ -248,21 +286,20 @@ $L_MESSAGE"
     local rel="${root#"$DL_DIR/unpack"}"
     rm -rf "$GAME_ORIG"; mv "$DL_DIR/unpack" "$GAME_ORIG" || { game_broken "the game folder could not be created"; return $?; }
     GAME="$GAME_ORIG$rel"
-    dl_status 100 done; sleep 1; dl_ui_end; rm -rf "$GAME_DL"
+    dl_status 100 done; [ -n "$SETUP_ON" ] || sleep 1; dl_ui_end; rm -rf "$GAME_DL"
     echo "get the game: installed in $GAME"
     return 0
 }
 
 # ======================================================================== Reforge pack
 pack_broken() { # explain, offer the help page; the game always starts (1998 look)
-    rm -rf "$PACK_DL"; dl_ui_end
+    rm -rf "$PACK_DL"; dl_ui_close
     echo "reforge pack: broken - $1"
-    local b="${UA_NOTICE_AUTO:-}"
-    if [ -z "$b" ]; then
-        b="$(ask "The Reforge pack download isn't working right now. The game starts with its 1998 look; UA Reforged offers the pack again on a later start.
+    local b="${UA_NOTICE_AUTO:-}" msg="The Reforge pack download isn't working right now. The game starts with its 1998 look; UA Reforged offers the pack again on a later start.
 
-What went wrong: $1." "Open help page" "Try again later" "Open help page")"
-    fi
+What went wrong: $(no_paths "$1")."
+    echo "notice: $msg" | tr '\n' ' '; echo
+    [ -n "$b" ] || b="$(ask "$msg" "Open help page" "Try again later" "Open help page")"
     case "$b" in help|"Open help page") open_help "${L_PACK_HELP:-https://uareforged.pages.dev/downloads/#install-h}" ;; esac
     return 1
 }
@@ -292,7 +329,7 @@ pack_download() {
         DL_WHAT="Downloading the Reforge pack"; DL_BASE=$done_b; DL_TOTAL=$total
         if [ "$(stat -f %z "$f" 2>/dev/null || echo 0)" -lt "$bytes" ]; then
             dl_fetch "$L_PACK_URL$name" "$f"; rc=$?
-            [ $rc -eq 130 ] && { dl_ui_end; return 130; }
+            [ $rc -eq 130 ] && { dl_ui_close; return 130; }
             [ $rc -eq 0 ] || { pack_broken "$DL_WHY"; return 1; }
         fi
         dl_status "$(( (done_b + bytes) * 90 / total ))" "Checking $name..."
@@ -306,7 +343,7 @@ pack_download() {
     while IFS="$(printf '\t')" read -r name bytes sum; do
         /usr/bin/ditto -x -k "$DL_DIR/$name" "$DL_DIR/unpack" </dev/null &
         dl_wait $!; rc=$?
-        [ $rc -eq 130 ] && { rm -rf "$DL_DIR/unpack"; dl_ui_end; return 130; }
+        [ $rc -eq 130 ] && { rm -rf "$DL_DIR/unpack"; dl_ui_close; return 130; }
         [ $rc -eq 0 ] || { pack_broken "a downloaded part does not unpack ($name)"; return 1; }
     done <<< "$L_PACK_PARTS"
     local new="$DL_DIR/unpack/reforge-pack"
@@ -314,13 +351,13 @@ pack_download() {
     dl_status 95 "Setting up the pack (about a minute)..."
     /bin/sh "$new/install-links.sh" --verify </dev/null &
     dl_wait $!; rc=$?
-    [ $rc -eq 130 ] && { rm -rf "$DL_DIR/unpack"; dl_ui_end; return 130; }
+    [ $rc -eq 130 ] && { rm -rf "$DL_DIR/unpack"; dl_ui_close; return 130; }
     [ $rc -eq 0 ] || { pack_broken "the pack's files did not check out"; return 1; }
     conf version | head -1 > "$new/PACK-VERSION"
     if [ -e "$PACK" ]; then rm -rf "$PACK.old"; mv "$PACK" "$PACK.old" || { pack_broken "the old pack folder could not be replaced"; return 1; }; fi
     mv "$new" "$PACK" || { pack_broken "the pack folder could not be created"; return 1; }
     rm -rf "$PACK.old"
-    dl_status 100 done; sleep 1; dl_ui_end; rm -rf "$PACK_DL"
+    dl_status 100 done; [ -n "$SETUP_ON" ] || sleep 1; dl_ui_end; rm -rf "$PACK_DL"
     echo "reforge pack: installed $(cat "$PACK/PACK-VERSION" 2>/dev/null)"
     return 0
 }
@@ -328,6 +365,7 @@ pack_download() {
 # Offer the pack when none is installed. Never fatal: every failure starts the game with the 1998 look.
 pack_offer() {
     [ -d "$PACK/hd-models" ] && return 0
+    [ -n "$PACK_ASKED" ] && return 0
     [ -f "$DL_CONF" ] || return 0
     [ -f "$PACK_OFF" ] && [ -z "${UA_PACK_AUTO:-}" ] && return 0
     [ -n "${LINKS_DONE:-}" ] || links_load
@@ -347,7 +385,7 @@ pack_offer() {
         fi
         msg="$msg
 
-It goes to ~/Library/Application Support/UA Reforged. Your Urban Assault folder is not changed."
+It is saved in UA Reforged's own folder ($(pack_disk) once installed). Your Urban Assault folder is not changed."
         case "$(ask "$msg" "$verb" "Don't ask again" "Not now" "$verb")" in
             "Don't ask again") : > "$PACK_OFF"; echo "reforge pack: offer turned off"; return 0 ;;
             "$verb") answer=yes ;;
@@ -355,47 +393,187 @@ It goes to ~/Library/Application Support/UA Reforged. Your Urban Assault folder 
         esac
     fi
     [ "$answer" = yes ] || { echo "reforge pack: not now"; return 0; }
-    rm -f "$PACK_OFF"
+    pack_get; return 0
+}
+# pack_get: download + install now (the offer, the launcher's "Get the Reforge pack", or "Set up everything")
+pack_get() {
+    PACK_ASKED=1; rm -f "$PACK_OFF"
     pack_download; local rc=$?
     case $rc in
         0) ;;
         130) echo "reforge pack: download cancelled (the parts stay for a resume)"
-             [ -z "${UA_PACK_AUTO:-}" ] && ask "Download stopped. The game starts with the 1998 look; next time UA Reforged offers to resume the download." "OK" "OK" >/dev/null ;;
+             [ -z "${UA_PACK_AUTO:-}${UA_SETUP_AUTO:-}${UA_PLAY_AUTO:-}${UA_GAME_AUTO:-}" ] && ask "Download stopped. The game starts with the 1998 look; next time UA Reforged offers to resume the download." "OK" "OK" >/dev/null ;;
         *) echo "reforge pack: not installed (1998 look)" ;;
     esac
-    return 0
+    return $rc
 }
 
-# First launch with no game folder: "I have the game" (the folder picker) or "Get the game".
-# Sets GAME, or exits the launcher cleanly (nothing half set up: the next start asks again).
-game_choose() {
-    local pick
-    while ! is_game_dir "$GAME"; do
-        pick="${UA_GAME_AUTO:-}"
-        if [ -z "$pick" ]; then
-            pick="$(ask "UA Reforged needs the original Urban Assault game files.
+# ======================================================================== Set up everything (first launch)
+# Sizes for the dialogs come from downloads.txt (docs/SIZES.md is the table they come from).
+game_size() { local b; b="$(conf game_bytes | head -1)"; human "${b:-445000000}"; }
+pack_disk() { local b; b="$(conf pack_disk_bytes | head -1)"; human "${b:-2400000000}"; }
+pack_ready() { # the pack can be downloaded: this build (or links.json) has an address for it
+    [ -f "$DL_CONF" ] || return 1
+    [ -n "${LINKS_DONE:-}" ] || links_load
+    case "$L_PACK_URL" in ''|*PACK-URL-NOT-SET*) return 1 ;; esac
+    [ -n "$L_PACK_PARTS" ]
+}
 
-Do you have the game on this Mac? If not, UA Reforged can fetch the community OpenUA Standalone Package (about 445 MB) from the Metropolis Dawn community for you." "Get the game" "Quit" "I have the game - choose folder" "Get the game")"
+# setup_first: the first launch with no game folder. One dialog (Set up everything / I already have the game /
+# Install on my Quest / Quit, and a checkbox for the Reforge pack), then one progress window for every download.
+# Sets GAME, or exits the launcher cleanly (nothing half set up: the next start asks again).
+setup_first() {
+    is_game_dir "$GAME" && return 0
+    [ -n "${LINKS_DONE:-}" ] || links_load
+    local can_pack=0 withpack pick r text check
+    pack_ready && [ ! -d "$PACK/hd-models" ] && can_pack=1
+    while ! is_game_dir "$GAME"; do
+        pick="${UA_SETUP_AUTO:-}"; withpack=1
+        if [ -z "$pick" ] && [ -n "${UA_GAME_AUTO:-}" ]; then
+            case "$UA_GAME_AUTO" in get|"Get the game") pick=everything; [ "${UA_PACK_AUTO:-}" = no ] && pick=game-only ;; *) pick=quit ;; esac
         fi
+        if [ -n "$pick" ]; then
+            case "$pick" in game-only|folder-only) withpack=0 ;; esac
+            echo "setup: test answer $pick"
+        else
+            check=""
+            text="UA Reforged needs the original Urban Assault game files. It can fetch everything for you:
+
+• The game: the free OpenUA Standalone Package ($(game_size)), the full 1998 game plus the Metropolis Dawn add-on, straight from the Metropolis Dawn community's server. They host it, not UA Reforged; the game files belong to Microsoft."
+            if [ $can_pack = 1 ]; then
+                text="$text
+• The Reforge pack ($(human "$(pack_total)")): the new look, with remastered units, buildings and skies, HD textures, restored videos and sharp menus."
+                check="Include the Reforge pack ($(human "$(pack_total)") download, $(pack_disk) installed)"
+            fi
+            text="$text
+
+Everything is saved in UA Reforged's own folder. Already have the game? Choose its folder instead."
+            [ -n "$L_MESSAGE" ] && text="$text
+
+$L_MESSAGE"
+            q_usb_seen 2>/dev/null && text="$text
+
+A Meta Quest is plugged in: choose Install on my Quest to put UA Reforged VR on it."
+            r="$(dlg "Set up UA Reforged" "$text" "$check" 1 "" "" 0 "Set up everything" "I already have the game" "Install on my Quest…" "Quit")"
+            IFS=$'\t' read -r pick withpack _ <<< "$r"
+            echo "setup: chose [${pick:-closed}], pack ${withpack:-0}"
+            case "$pick" in "Set up everything") pick=everything ;; "I already have the game") pick=folder ;; "Install on my Quest…") pick=quest ;; *) pick=quit ;; esac
+        fi
+        [ $can_pack = 1 ] || withpack=0
         case "$pick" in
-            get|"Get the game")
-                game_get; case $? in
-                    0) ;; 1) [ -n "${UA_GAME_AUTO:-}" ] && exit 0 ;;
+            everything|game-only)
+                setup_run get "$withpack"; case $? in
+                    0) ;;
+                    1) [ -n "${UA_SETUP_AUTO:-}${UA_GAME_AUTO:-}" ] && exit 0 ;;
                     2) echo "stopped: help page opened, nothing set up"; exit 0 ;;
-                    3) game_pick || [ -z "${UA_GAME_AUTO:-}" ] || exit 0 ;;
+                    3) if game_pick; then setup_run folder "$withpack"; elif [ -n "${UA_SETUP_AUTO:-}${UA_GAME_AUTO:-}" ]; then exit 0; fi ;;
                 esac ;;
-            "I have the game - choose folder") game_pick ;;
+            folder|folder-only)
+                if game_pick; then setup_run folder "$withpack"; elif [ -n "${UA_SETUP_AUTO:-}" ]; then exit 0; fi ;;
+            quest)
+                quest_install; [ $? -eq 2 ] && { echo "stopped after the Quest install"; exit 0; }
+                [ -n "${UA_SETUP_AUTO:-}" ] && { echo "stopped after the Quest install (test run)"; exit 0; } ;;
             *) echo "stopped at the first-launch choice"; exit 0 ;;
         esac
     done
 }
+game_choose() { setup_first; }   # (the older name)
+
+# setup_run get|folder <pack 0|1>: the downloads in one progress window with the overall progress and the current
+# step. Returns like game_get (0 ok, 1 cancelled, 2 help page opened, 3 choose a folder instead). The pack never
+# stops the game: on a problem it shows its own notice and the game starts with the 1998 look.
+setup_run() {
+    local kind="$1" withpack="$2" gb=0 pb=0 steps=0 n=0 rc total
+    [ "$kind" = get ] && { gb="$(conf game_bytes | head -1)"; gb="${gb:-445000000}"; }
+    [ "$withpack" = 1 ] && pb=$(pack_total)
+    if [ "$withpack" != 1 ] && [ ! -d "$PACK/hd-models" ] && pack_ready; then
+        : > "$PACK_OFF"; PACK_ASKED=1; echo "setup: Reforge pack skipped (the launcher offers it)"
+    fi
+    [ "$gb" -gt 0 ] && steps=$((steps + 1)); [ "$pb" -gt 0 ] && steps=$((steps + 1))
+    [ $steps -gt 0 ] || return 0
+    total=$((gb + pb))
+    SETUP_ON=1; UI_DIR="$SETUP_PROGRESS"; UI_PID=""; rm -rf "$UI_DIR"; mkdir -p "$UI_DIR"
+    SETUP_BASE=0; SETUP_SPAN=100; SETUP_STEP=""
+    dl_ui_start "Setting up UA Reforged"
+    if [ "$gb" -gt 0 ]; then
+        n=$((n + 1)); SETUP_STEP="Step $n of $steps: the game ($(human "$gb"))"; SETUP_BASE=0; SETUP_SPAN=$(( gb * 100 / total ))
+        echo "setup: $SETUP_STEP"
+        game_get; rc=$?
+        if [ $rc -ne 0 ]; then SETUP_ON=""; dl_ui_close; rm -rf "$SETUP_PROGRESS"; return $rc; fi
+    fi
+    if [ "$pb" -gt 0 ]; then
+        n=$((n + 1)); SETUP_STEP="Step $n of $steps: the Reforge pack ($(human "$pb"))"; SETUP_BASE=$(( gb * 100 / total )); SETUP_SPAN=$(( 100 - SETUP_BASE ))
+        echo "setup: $SETUP_STEP"
+        pack_get
+    fi
+    SETUP_ON=""; dl_ui_close; rm -rf "$SETUP_PROGRESS"
+    echo "setup: done"
+    return 0
+}
+
+# ======================================================================== the launcher (every start)
+# play_menu: the campaign (when the game has Metropolis Dawn; the last choice is remembered), Play, Install on my
+# Quest, and Get the Reforge pack while none is installed (Resume after a stopped download). The launcher is the
+# pack offer, so pack_offer asks nothing more this launch. Sets campaign=base|ghor|taer, or exits (Quit).
+play_menu() {
+    local items="" label="" sel=0 r b idx md=0 can_pack text have pb name bytes sum pbtn
+    PACK_ASKED=1
+    if [ -d "$GAME/Ghor_env" ] || [ -d "$RUN/Ghor_env" ]; then
+        md=1; label="Campaign:"; items="Urban Assault|Metropolis Dawn: Ghorkov|Metropolis Dawn: Taerkasten"
+    fi
+    case "$(cat "$SUPPORT/campaign.txt" 2>/dev/null)" in ghor) sel=1 ;; taer) sel=2 ;; esac
+    while :; do
+        can_pack=0; [ ! -d "$PACK/hd-models" ] && pack_ready && can_pack=1
+        have=0; pbtn="Get the Reforge pack…"
+        if [ $can_pack = 1 ]; then
+            while IFS="$(printf '\t')" read -r name bytes sum; do
+                [ -f "$PACK_DL/$name" ] && have=$((have + $(stat -f %z "$PACK_DL/$name" 2>/dev/null || echo 0)))
+            done <<< "$L_PACK_PARTS"
+            [ "$have" -gt 0 ] && pbtn="Resume the Reforge pack…"
+        fi
+        b="${UA_PLAY_AUTO:-}"; idx=$sel
+        if [ -n "$b" ]; then
+            echo "launcher: test answer $b"; UA_PLAY_AUTO=play   # a test run answers once, then plays
+        else
+            text="Ready to play."
+            [ $md = 1 ] && text="Ready to play. Metropolis Dawn is the expansion, with two more campaigns."
+            pb="$(human "$(pack_total)")"
+            if [ $can_pack = 1 ] && [ "$have" -gt 0 ]; then text="$text
+
+The Reforge pack download stopped at $(human "$have") of $pb. Resume it to get the new look; until then the game has its 1998 look."
+            elif [ $can_pack = 1 ]; then text="$text
+
+The Reforge pack is not installed, so the game has its 1998 look. Get the Reforge pack adds the new look ($pb download)."
+            fi
+            local btns=("Play" "Install on my Quest…"); [ $can_pack = 1 ] && btns+=("$pbtn"); btns+=("Quit")
+            r="$(dlg "UA Reforged" "$text" "" 0 "$label" "$items" "$sel" "${btns[@]}")"
+            IFS=$'\t' read -r b _ idx <<< "$r"
+            echo "launcher: chose [${b:-closed}]"
+        fi
+        case "$b" in
+            Play|play) break ;;
+            "Install on my Quest…"|quest) quest_install; [ $? -eq 2 ] && { echo "stopped after the Quest install"; exit 0; } ;;
+            "Get the Reforge pack…"|"Resume the Reforge pack…"|pack) pack_get ;;
+            *) echo "stopped at the launcher"; exit 0 ;;
+        esac
+        sel="${idx:-0}"
+    done
+    campaign=base
+    if [ $md = 1 ]; then case "${idx:-0}" in 1) campaign=ghor ;; 2) campaign=taer ;; esac; fi
+    printf '%s\n' "$campaign" > "$SUPPORT/campaign.txt"
+}
 
 game_pick() {
-    [ -n "${UA_NOTICE_AUTO:-}" ] && { echo "folder picker (test run: skipped)"; exit 0; }
     local g
-    g="$(/usr/bin/osascript -e 'POSIX path of (choose folder with prompt "Choose your Urban Assault folder (it contains DATA and LEVELS). UA Reforged only reads it.")' 2>/dev/null)" || return 1
+    if [ -n "${UA_TEST_FOLDER:-}" ]; then
+        g="$UA_TEST_FOLDER"; echo "folder picker (test run): a folder was chosen"
+    else
+        [ -n "${UA_NOTICE_AUTO:-}" ] && { echo "folder picker (test run: skipped)"; exit 0; }
+        g="$(/usr/bin/osascript -e 'POSIX path of (choose folder with prompt "Choose your Urban Assault folder (it contains DATA and LEVELS). UA Reforged only reads it.")' 2>/dev/null)" || return 1
+    fi
     g="${g%/}"
     if is_game_dir "$g"; then GAME="$g"; return 0; fi
+    [ -n "${UA_TEST_FOLDER:-}" ] && { echo "folder picker (test run): not a game folder"; return 1; }
     ask "That folder has no DATA and LEVELS folders. Pick the folder of your Urban Assault install." "OK" "OK" >/dev/null
     return 1
 }

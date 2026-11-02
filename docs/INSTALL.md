@@ -1,9 +1,10 @@
 # Installing and playing UA Reforged
 
 UA Reforged is free. It needs **the original Urban Assault game files** (the folders `DATA` and `LEVELS`).
-They belong to Microsoft, so we never host or ship them. Use your own retail CD install, or let the app fetch
-the community **OpenUA Standalone Package** (the full game plus the Metropolis Dawn add-on, about 445 MB) from
-the Metropolis Dawn community's own server. More in [GAME-DATA.md](GAME-DATA.md).
+They belong to Microsoft, so we never host or ship them. The app fetches the free community **OpenUA Standalone
+Package** (the full game plus the Metropolis Dawn add-on, 445 MB) for you, straight from the Metropolis Dawn
+community's own server. Already have the game (your retail CD install)? Choose its folder instead. More in
+[GAME-DATA.md](GAME-DATA.md). Every download and disk size: [SIZES.md](SIZES.md).
 
 Downloads and checksums: **[uareforged.pages.dev/downloads](https://uareforged.pages.dev/downloads/)** and the
 [GitHub releases](https://github.com/ameliaaura/uareforged/releases).
@@ -23,29 +24,39 @@ Downloads and checksums: **[uareforged.pages.dev/downloads](https://uareforged.p
 
 **Needs** an Apple Silicon Mac (M1 or later) with macOS 11 or newer. Intel Macs are not supported.
 
-1. **Download** `UA-Reforged-<version>-macOS-arm64.zip`, unzip it and drag **UA Reforged.app** into *Applications*.
-2. **Open it the first time.** The app is not notarised by Apple, so macOS asks once: Control-click
-   (or right-click) *UA Reforged*, choose **Open**, then **Open** again. On macOS 15 and later you may need
-   *System Settings > Privacy & Security*, scroll down to "UA Reforged was blocked" and click **Open Anyway**.
-3. **Game files.** Choose **I have the game - choose folder** and pick the folder that holds `DATA` and
-   `LEVELS`, or **Get the game** to download the community package.
-4. **The new look.** Say **Download** when the app offers the Reforge pack (see [below](#the-reforge-pack)).
-5. Pick a preset in *Options > Graphics* and play.
+1. **Download** `UA-Reforged-<version>-macOS-arm64.zip` (14 MB), unzip it and drag **UA Reforged.app** into
+   *Applications*.
+2. **Open it the first time.** The app is not notarised by Apple, so macOS blocks the first start once:
+   1. Open *UA Reforged*. macOS says it was blocked: click **Done**.
+   2. Open *System Settings > Privacy & Security* and scroll down to *Security*: "UA Reforged was blocked to
+      protect your Mac". Click **Open Anyway**.
+   3. Click **Open Anyway** again and confirm with Touch ID or your password.
+
+   This needs an administrator: on a standard (non-admin) account macOS asks for an administrator's name and
+   password. You only do it once. (On macOS 14 and older, Control-click > **Open** also works; on macOS 15 and
+   newer it does not.)
+3. **Set up everything.** The first start shows one dialog: click **Set up everything**. The app downloads the
+   game (445 MB, from the Metropolis Dawn community) and the [Reforge pack](#the-reforge-pack) (1.6 GB) in one
+   progress window. Already have the game? Click **I already have the game** and choose the folder that holds
+   `DATA` and `LEVELS`. Untick **Include the Reforge pack** to keep the 1998 look for now.
+4. **Play.** Every start shows a small launcher: pick the campaign and click **Play**. Pick a preset in
+   *Options > Graphics*.
 
 ## Windows
 
 **Needs** Windows 10 (version 1803 or newer) or Windows 11, 64-bit, and a graphics card with OpenGL 4.1 and a
 current driver.
 
-1. **Download** `UA-Reforged-<version>-Windows-Setup.exe` and run it. It is not code-signed, so SmartScreen may
-   say *Windows protected your PC*: click **More info**, then **Run anyway**.
-   It installs for your account only (no administrator rights), into `%LOCALAPPDATA%\Programs\UA Reforged`,
-   with a Start menu entry. Prefer no installer? The `-Windows-x64.zip` has the same files: unzip it anywhere
-   and start `UA Reforged.exe`.
-2. **Game files.** Choose **I have the game - choose folder** (the folder with `DATA` and `LEVELS`) or
-   **Get the game**.
-3. **The new look.** Say **Download** when the app offers the Reforge pack.
-4. Pick a preset in *Options > Graphics* and play.
+1. **Download** `UA-Reforged-<version>-Windows-Setup.exe` (60 MB) and run it. It is not code-signed, so
+   SmartScreen may say *Windows protected your PC*: click **More info**, then **Run anyway**.
+   It installs for your account only (no administrator rights), into your Programs folder under AppData, with a
+   Start menu entry. Want it somewhere else? The `-Windows-x64.zip` has the same files: unzip it anywhere and
+   start `UA Reforged.exe`.
+2. **Set up everything.** The first start shows one dialog: click **Set up everything** (the game, 445 MB, and
+   the Reforge pack, 1.6 GB, in one progress window), or **I already have the game** to choose your folder.
+   Untick **Include the Reforge pack** to keep the 1998 look for now.
+3. **Play.** Every start shows a small launcher: pick the campaign and click **Play**. Pick a preset in
+   *Options > Graphics*.
 
 ## Meta Quest 3
 
@@ -64,9 +75,10 @@ untested. Quest 2 and Quest Pro are untested.
 2. **Connect it.** Plug the headset into your computer, put it on and choose **Allow** for USB debugging
    (tick *Always allow from this computer*).
 3. **Install the app.** Pick one:
-   - **The easy way: from UA Reforged on your computer.** Start the desktop app with the headset plugged in;
-     it offers **Install on my Quest**. Any time later: hold **Option** while opening the app on a Mac, or use
-     the Start menu shortcut **Install UA Reforged VR on my Quest** on Windows. The app downloads and checks the
+   - **The easy way: from UA Reforged on your computer.** Start the desktop app and click **Install on my
+     Quest**: it is on the first-start dialog and on the launcher every start, and the app offers it by itself
+     when it sees a headset. Your computer does not need the game for this. On Windows the Start menu shortcut
+     **Install UA Reforged VR on my Quest** does the same. The app downloads and checks the
      VR app and, the first time, Google's Android platform tools (adb), installs or updates the app, and can
      copy your game files to the headset. Nothing else on the headset changes. On Windows you may need Meta's
      [Oculus ADB Drivers](https://developers.meta.com/horizon/downloads/package/oculus-adb-drivers/).
@@ -91,13 +103,14 @@ Step-by-step with pictures: the site's [Quest guide](https://uareforged.pages.de
 The pack is the new look: rebuilt units and host stations, buildings, skies, HD textures, restored videos, sharp
 menus and the detailed floor. It is optional; without it the game keeps its 1998 look.
 
-- **Desktop:** on first start (after the game folder) the app offers to download it, about 1.6 GB in two parts
-  and 2.4 GB on disk. It checks every part's SHA-256, sets the pack up (about 30 seconds) and starts the game.
-  Cancelling is fine; the next start resumes. *Don't ask again* stops the offer; delete the file
-  `reforge-pack-offer-off` in the app's data folder to get it back.
+- **Desktop:** *Set up everything* on first start includes it: 1.6 GB in two parts, 2.4 GB on disk (about
+  4.5 GB free while it installs). It checks every part's SHA-256, sets the pack up (about 30 seconds) and starts
+  the game. Cancelling is fine; the next start resumes. Skipped it? The launcher shows **Get the Reforge pack**
+  while none is installed.
 - **By hand:** download the parts from the Downloads page and unzip them into the app's data folder so that
   `reforge-pack/hd-models/` exists. The next start finishes the setup.
-- **Quest:** the headset downloads its own version of the pack (textures made for the Quest's GPU).
+- **Quest:** the headset downloads its own version of the pack, the Reforge pack for Quest (712 MB, textures made
+  for the Quest's GPU).
 
 The pack has its own licence (see the [README](../README.md#licences)).
 
@@ -123,7 +136,7 @@ The app only **reads** your game folder; it never changes it. To choose a differ
 - **macOS:** move *UA Reforged.app* to the Bin. To remove the downloaded game, pack and saves too, delete
   `~/Library/Application Support/UA Reforged/`.
 - **Windows:** *Settings > Apps > UA Reforged > Uninstall* (or *Uninstall UA Reforged* in the Start menu). It
-  asks whether to delete `%LOCALAPPDATA%\UA Reforged` as well. Your own game folder is never touched.
+  asks whether to delete UA Reforged's data folder (`%LOCALAPPDATA%\UA Reforged`) as well. Your own game folder is never touched.
 - **Quest:** *App Library > Unknown Sources > UA Reforged VR > … > Uninstall*. This also removes the downloaded
   game and pack from the headset.
 
@@ -133,6 +146,8 @@ The app only **reads** your game folder; it never changes it. To choose a differ
   holds `DATA` and `LEVELS` directly: not the zip, not a folder above it, not `DATA` itself.
 - **A download broke:** the app says what went wrong, cleans up and offers the help page. Try again later, or
   choose a folder instead.
+- **The game stopped:** the notice has a **Show log in Finder** / **Show log in Explorer** button that opens the
+  folder with the log file.
 - **Logs** (attach them to a [bug report](https://github.com/ameliaaura/uareforged/issues/new/choose)):
   - macOS: `~/Library/Application Support/UA Reforged/launcher.log` and `…/game/ENV/ypa_log.txt`
   - Windows: `%LOCALAPPDATA%\UA Reforged\launcher.log`, `engine.log` and `game\ENV\ypa_log.txt`

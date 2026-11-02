@@ -180,7 +180,7 @@ build_app() {
     cp "$PKGDIR/launcher.sh" "$C/MacOS/$APPNAME"; chmod 755 "$C/MacOS/$APPNAME"
     # "Get the game" + one-click Reforge pack download: the code, its progress window, the links.json check and
     # the addresses + pack checksum list
-    cp "$PKGDIR/downloads.sh" "$PKGDIR/downloads.txt" "$PKGDIR/progress.js" "$PKGDIR/links.js" "$PKGDIR/quest.sh" "$R/"
+    cp "$PKGDIR/downloads.sh" "$PKGDIR/downloads.txt" "$PKGDIR/progress.js" "$PKGDIR/dialog.js" "$PKGDIR/links.js" "$PKGDIR/quest.sh" "$R/"
     sed -e "s/@VERSION@/$VERSION/" -e "s/@BUILD@/$VERSION/" -e "s/@MINOS@/$MINOS/" "$PKGDIR/Info.plist.in" > "$C/Info.plist"
     cp "$PKGDIR/AppIcon.icns" "$R/AppIcon.icns"
     mkdir -p "$R/licenses"

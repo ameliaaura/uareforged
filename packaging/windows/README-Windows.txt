@@ -4,8 +4,9 @@ UA REFORGED - for Windows 10 (version 1803 or newer) and Windows 11, 64-bit
 The 1998 game Urban Assault on the open-source OpenUA engine, with modern
 graphics. Unofficial, free, non-commercial fan project.
 
-YOU NEED YOUR OWN COPY OF URBAN ASSAULT. This download contains no game
-files at all. See "Your game files" below.
+YOU NEED THE ORIGINAL GAME FILES. This download contains no game files at
+all: on first start the app fetches the free community game package for you,
+or uses your own copy. See "Your game files" below.
 
 
 INSTALLING
@@ -14,33 +15,33 @@ INSTALLING
    It is not signed, so Windows SmartScreen may say "Windows protected your
    PC". Click "More info", then "Run anyway".
 2. The installer puts UA Reforged in your own account (no administrator
-   rights needed), by default in
-       %LOCALAPPDATA%\Programs\UA Reforged
-   with "UA Reforged" in the Start menu (and on the desktop if you keep that
-   box ticked). Uninstall it from Settings > Apps, or with "Uninstall UA
-   Reforged" in the Start menu.
-   No installer? The zip has the same files: unzip it anywhere and start
-   "UA Reforged.exe".
-3. On first start choose "I have the game - choose folder" and pick the
-   folder that contains DATA and LEVELS, or "Get the game" (see below).
-   UA Reforged only reads that folder; your saves and settings are copied to
-       %LOCALAPPDATA%\UA Reforged\game\
-   and the game writes only there.
+   rights needed, in your Programs folder under AppData), with "UA Reforged"
+   in the Start menu (and on the desktop if you keep that box ticked).
+   Uninstall it from Settings > Apps, or with "Uninstall UA Reforged" in the
+   Start menu.
+   Want it somewhere else? The zip has the same files: unzip it anywhere and
+   start "UA Reforged.exe".
+3. Set up UA Reforged. The first start shows one dialog. Click "Set up
+   everything": the app downloads the game (the free OpenUA Standalone
+   Package, 445 MB, from the Metropolis Dawn community) and the Reforge pack
+   (1.6 GB) and shows one progress window for both. Then pick a campaign and
+   click Play.
+   Already have the game? Click "I already have the game" and choose its
+   folder (the one that contains DATA and LEVELS). Untick "Include the
+   Reforge pack" to keep the 1998 look for now.
+   UA Reforged only reads your game folder; your saves and settings are kept
+   in UA Reforged's own folder (%LOCALAPPDATA%\UA Reforged).
 
 
 YOUR GAME FILES
 ---------------
-Use either:
-- your own retail Urban Assault CD install, or
-- the community "OpenUA Standalone Package" (full game plus the Metropolis
-  Dawn expansion), hosted by the Metropolis Dawn community, not by us.
-Point the app at that folder. Or choose "Get the game" on first start: the
-app downloads the OpenUA Standalone Package (about 445 MB) straight from the
-Metropolis Dawn community's server (hosted by them, not by us; the files are
-Microsoft's) into
-    %LOCALAPPDATA%\UA Reforged\game-original\
-If that link is not working, the app says so and opens the UA Reforged help
-page with other ways to get the game.
+"Set up everything" downloads the community OpenUA Standalone Package (the
+full game plus the Metropolis Dawn expansion, 445 MB) straight from the
+Metropolis Dawn community's server onto your PC. It is hosted by them, not by
+us, and the game files belong to Microsoft. If that link is not working, the
+app says so and opens the UA Reforged help page with other ways to get the
+game. You can also use your own retail Urban Assault CD install with "I
+already have the game".
 To pick a different folder later, delete
     %LOCALAPPDATA%\UA Reforged\game-folder.txt
 
@@ -48,13 +49,12 @@ To pick a different folder later, delete
 THE REFORGE PACK (OPTIONAL)
 ---------------------------
 The new look: remastered units, buildings and skies, HD textures, restored
-videos, sharp menus and the floor pack (a 1.6 GB download, 2.4 GB on disk).
-On first start (after you pick your game folder) the app offers to download
-it: click "Download". The app checks every file, sets the pack up and then
-starts the game with the new look. You can cancel; the next start offers to
-resume. "Not now" or no internet: the game starts with the 1998 look.
-"Don't ask again" stops the offer; to get it back, delete
-    %LOCALAPPDATA%\UA Reforged\reforge-pack-offer-off
+videos, sharp menus and the floor pack (a 1.6 GB download, 2.4 GB on disk;
+it needs about 4.5 GB free while it installs). "Set up everything" includes
+it. The app checks every file and sets the pack up. You can cancel; the next
+start offers to resume. No internet: the game starts with the 1998 look.
+Skipped it? Every start shows a small launcher; while the pack is missing it
+has a "Get the Reforge pack" button.
 Manual install: unzip every pack part into %LOCALAPPDATA%\UA Reforged\ so
 that this folder exists:
     %LOCALAPPDATA%\UA Reforged\reforge-pack\hd-models\
@@ -67,14 +67,24 @@ INSTALL ON MY QUEST (UA REFORGED VR)
 -----------------------------------
 UA Reforged VR is the Meta Quest app. To install it from this PC: turn on
 Developer Mode for the headset (once, in the Meta Horizon phone app), plug the
-headset in with a USB-C cable, and start UA Reforged. It sees the headset and
-offers "Install on my Quest" (or use the Start menu shortcut "Install UA
-Reforged VR on my Quest"). Windows may also need Meta's "Oculus ADB Drivers".
-It downloads the VR app and, the first time, Google's Android platform tools
-(adb) from Google, checks both, installs or updates the app, and can copy your
-game files to the headset so it does not download the game again. Nothing
-else on the headset changes. In the headset: App Library > Unknown Sources >
-UA Reforged VR. Help: https://uareforged.pages.dev/downloads/#quest-computer-h
+headset in with a USB-C cable, start UA Reforged and click "Install on my
+Quest" (on the first-start dialog and on the launcher every start; your PC
+does not need the game for this). The Start menu shortcut "Install UA
+Reforged VR on my Quest" does the same, and the app offers it by itself when
+it sees a headset. Windows may also need Meta's "Oculus ADB Drivers".
+It downloads the VR app (14 MB) and, the first time, Google's Android
+platform tools (adb, 8 MB) from Google, checks both, installs or updates the
+app, and can copy your game files to the headset so it does not download the
+game again. Nothing else on the headset changes. In the headset: App Library
+> Unknown Sources > UA Reforged VR.
+Help: https://uareforged.pages.dev/downloads/#quest-computer-h
+
+
+SIZES
+-----
+Windows installer: 60 MB download, 195 MB installed (the zip: 80 MB). Game:
+445 MB download, 675 MB on disk. Reforge pack: 1.6 GB download, 2.4 GB on
+disk. Full list: https://github.com/ameliaaura/uareforged/blob/main/docs/SIZES.md
 
 
 GRAPHICS

@@ -5,9 +5,10 @@
 # this PC's game files over too, so the headset does not download the game again. Nothing else on the headset is
 # touched: no other app is removed, no setting is changed.
 #
-# How it is offered: when a Meta Quest is plugged in at launch (seen on USB, no tools needed) and it does not have
-# this version yet; the Start menu shortcut "Install UA Reforged VR on my Quest" (-UaQuest); or hold Shift while
-# starting UA Reforged.
+# How it is offered: the "Install on my Quest" button on the first-launch dialog and on the launcher shown at every
+# start (downloads.ps1); the Start menu shortcut "Install UA Reforged VR on my Quest" (-UaQuest); by itself when a
+# Meta Quest is plugged in at launch (seen on USB, no tools needed) and it does not have this version yet; or Shift
+# held while starting UA Reforged.
 #
 # adb: Google's Android SDK Platform-Tools. Google's licence for them does not allow passing them on, so they are
 # not in the installer: on first use the app downloads Google's own zip from dl.google.com (a pinned release,
@@ -103,9 +104,10 @@ function Q-Links {
 function Q-Broken([string]$why) {
     Dl-UiEnd
     Log "quest: broken - $why"
+    Log "notice: UA Reforged VR could not be installed on your headset. What went wrong: $(No-Paths $why)."
     $b = '' + $env:UA_NOTICE_AUTO
     if (-not $b) {
-        $b = Ask ("UA Reforged VR could not be installed on your headset. Nothing on the headset was changed.`r`n`r`nWhat went wrong: $why.") 'Open help page' @('Play on this PC', 'Open help page')
+        $b = Ask ("UA Reforged VR could not be installed on your headset. Nothing on the headset was changed.`r`n`r`nWhat went wrong: $(No-Paths $why).") 'Open help page' @('Play on this PC', 'Open help page')
     }
     if ($b -eq 'help' -or $b -eq 'Open help page') { Open-Help $script:Q_HELP; return 2 }
     return 1
@@ -325,7 +327,7 @@ function Q-OfferCopy {
     elseif ($rc -eq 130) { Log 'quest: game copy cancelled' }
     else {
         Log "quest: game copy failed - $($script:Q_WHY)"
-        if (-not $env:UA_NOTICE_AUTO) { [void](Ask ("The game files could not be copied: $($script:Q_WHY).`r`n`r`nThe VR app is installed. On its first start it offers to download the game instead.") 'OK' @('OK')) }
+        if (-not $env:UA_NOTICE_AUTO) { [void](Ask ("The game files could not be copied: $(No-Paths $script:Q_WHY).`r`n`r`nThe VR app is installed. On its first start it offers to download the game instead.") 'OK' @('OK')) }
     }
 }
 

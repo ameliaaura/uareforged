@@ -16,15 +16,18 @@
 # Optional Reforge pack: %LOCALAPPDATA%\UA Reforged\reforge-pack\ (hd-models\, hd-textures\, hd-fmv\, ui\, ground\).
 # Without it the game draws the 1998 look. The pack stores files that many levels share once; on first launch (and
 # after a pack update) the launcher rebuilds the per-level layout as NTFS hard links (copies where that fails).
-# With no pack installed, the app offers to download it. With no game folder, it offers to fetch the community
-# OpenUA Standalone Package from the Metropolis Dawn community's own server instead of a folder.
-# Both live in downloads.ps1; every address is in downloads.txt (+ the site's links.json).
+# First launch with no game folder: one "Set up UA Reforged" step fetches the community OpenUA Standalone Package (from
+# the Metropolis Dawn community's own server) and the Reforge pack in one go, or uses the player's own folder. Every
+# later start shows a small launcher: the campaign, Play, Install on my Quest, and Get the Reforge pack while none is
+# installed. All of it lives in downloads.ps1; every address is in downloads.txt (+ the site's links.json).
+# Dialogs show no file paths: a player's path holds their account name. launcher.log keeps the paths.
 #
-# Environment (for testing): UA_GAME_DIR=<folder> skips the folder picker, UA_CAMPAIGN=base|ghor|taer skips the
-# campaign picker, UA_DATA_DIR=<folder> uses that folder instead of %LOCALAPPDATA%\UA Reforged.
+# Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup, UA_CAMPAIGN=base|ghor|taer skips the
+# launcher, UA_DATA_DIR=<folder> uses that folder instead of %LOCALAPPDATA%\UA Reforged.
 # Arguments go to the engine. "-UaPurge" (used by the uninstaller) removes %LOCALAPPDATA%\UA Reforged safely.
 # "-UaQuest" (the Start menu shortcut "Install UA Reforged VR on my Quest") runs only "Install on my Quest" (quest.ps1);
-# holding Shift while starting UA Reforged offers it too, and so does a Meta Quest plugged in at launch.
+# the first-launch dialog and the launcher have an "Install on my Quest" button, a Meta Quest plugged in at launch is
+# offered it by itself, and holding Shift while starting UA Reforged still works.
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -60,7 +63,7 @@ if ($args.Count -ge 1 -and $args[0] -eq '-UaPurge') {
     exit 0
 }
 
-try { [void][IO.Directory]::CreateDirectory($RUN) } catch { Fail "Could not create $RUN" }
+try { [void][IO.Directory]::CreateDirectory($RUN) } catch { Log "could not create ${RUN}: $_"; Fail "UA Reforged could not create its data folder. Check that your disk is not full." }
 Log ("=== {0} launch from {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $INST)
 if (-not [IO.File]::Exists($ENGINE)) { Fail "UA Reforged is incomplete (the engine is missing). Please install it again." }
 
@@ -76,13 +79,16 @@ elseif ([IO.File]::Exists($CONF)) { $script:GAME = ([IO.File]::ReadAllText($CONF
 try {
     # the Start menu shortcut: only "Install on my Quest" (the game folder, if any, is offered for copying)
     if ($questOnly) { Quest-Offer $false $true }
-    # no game folder yet: "I have the game - choose folder" or "Get the game"
-    Game-Choose
+    # no game folder yet: "Set up UA Reforged" (the game + the Reforge pack in one step, or your own folder)
+    Setup-First
     $GAME = [IO.Path]::GetFullPath($script:GAME).TrimEnd('\')
     if (-not $env:UA_GAME_DIR) { [IO.File]::WriteAllText($CONF, $GAME + "`r`n") }
     Log "game folder: $GAME"
     # a Meta Quest plugged in (or Shift held): offer to install UA Reforged VR on it
     Quest-Offer $questAsked $false
+    # the launcher: campaign, Play, Install on my Quest, Get the Reforge pack (UA_CAMPAIGN or -env skips it)
+    $campaign = '' + $env:UA_CAMPAIGN
+    if (-not $campaign -and -not ($args -contains '-env')) { $campaign = Play-Menu }
 
     # what the last launch linked: removed and made again, so a changed game folder or pack is picked up
     if ([IO.File]::Exists($LINKED)) {
@@ -104,7 +110,7 @@ try {
                 Get-ChildItem -LiteralPath $dst -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer } |
                     ForEach-Object { if ($_.IsReadOnly) { $_.IsReadOnly = $false } }
                 if ([IO.File]::Exists($dst)) { [IO.File]::SetAttributes($dst, [IO.FileAttributes]::Normal) }
-            } catch { Fail "Could not copy $name from your game folder" }
+            } catch { Log "copy ${name}: $_"; Fail "Could not copy $name from your game folder." }
         }
     }
 
@@ -174,19 +180,13 @@ try {
     [IO.File]::WriteAllLines($LINKED, $made.ToArray())
 } catch {
     Log ("launcher error: {0} at {1}" -f $_, $_.InvocationInfo.PositionMessage)
-    Fail ("UA Reforged could not set up its game folder: {0}`r`n`r`nDetails: {1}" -f $_.Exception.Message, $LOG)
+    $msg = "UA Reforged could not set up its game folder: $(No-Paths $_.Exception.Message)`r`n`r`nThe details are in its log file."
+    Log ('notice: ' + ($msg -replace '\s+', ' '))
+    if ((-not $env:UA_NOTICE_AUTO -and -not $env:UA_DIALOG_SNAP) -and (Ask $msg 'OK' @('Show log in Explorer', 'OK')) -eq 'Show log in Explorer') { Show-InExplorer $LOG }
+    exit 1
 }
 
-$campaign = '' + $env:UA_CAMPAIGN
 $engineArgs = @($args | Where-Object { $_ -ne '-UaQuest' })
-$hasEnvArg = $engineArgs -contains '-env'
-if (-not $campaign -and -not $hasEnvArg) {
-    $choice = ''
-    if ([IO.Directory]::Exists((Join-Path $GAME 'Ghor_env')) -or [IO.Directory]::Exists((Join-Path $RUN 'Ghor_env'))) {
-        $choice = Ask ("Which campaign?`r`n`r`nMetropolis Dawn is the expansion (two campaigns).") 'Urban Assault' @('Metropolis Dawn: Taerkasten', 'Metropolis Dawn: Ghorkov', 'Urban Assault')
-    }
-    if ($choice -like '*Ghorkov*') { $campaign = 'ghor' } elseif ($choice -like '*Taerkasten*') { $campaign = 'taer' } else { $campaign = 'base' }
-}
 if ($campaign -eq 'ghor') { $engineArgs = @('-env', 'Ghor_env') + $engineArgs }
 elseif ($campaign -eq 'taer') { $engineArgs = @('-env', 'Taer_env') + $engineArgs }
 if (-not $campaign) { $campaign = 'from arguments' }
@@ -214,5 +214,12 @@ try { [void]$t1.Wait(5000); [void]$t2.Wait(5000) } catch { }
 $elog.Dispose(); $eerr.Dispose()
 $rc = $p.ExitCode
 Log "engine exit $rc"
-if ($rc -ne 0) { Fail ("The game stopped unexpectedly (code {0}). Details: {1}" -f $rc, (Join-Path $RUN 'ENV\ypa_log.txt')) }
+if ($rc -ne 0) {
+    $msg = "The game stopped unexpectedly (code $rc). Its log file has the details."
+    Log "notice: $msg"
+    $ylog = Join-Path $RUN 'ENV\ypa_log.txt'
+    if ($env:UA_NOTICE_AUTO -or $env:UA_DIALOG_SNAP) { if ($env:UA_NOTICE_AUTO -eq 'help') { Show-InExplorer $ylog } }
+    elseif ((Ask $msg 'OK' @('Show log in Explorer', 'OK')) -eq 'Show log in Explorer') { Show-InExplorer $ylog }
+    exit 1
+}
 exit 0

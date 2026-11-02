@@ -33,8 +33,9 @@ All are behind `#ifdef _WIN32`; other platforms compile exactly as before.
 console window. The script does what `packaging/macos/launcher.sh` does on the Mac:
 - data in `%LOCALAPPDATA%\UA Reforged\` (`game\` is the engine's working folder; the player's game folder is
   linked in with directory junctions and never written to);
-- "I have the game - choose folder" or "Get the game" (the community OpenUA Standalone Package, fetched from the
-  Metropolis Dawn community's server), and the one-click Reforge pack download, in `launcher\downloads.ps1`
+- the first-launch "Set up everything" (the community OpenUA Standalone Package, fetched from the Metropolis Dawn
+  community's server, plus the Reforge pack, in one progress window; or "I already have the game"), the launcher
+  shown at every start (campaign, Play, Install on my Quest, Get the Reforge pack), in `launcher\downloads.ps1`
   (the twin of `packaging/macos/downloads.sh`: the same `downloads.txt`, `links.json` rules and failsafe; it
   uses the `curl.exe` that ships with Windows);
 - the pack's shared files are rebuilt as NTFS hard links (copies where hard links fail).

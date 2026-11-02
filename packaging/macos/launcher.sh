@@ -18,15 +18,20 @@
 # (hd-models/, hd-textures/, hd-fmv/, ui/, ground/ inside it). Without it the game draws the 1998 look.
 # The pack stores files that many levels share once; on first launch (and after a pack update) the
 # launcher runs the pack's install-links.sh, which rebuilds the per-level layout as hard links.
-# With no pack installed, the app offers to download it. With no game folder, it offers to fetch the
-# community OpenUA Standalone Package from the Metropolis Dawn community's own server instead of a folder.
-# Both live in downloads.sh; every address is in Contents/Resources/downloads.txt (+ the site's links.json).
+# First launch with no game folder: one "Set up UA Reforged" step fetches the community OpenUA Standalone Package
+# (from the Metropolis Dawn community's own server) and the Reforge pack in one go, or uses the player's own folder.
+# Every later start shows a small launcher: the campaign, Play, Install on my Quest, and Get the Reforge pack while
+# none is installed. All of it lives in downloads.sh; every address is in Contents/Resources/downloads.txt
+# (+ the site's links.json).
 #
-# "Install on my Quest" (quest.sh): installs UA Reforged VR on a Meta Quest plugged in by USB. Offered when one is
-# plugged in at launch; hold the Option key while opening the app (or pass --quest) to choose it at any time.
+# "Install on my Quest" (quest.sh): installs UA Reforged VR on a Meta Quest plugged in by USB. On the first-launch
+# dialog and the launcher, offered by itself when one is plugged in at launch; the Option key while opening the app
+# (or --quest) still works too.
 #
-# Environment (for testing): UA_GAME_DIR=<folder> skips the folder picker,
-# UA_CAMPAIGN=base|ghor|taer skips the campaign picker. Arguments go to the engine.
+# Dialogs show no file paths: a player's path holds their account name. launcher.log keeps the paths.
+#
+# Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup,
+# UA_CAMPAIGN=base|ghor|taer skips the launcher. Arguments go to the engine.
 
 CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="$CONTENTS/MacOS/UA_source"
@@ -46,7 +51,7 @@ alert() {
 fail() { alert "$1"; exit 1; }
 
 [ "$(uname -m)" = arm64 ] || fail "This build needs a Mac with Apple Silicon (M1 or later). Intel Macs are not supported."
-mkdir -p "$RUN" || fail "Could not create $RUN"
+mkdir -p "$RUN" || fail "UA Reforged could not create its folder in your Library. Check that your disk is not full."
 exec >>"$LOG" 2>&1
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') launch from $CONTENTS"
 
@@ -65,17 +70,20 @@ GAME="${UA_GAME_DIR:-}"
 . "$CONTENTS/Resources/downloads.sh"
 # "Install on my Quest": UA Reforged VR onto a Meta Quest over USB
 . "$CONTENTS/Resources/quest.sh"
-# no game folder yet: "I have the game - choose folder" or "Get the game"
-game_choose
+# no game folder yet: "Set up UA Reforged" (the game + the Reforge pack in one step, or your own folder)
+setup_first
 [ -n "${UA_GAME_DIR:-}" ] || printf '%s\n' "$GAME" > "$CONF"
 echo "game folder: $GAME"
 # a Meta Quest plugged in (or Option held): offer to install UA Reforged VR on it
 quest_offer
+# the launcher: campaign, Play, Install on my Quest, Get the Reforge pack (UA_CAMPAIGN skips it)
+campaign="${UA_CAMPAIGN:-}"
+[ -n "$campaign" ] || play_menu
 
 # writable state: copied once from the player's folder
 for name in $WRITABLE; do
     if [ ! -e "$RUN/$name" ] && [ -e "$GAME/$name" ]; then
-        cp -RH "$GAME/$name" "$RUN/$name" || fail "Could not copy $name from your game folder"
+        cp -RH "$GAME/$name" "$RUN/$name" || fail "Could not copy $name from your game folder."
         chmod -R u+w "$RUN/$name"
     fi
 done
@@ -117,17 +125,6 @@ done
 [ -d "$PACK/ui" ] && export UA_UI_DIR="$PACK/ui/"
 [ -f "$PACK/ground/pack.txt" ] && export UA_R2_GROUND_DIR="$PACK/ground"
 
-campaign="${UA_CAMPAIGN:-}"
-if [ -z "$campaign" ]; then
-    if [ -d "$GAME/Ghor_env" ] || [ -d "$RUN/Ghor_env" ]; then
-        choice="$(/usr/bin/osascript -e 'button returned of (display dialog "Which campaign?" & return & return & "Metropolis Dawn is the expansion (two campaigns)." with title "UA Reforged" buttons {"Metropolis Dawn: Taerkasten", "Metropolis Dawn: Ghorkov", "Urban Assault"} default button "Urban Assault")' 2>/dev/null)"
-    fi
-    case "${choice:-}" in
-        *Ghorkov*) campaign=ghor ;;
-        *Taerkasten*) campaign=taer ;;
-        *) campaign=base ;;
-    esac
-fi
 ENVARGS=()
 case "$campaign" in
     ghor) ENVARGS=(-env Ghor_env) ;;
@@ -137,10 +134,17 @@ esac
 # no network side features in this build
 unset UA_RADIO UA_RADIO_LLM
 
-cd "$RUN" || fail "Could not open $RUN"
+cd "$RUN" || fail "UA Reforged could not open its game folder."
 echo "campaign=$campaign"
 if [ ${#ENVARGS[@]} -gt 0 ]; then "$ENGINE" "${ENVARGS[@]}" "$@"; else "$ENGINE" "$@"; fi
 rc=$?
 echo "engine exit $rc"
-[ $rc -eq 0 ] || fail "The game stopped unexpectedly (code $rc). Details: ~/Library/Application Support/UA Reforged/game/ENV/ypa_log.txt"
+if [ $rc -ne 0 ]; then
+    echo "stopped: the engine exited with code $rc"
+    msg="The game stopped unexpectedly (code $rc). Its log file has the details."
+    echo "notice: $msg"
+    if [ -n "${UA_NOTICE_AUTO:-}" ]; then [ "$UA_NOTICE_AUTO" = help ] && show_in_finder "$RUN/ENV/ypa_log.txt"
+    elif [ "$(ask "$msg" "OK" "Show log in Finder" "OK")" = "Show log in Finder" ]; then show_in_finder "$RUN/ENV/ypa_log.txt"; fi
+    exit 1
+fi
 exit 0

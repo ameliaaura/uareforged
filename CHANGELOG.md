@@ -41,12 +41,18 @@ The first public release of the desktop apps.
   first launch. **Original** draws the game exactly as in 1998.
 - **Reforge pack** support: rebuilt units and host stations, buildings, skies, HD textures, restored videos,
   sharp menus and the floor. The app offers a one-click download on first start and checks every part.
-- **Get the game**: with no game folder yet, the app can fetch the community OpenUA Standalone Package from the
-  Metropolis Dawn community's server. Your own CD install works too.
+- **Set up everything**: with no game folder yet, one dialog and one progress window fetch the community OpenUA
+  Standalone Package (from the Metropolis Dawn community's server) and the Reforge pack. Your own CD install works
+  too (*I already have the game*), and the pack can be skipped.
+- **Launcher** at every start: pick the campaign (the last one is remembered), *Play*, *Install on my Quest*, and
+  *Get the Reforge pack* while none is installed.
 - **Safe downloads**: link check, resume after a dropped connection, size and SHA-256 checks, plain messages
   and a help page when something breaks; nothing is left half set up.
 - **Install on my Quest**: the desktop apps can install or update UA Reforged VR on a Quest over USB, and copy
-  your game files to the headset.
+  your game files to the headset. A button on the first-launch dialog and the launcher; the computer does not
+  need the game for it.
+- Dialogs show no file paths (your account name stays off streams and screenshots); *Show log in Finder* /
+  *Show log in Explorer* where a log helps.
 - Sharp UI text, DualSense and other SDL game controllers.
 
 ### Unchanged on purpose
@@ -54,7 +60,8 @@ The first public release of the desktop apps.
 - Your game folder is only read, never changed.
 
 ### Known limits
-- The Mac app is not notarised: the first start needs *Open Anyway*. The Windows installer is not code-signed:
+- The Mac app is not notarised: the first start needs *System Settings > Privacy & Security > Open Anyway*
+  (an administrator's password). The Windows installer is not code-signed:
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 

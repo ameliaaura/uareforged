@@ -7,6 +7,9 @@ pack_help_url	https://uareforged.pages.dev/downloads/#install-h
 # "Get the game": the OpenUA Standalone Package, fetched straight from the Metropolis Dawn community's own server
 # on the player's Mac (UA Reforged never hosts, mirrors or ships it). No checksum: the package gets updated.
 game_url	https://metropolisdawn.de/filebase/download/5/
+# game_bytes: the package's size as measured on 2026-11-02 (445,036,699 B). Only for the setup dialog and the progress
+# bar; the real size comes from the server (the package can change). Every size: docs/SIZES.md.
+game_bytes	445036699
 game_min_bytes	100000000
 game_max_bytes	5000000000
 allow_host	metropolisdawn.de
@@ -18,10 +21,12 @@ allow_host	dl.google.com
 # allow_host	<the R2 download host, added at release>
 # Reforge pack: url = the folder that holds the parts (PACK-URL-NOT-SET = no download offered; set at release).
 # part = file name, size in bytes, SHA-256. The app refuses a part whose checksum differs.
+# pack_disk_bytes = the installed pack on disk (shared files stored once), for the dialogs (docs/SIZES.md).
 version	0.8.0 (2026-11-01)
 url	https://PACK-URL-NOT-SET/
 part	UA-Reforged-pack-0.8.0-1of2.zip	699598021	afb815b7de26a078097d9ef0fd2190f2434655232f4e903d3e822019b3eca98f
 part	UA-Reforged-pack-0.8.0-2of2.zip	914081357	3854c505647ea9e4939ad55a29a76aea159069eeb081c02be8a9bf767f9bec4c
+pack_disk_bytes	2415853568
 # Install on my Quest (quest.sh): UA Reforged VR, installed from this computer over USB with adb.
 # quest_apk_url = the APK's release address (APK-URL-NOT-SET = not offered for download yet; set at release).
 # quest_apk = file name, size in bytes, SHA-256, Android versionCode, version. The app refuses an APK whose checksum differs.
