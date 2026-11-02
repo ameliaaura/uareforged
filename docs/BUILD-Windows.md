@@ -8,7 +8,10 @@ The Windows build (64-bit, Windows 10 1803+ and 11) is cross-compiled on a Mac:
 
 Output in `build/windows/`: `UA-Reforged-<version>-Windows-Setup.exe` (NSIS, per-user, no administrator
 rights) and `UA-Reforged-<version>-Windows-x64.zip` (the same files), each with a `.sha256`.
-Neither contains game data.
+Neither contains game data. CI runs the same script on every push and pull request
+(`.github/workflows/build.yml`).
+
+A native Windows build environment (MSYS2 on Windows) is not set up yet; contributions welcome.
 
 ## Dependencies
 `packaging/windows/fetch-deps.py` builds a sysroot from MSYS2 `ucrt64` binary packages (SDL2 and its add-ons,
@@ -43,3 +46,7 @@ Test switches (environment): the ones listed in `downloads.ps1`, plus `UA_DATA_D
 Removes the program files, shortcuts and the Add/Remove Programs entry. It asks whether to delete
 `%LOCALAPPDATA%\UA Reforged` too (silent: `Uninstall.exe /S /PURGE`); junctions are removed as links, so the
 player's own game folder is never touched.
+
+## See also
+- [INSTALL.md](INSTALL.md#windows): the player's side (SmartScreen, data folder, logs).
+- [BUILD-quest.md](BUILD-quest.md): the Quest app that *Install on my Quest* puts on the headset.

@@ -1,68 +1,199 @@
-# UA Reforged engine
+<p align="center">
+  <img src="docs/media/banner.webp" alt="UA Reforged: a city level with the rebuilt Resistance host station, remastered skyline and sky" width="100%">
+</p>
 
-A native macOS (Apple Silicon) build of **OpenUA**, the open-source re-implementation of the
-*Urban Assault* (1998) engine, with the **Reforged** visual upgrade: a modern renderer
-(shadows, glow, trails, battle marks, remastered skies and atmosphere, sharp UI text),
-graphics presets with an in-game menu, and a loader for optional high-detail model packs.
+<p align="center">
+  <a href="https://github.com/ameliaaura/uareforged/releases"><img alt="Desktop 0.8.0" src="https://img.shields.io/badge/desktop-0.8.0-2f81f7"></a>
+  <a href="https://github.com/ameliaaura/uareforged/releases"><img alt="Quest 0.9.0" src="https://img.shields.io/badge/Quest-0.9.0-8957e5"></a>
+  <img alt="Platforms: macOS, Windows, Meta Quest 3" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Quest%203-555">
+  <a href="LICENSE"><img alt="Engine licence: GPL-2.0" src="https://img.shields.io/badge/engine-GPL--2.0-3fb950"></a>
+  <a href="https://github.com/ameliaaura/uareforged/actions/workflows/build.yml"><img alt="Build" src="https://github.com/ameliaaura/uareforged/actions/workflows/build.yml/badge.svg"></a>
+</p>
 
-It is the plain 1998 game, modernised in its visuals. It adds no units, levels or factions.
+<p align="center">
+  <b>Urban Assault (1998), remastered.</b> The original game on a modern open-source engine, with a new renderer,<br>
+  rebuilt units and a VR Command Deck. Free, non-commercial, and you bring your own copy of the game.
+</p>
 
-**You need your own copy of Urban Assault.** This repository contains no game data: no
-levels, textures, models, sounds or videos from the original game. Those belong to
-Microsoft. See [docs/GAME-DATA.md](docs/GAME-DATA.md).
+<p align="center">
+  <a href="https://uareforged.pages.dev/downloads/"><b>Download</b></a> ·
+  <a href="docs/INSTALL.md">Install guide</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="https://github.com/ameliaaura/uareforged/discussions">Discussions</a> ·
+  <a href="https://github.com/ameliaaura/uareforged/issues">Issues</a> ·
+  <a href="https://uareforged.pages.dev">Website</a>
+</p>
 
-This is an unofficial, non-commercial fan project. It is not affiliated with or endorsed by
-Microsoft.
+<p align="center">
+  <img src="docs/media/gameplay.gif" alt="Gameplay: the camera circles the host station between the towers of a city level" width="520">
+</p>
 
-## What is in this repository
+## 1998 vs Reforged
 
-| Path | What |
-|---|---|
-| `src/` | The engine (C++17, SDL2, OpenGL). Builds with CMake. |
-| `res/`, `fonts/`, `locale/`, `localexp/` | Engine shaders, the free fonts OpenUA ships, locale tables (from upstream OpenUA) |
-| `packaging/macos/` | Script that builds the third-party libraries, the engine and an unsigned `.app` |
-| `tools/reforge/texc/` | `uatexc`, the DDS (BC1/BC5) encoder used to build model packs |
-| `tools/reforge/marks_atlas.cpp` | Look-dev CLI for the procedural battle-marks atlas |
-| `docs/` | Build notes, how to supply game data, the Reforge settings, the upstream README |
+The same moment in the same level, from the same camera. Left: the **Original** preset, exactly as the game
+looked in 1998. Right: **High** with the Reforge pack: the rebuilt host station, 3D clouds, glow on the beam gate,
+shadows and the remastered city.
 
-## Building on macOS
+![The same scene in the Original preset (left) and the High preset with the Reforge pack (right)](docs/media/before-after.webp)
 
-Short version (Apple Silicon, macOS 11 or later, Xcode command line tools, CMake,
-`pkg-config`):
+## Play in 3 steps
+
+You need the original game files (`DATA` and `LEVELS`). No copy? The app's **Get the game** button fetches the
+community OpenUA Standalone Package from the Metropolis Dawn community's own server. We never host the game.
+
+| | macOS | Windows | Meta Quest 3 |
+|---|---|---|---|
+| **1** | [Download](https://uareforged.pages.dev/downloads/#install-h) the zip, drag *UA Reforged* to Applications | [Download](https://uareforged.pages.dev/downloads/) and run the installer | Turn on [Developer Mode](https://uareforged.pages.dev/downloads/#quest-devmode-h) and plug the headset into your Mac or PC |
+| **2** | First open: Control-click > **Open** (or *Privacy & Security > Open Anyway*) | SmartScreen: **More info > Run anyway** | Start UA Reforged on the computer and choose **[Install on my Quest](https://uareforged.pages.dev/downloads/#quest-computer-h)** |
+| **3** | Choose your game folder or **Get the game**, then say yes to the **Reforge pack** | Choose your game folder or **Get the game**, then say yes to the **Reforge pack** | In the headset: *Unknown Sources > UA Reforged VR*, then **Get the game** and the pack |
+| ▶ | [Install video](https://uareforged.pages.dev/downloads/#video-mac) | [Install video](https://uareforged.pages.dev/downloads/#video-windows) | [Install video](https://uareforged.pages.dev/downloads/#video-quest) |
+
+Full steps, troubleshooting and uninstalling: **[docs/INSTALL.md](docs/INSTALL.md)**.
+
+## Features
+
+- **Reforged renderer**: sun shadows, glow, unit trails, battle marks, remastered skies with 3D clouds, per-level
+  light and haze, lit windows at night and a detailed floor. Drawn by the engine, no pack needed.
+- **Graphics presets**: Original, Low, Medium, High and Ultra in *Options > Graphics*. **Original is the 1998
+  game, unchanged.** A short benchmark on first launch picks one for you.
+- **The Reforge pack**: rebuilt units and host stations, buildings, skies, HD
+  textures, restored videos, sharp menus and the floor. Same sizes and fire points, so gameplay is untouched.
+  One click on first launch; every part is checked against its SHA-256.
+- **UA Reforged VR** for the Meta Quest 3: play from the cockpit, or command from the **VR Command Deck**, the
+  live battlefield as a table-top miniature in your room, then dive into any unit. New Look / Original switch,
+  90 Hz.
+- **Install on my Quest**: plug your headset into your Mac or PC and the desktop app installs or updates the VR
+  app, and can copy your game files across.
+- **Safe first launch**: *Get the game*, resumable downloads, size and checksum checks, plain-language help when a
+  link breaks. Your game folder is only read, never changed.
+- **Sharp UI text**, DualSense and other game controllers, and the Metropolis Dawn campaigns (Ghorkov,
+  Taerkasten) with the expansion data.
+
+<p align="center">
+  <img src="docs/media/screenshot-city.webp" alt="A host station among the towers of a city level at dusk" width="49%">
+  <img src="docs/media/screenshot-field.webp" alt="A host station and units over a field of ruined stones" width="49%">
+</p>
+
+## System requirements
+
+| | Minimum | Notes |
+|---|---|---|
+| **macOS** | Apple Silicon (M1 or later), macOS 11 | Not notarised: *Open Anyway* once. Intel Macs not supported |
+| **Windows** | Windows 10 1803+ or 11, 64-bit, OpenGL 4.1 GPU | Installs per user, no admin rights |
+| **Meta Quest** | Quest 3 | Quest 3S should work (untested). Sideloaded with Developer Mode |
+| **Disk** | the game: about 445 MB download; the Reforge pack: about 1.6 GB download, 2.4 GB installed | The Quest downloads its own, smaller pack |
+| **Game files** | your own *Urban Assault*, or *Get the game* | See [GAME-DATA.md](docs/GAME-DATA.md) |
+
+## FAQ
+
+<details><summary><b>Is this an official Microsoft project?</b></summary>
+
+No. It is an unofficial, non-commercial fan project. Urban Assault and its designs belong to Microsoft. The engine
+underneath is OpenUA, an open-source re-implementation by Marisa-Chan and contributors.
+</details>
+
+<details><summary><b>Is it free?</b></summary>
+
+Yes. Nothing is sold, and nothing will be. Fan projects under Microsoft's Game Content Usage Rules have to stay
+non-commercial, and we're happy with that.
+</details>
+
+<details><summary><b>Do I need the original game?</b></summary>
+
+Yes. Use your own retail CD install, or the community OpenUA Standalone Package (the full game plus the
+Metropolis Dawn add-on, unmodified original files, ready for the OpenUA engine), which the app can fetch for you.
+The game files are Microsoft's and are hosted by the Metropolis Dawn community, not by us; we never host or ship
+them. See the site's [I don't have the game](https://uareforged.pages.dev/downloads/#nogame-h).
+</details>
+
+<details><summary><b>Can I play it exactly like 1998?</b></summary>
+
+Yes: that's the **Original** preset. On the Quest, *Settings > LOOK > Original*.
+</details>
+
+<details><summary><b>Does it change the gameplay?</b></summary>
+
+No. The remastered models swap in at the same size and fire points, and the units, levels and factions are the
+1998 game's.
+</details>
+
+<details><summary><b>Does it include Metropolis Dawn?</b></summary>
+
+The engine runs the Metropolis Dawn campaigns (Ghorkov and Taerkasten), and the Reforge pack includes remastered
+Metropolis Dawn units. You need the expansion data yourself; the community package includes it.
+</details>
+
+<details><summary><b>Why isn't the VR app in the Meta Horizon Store?</b></summary>
+
+It is a free fan project, so you install it yourself with Developer Mode, which Meta offers to everyone. The
+desktop app's *Install on my Quest* does the hard part for you.
+</details>
+
+<details><summary><b>Linux? Intel Macs? Quest 2?</b></summary>
+
+Not supported in this release. The engine has upstream Linux build rules but they are untested with the Reforged
+changes. Help testing is welcome: post in [Discussions](https://github.com/ameliaaura/uareforged/discussions).
+</details>
+
+<details><summary><b>Can I play online?</b></summary>
+
+Between friends over a private network, yes. It can't cross-play with the original 1998 Windows game, and there
+are no public servers.
+</details>
+
+More on the site's [FAQ](https://uareforged.pages.dev/faq/).
+
+## Build from source
 
 ```sh
-packaging/macos/build-mac.sh          # third-party libs -> engine -> "UA Reforged.app"
+packaging/macos/build-mac.sh              # macOS app + zip          docs/BUILD-macOS.md
+packaging/windows/build-windows.sh        # Windows installer + zip  docs/BUILD-Windows.md (cross-built on a Mac)
+packaging/quest/build-quest.sh            # Quest APK                docs/BUILD-quest.md
 ```
 
-Full instructions, including a quick developer build against Homebrew libraries, are in
-[docs/BUILD-macOS.md](docs/BUILD-macOS.md).
+A map of the code: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). How releases are made:
+[docs/RELEASING.md](docs/RELEASING.md). What changed: [CHANGELOG.md](CHANGELOG.md).
 
-## Playing
+## Contributing
 
-1. Build or download `UA Reforged.app`.
-2. Start it. On first launch it asks for your Urban Assault folder (the one that contains
-   `DATA/` and `LEVELS/`). Your folder is only read, never changed. No game yet? Choose
-   *Get the game*: the app fetches the community OpenUA Standalone Package from the Metropolis
-   Dawn community's own server for you (see [docs/GAME-DATA.md](docs/GAME-DATA.md)).
-3. Optional, the new look: with no Reforge pack installed, the app offers to download it
-   (a 1.6 GB download, 2.4 GB on disk, checked against SHA-256 sums shipped in the app) into
-   `~/Library/Application Support/UA Reforged/reforge-pack/`. You can also unzip the pack
-   there yourself. Without it the game keeps its 1998 look. See [docs/REFORGE.md](docs/REFORGE.md).
+Contributions are welcome: bug reports, testing on hardware we don't have, docs, and code. Small fixes can go
+straight to a pull request; for bigger features, please open an issue first. Every commit needs a DCO sign-off
+(`git commit -s`), and **Microsoft game files or anything made from them never go into this repository**.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Graphics presets (Original, Low, Medium, High, Ultra) are in *Options > Graphics*.
-*Original* draws the game as it looked in 1998.
+- Questions and ideas: [Discussions](https://github.com/ameliaaura/uareforged/discussions)
+- Bugs: [Issues](https://github.com/ameliaaura/uareforged/issues/new/choose)
+- Security problems: [SECURITY.md](SECURITY.md) (privately, please)
+- Help: [SUPPORT.md](SUPPORT.md)
+
+## Licences
+
+| What | Licence |
+|---|---|
+| **The engine** (this repository) | [GNU GPL version 2](LICENSE), inherited from OpenUA. Every binary we ship names this repository as its source |
+| **The Reforge pack**, Part A: our own work (new models, skies, effects, trails, floor materials) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), credit "Amelia Aura / UA Reforged". The designs they depict stay Microsoft's |
+| **The Reforge pack**, Part B: everything remade from the 1998 game (HD textures and restored videos made from the game's own, rebuilt original models, interface art, floor masks) | Not ours: free, non-commercial fan content under [Microsoft's Game Content Usage Rules](https://www.xbox.com/en-US/developers/rules) |
+| **The game** | *Urban Assault* and all its content belong to Microsoft. You bring it |
+| Fonts and libraries | Their own licences (OFL, IPA, zlib, BSD, LGPL, MIT …); see [CREDITS.md](CREDITS.md) |
+
+The pack's `LICENSE.txt` lists which part every file belongs to. Nobody may sell the pack or bundle it with
+anything sold. Including us.
 
 ## Credits
 
-The engine is the work of the OpenUA authors. See [CREDITS.md](CREDITS.md).
+- **OpenUA (UA_source)** by [Marisa-Chan](https://github.com/Marisa-Chan/UA_source) and contributors: the
+  engine this is built on. Full list in [CREDITS.md](CREDITS.md).
+- **The Metropolis Dawn community** ([metropolisdawn.de](https://metropolisdawn.de)), who kept Urban Assault alive
+  and host the OpenUA Standalone Package.
+- **TerraTools and Microsoft**, who made *Urban Assault* in 1998.
+- Libraries: SDL2 (with SDL_image, SDL_ttf, SDL_net), OpenAL Soft, libogg/libvorbis, FFmpeg (LGPL, decode only),
+  Lua, {fmt}, any-lite, stb, the Khronos OpenXR loader, FreeType; fonts Liberation, Xolonium, Press Start 2P,
+  Textar and Rajdhani.
+- The Reforged changes, the pack and the VR app: Amelia Aura.
 
-- **OpenUA / UA_source** by Marisa-Chan and contributors: https://github.com/Marisa-Chan/UA_source
-- macOS fixes by Paul W. Rankin
-- *Urban Assault* (1998) was developed by TerraTools and published by Microsoft.
-- The Reforged changes: Amelia Aura.
+---
 
-## Licence
-
-GNU General Public License, version 2 ([LICENSE](LICENSE)), the same terms as upstream
-OpenUA. Bundled fonts and libraries keep their own licences; see [CREDITS.md](CREDITS.md).
-If you distribute a binary built from this code, you must also offer this source.
+<sub>UA Reforged is an unofficial fan project. It is not affiliated with, endorsed, sponsored or approved by
+Microsoft. UA Reforged was created under Microsoft's
+"[Game Content Usage Rules](https://www.xbox.com/en-US/developers/rules)" using assets from Urban Assault, and it
+is not endorsed by or affiliated with Microsoft.</sub>

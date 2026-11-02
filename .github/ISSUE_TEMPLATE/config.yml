@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/ameliaaura/uareforged/discussions/categories/q-a
+    about: Ask in Discussions. Install, setup and "is this normal?" questions get answered there.
+  - name: Idea or wish
+    url: https://github.com/ameliaaura/uareforged/discussions/categories/ideas
+    about: Share it in Discussions first; clear, agreed ideas become feature requests.
+  - name: Install guide and FAQ
+    url: https://uareforged.pages.dev/downloads/
+    about: Step-by-step install for Mac, Windows and Meta Quest, plus "I don't have the game".
+  - name: Security problem
+    url: https://github.com/ameliaaura/uareforged/security/advisories/new
+    about: Please report security problems privately, not as an issue.

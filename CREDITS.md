@@ -53,3 +53,8 @@ the app at `Contents/Resources/licenses/`.
 | FFmpeg (decode-only build, no GPL or non-free parts) | LGPL 2.1 or later |
 | Lua 5.5 (linked statically) | MIT |
 | OpenAL (Apple system framework) | system |
+
+## Contributors
+
+Everyone whose pull request is merged is listed in the release notes of the version that includes it, and in
+the repository's contributor graph. Thank you.

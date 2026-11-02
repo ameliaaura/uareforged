@@ -1,0 +1,88 @@
+# Builds the desktop apps with the same scripts a release uses.
+#   macOS:   packaging/macos/build-mac.sh        (Apple Silicon app + zip)
+#   Windows: packaging/windows/build-windows.sh  (cross-built on macOS with mingw-w64: installer + zip)
+# The third-party libraries are cached between runs; a cold run builds them from source and takes longer.
+# No game data is used or needed: these jobs only check that everything compiles and packages.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: brew install cmake pkg-config
+
+      - name: Cache third-party libraries
+        uses: actions/cache@v4
+        with:
+          path: build/macos/deps
+          key: mac-deps-${{ hashFiles('packaging/macos/build-mac.sh') }}
+
+      - name: Build app and zip
+        run: packaging/macos/build-mac.sh
+
+      - name: Check the app
+        run: |
+          codesign --verify --deep --strict "build/macos/UA Reforged.app"
+          ls -l build/macos/*.zip
+          cat build/macos/*.zip.sha256
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: UA-Reforged-macOS-arm64
+          path: |
+            build/macos/*.zip
+            build/macos/*.zip.sha256
+          retention-days: 14
+
+  windows:
+    name: Windows (x64)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: brew install mingw-w64 makensis cmake
+
+      - name: Cache dependency sysroot
+        uses: actions/cache@v4
+        with:
+          path: build/windows/deps
+          key: win-deps-${{ hashFiles('packaging/windows/fetch-deps.py') }}
+
+      - name: Build installer and zip
+        run: packaging/windows/build-windows.sh all
+
+      - name: Check the output
+        run: |
+          ls -l build/windows/*.exe build/windows/*.zip
+          cat build/windows/*.sha256
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: UA-Reforged-Windows-x64
+          path: |
+            build/windows/*.exe
+            build/windows/*.zip
+            build/windows/*.sha256
+          retention-days: 14

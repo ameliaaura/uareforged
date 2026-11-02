@@ -1,0 +1,124 @@
+name: Bug report
+description: Something in UA Reforged is broken, crashes or looks wrong.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please check the [FAQ](https://uareforged.pages.dev/faq/)
+        and the [open issues](https://github.com/ameliaaura/uareforged/issues) first.
+        **Please don't attach Urban Assault game files** (they are Microsoft's); describe the level instead.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - Windows
+        - Meta Quest 3
+        - Meta Quest 3S
+        - Other (say below)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: UA Reforged version
+      description: |
+        Desktop: the corner of the main menu ("UA Reforged 0.8 (OpenUA)") or the download's file name. Quest: *App Library > Unknown Sources*, the app's details.
+      placeholder: "0.8.0"
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: Computer or headset
+      description: OS version and hardware, for example "macOS 15.3, M2, 16 GB" or "Windows 11, RTX 3070" or "Quest 3, Horizon OS v77".
+    validations:
+      required: true
+
+  - type: dropdown
+    id: preset
+    attributes:
+      label: Graphics preset (desktop) or LOOK (Quest)
+      options:
+        - Original
+        - Low
+        - Medium
+        - High
+        - Ultra
+        - New Look (Quest)
+        - Original (Quest)
+        - Not in the game yet (install, download or first launch)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gamedata
+    attributes:
+      label: Game files
+      options:
+        - '"Get the game" in the app (OpenUA Standalone Package)'
+        - OpenUA Standalone Package, downloaded myself
+        - My own retail CD install
+        - Something else (say below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pack
+    attributes:
+      label: Reforge pack
+      options:
+        - Installed by the app
+        - Installed by hand
+        - Not installed
+        - Don't know
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect instead? Screenshots or a short video help a lot.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Which level, which unit, what you did. "Every time" or "once in a while"?
+      placeholder: |
+        1. Start level 3 (campaign)
+        2. Take over a tank
+        3. Drive up the ramp near the host station
+        4. The tank gets stuck
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log file
+      description: |
+        Drag the log file here, or paste the last 50 lines. Where to find it:
+        - **macOS**: `~/Library/Application Support/UA Reforged/launcher.log` (in Finder: *Go > Go to Folder…*) and `…/UA Reforged/game/ENV/ypa_log.txt`
+        - **Windows**: `%LOCALAPPDATA%\UA Reforged\launcher.log`, `engine.log` and `engine-err.log` (paste the path into the Explorer address bar)
+        - **Quest**: with the headset on USB, `adb logcat -d -s UAVR > uavr.txt`
+        Logs can contain your user name in folder paths; remove it if you like.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues and this is not already reported.
+          required: true
+        - label: I did not attach any Urban Assault game files.
+          required: true
