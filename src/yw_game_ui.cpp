@@ -95,6 +95,7 @@ enum VRSetRow
     VRS_QUICKST, VRS_PANELS, VRS_PANELRESET, //
     VRS_MORE, VRS_RESTORE, VRS_BACK, VRS_BACK2,
     VRS_LOOK, // New Look app: LOOK: NEW LOOK / ORIGINAL (graphics preset VR / VR CLASSIC)
+    VRS_HDR_PRIVACY, VRS_STATS, // SEND ANONYMOUS USAGE STATS: ON / OFF (docs/usage-stats.md)
     VRS_COUNT
 };
 static const int kVRPage1[] = {
@@ -108,12 +109,9 @@ static const int kVRPage1[] = {
 static const int kVRPage2[] = {
     VRS_HDR_CONTROLS, VRS_GRIPS, VRS_BOARD, VRS_CARD,
     VRS_FIELDORD, VRS_WRISTSQ, VRS_SQWHEEL, VRS_MAPSIZE, VRS_DIRRADIO,
-    VRS_QUICKST, VRS_PANELS, VRS_PANELRESET, VRS_BACK2 };
-#ifdef UA_VR_NEWLOOK
-static const int kVRPauseMaxRows = 15; // ids 8 .. 22 (bits fit an int); page 1 is the longest (+ LOOK)
-#else
-static const int kVRPauseMaxRows = 14; // ids 8 .. 21 (bits fit an int); page 1 is the longest
-#endif
+    VRS_QUICKST, VRS_PANELS, VRS_PANELRESET, VRS_HDR_PRIVACY, VRS_STATS, VRS_BACK2 };
+// ids 8 .. 22 (bits fit an int): page 1 with LOOK and page 2 with PRIVACY both have 15 rows
+static const int kVRPauseMaxRows = 15;
 
 static int VRPageRows(int page)
 {
@@ -128,7 +126,8 @@ static int VRPageRow(int page, int pos)
 
 static bool VRPauseHeaderRow(int row)
 {
-    return row == VRS_HDR_MODE || row == VRS_HDR_COMFORT || row == VRS_HDR_VIEW || row == VRS_HDR_CONTROLS;
+    return row == VRS_HDR_MODE || row == VRS_HDR_COMFORT || row == VRS_HDR_VIEW || row == VRS_HDR_CONTROLS ||
+           row == VRS_HDR_PRIVACY;
 }
 
 static bool VRPause()
@@ -223,7 +222,9 @@ static std::string VRSettingsRowLabel(int row)
     case VRS_QUICKST:      return VRControlLabel(1197);
     case VRS_PANELS:       return VRControlLabel(1198);
     case VRS_PANELRESET:   return VRControlLabel(1199);
-    case VRS_MORE:         return "CONTROLS >";
+    case VRS_MORE:         return "CONTROLS, PRIVACY >";
+    case VRS_HDR_PRIVACY:  return "- PRIVACY -";
+    case VRS_STATS:        return yw_UsageStatsCaption();
     case VRS_RESTORE:      return "RESTORE DEFAULTS";
     case VRS_BACK:         return "Back";
     case VRS_BACK2:        return "< Back";
@@ -272,6 +273,10 @@ static void VRPauseSettingClick(NC_STACK_ypaworld *yw, int id)
     case VRS_PANELS:   VR::SetPanelsFree(!VR::PanelsFree()); break;     //
     case VRS_PANELRESET: VR::ResetPanels(); break;                      //
     case VRS_MORE:     VRPauseSetPage(yw, 2); return;
+    case VRS_STATS: // applied at once; kept in usage-stats.txt, not in the profile
+        yw_UsageStatsToggle();
+        fprintf(stderr, "UAVR pause: %s\n", yw_UsageStatsCaption().c_str());
+        return;
     case VRS_BACK2:    VRPauseSetPage(yw, 1); return;
     case VRS_VIGNETTE: VR::CycleComfortVignette(); break;
     case VRS_TURN:     VR::CycleStationTurn(); break;

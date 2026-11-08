@@ -4,9 +4,14 @@ What changed for players in each release. The format follows [Keep a Changelog](
 versions follow [Semantic Versioning](https://semver.org/) loosely (0.x: anything may still change).
 Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
-## [Unreleased]
+## [Unreleased] - 0.8.1 (desktop) / 0.9.1 (Quest)
 
-Nothing yet.
+### Added
+- **Anonymous usage stats, optional and off unless you say yes.** The first start asks once ("Help make UA
+  Reforged better?"; nothing pre-selected, closing it = no); *Options > Send anonymous usage stats* (desktop) and
+  *Pause > Settings > CONTROLS, PRIVACY* (VR) change it any time. When on: a crash report on the next start
+  after a crash, a performance summary after each mission, a few error codes, and a count of app and mission
+  starts. No name, no IP, no files, no personal data. Exactly what is sent: [docs/usage-stats.md](docs/usage-stats.md).
 
 ## [0.9.0] - Quest - not yet released
 

@@ -69,6 +69,9 @@ thumbstick and press A).
   * Pause > Settings > LOOK switches between NEW LOOK and ORIGINAL (it applies at the next level).
   * Pause > Settings > DISPLAY sets the refresh rate (90 Hz by default).
   * Recentre the view: hold the Meta button on the right controller.
+  * Anonymous usage stats: optional, off unless you say yes on the first start. Change it any time in
+    Pause > Settings > CONTROLS, PRIVACY. When on: crash reports, performance summaries, error codes and a
+    usage count; no name, no IP, no files, no personal data. Details: docs/usage-stats.md in the source.
 
 
 Uninstall: App Library > Unknown Sources > UA Reforged VR > ... > Uninstall (this also removes the

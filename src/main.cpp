@@ -51,6 +51,9 @@
 #include "obj3d.h"
 #include "aituning.h"
 #include "gfxsettings.h"
+#include "usage_stats.h"
+#include <atomic>
+#include "version.h"
 
 
 int dword_513638 = 0;
@@ -239,6 +242,124 @@ void AutostartLevelTimeout()
 
 }
 
+// ------------------------------------------------------------------ anonymous usage stats (opt-in)
+// docs/usage-stats.md. Every call is a cheap no-op while the player hasn't said yes.
+#ifndef UA_BUILD_ID
+#define UA_BUILD_ID "dev"
+#endif
+std::string yw_UsageStatsCaption(); // yw_func2.cpp
+void yw_UsageStatsToggle();
+std::atomic<int> g_statsMaterialMapsMissing{0}; // obj3d.cpp: "material map ... not loaded"
+std::atomic<int> g_statsShaderFailures{0};      // gfx.cpp: a shader that did not compile
+std::atomic<int> g_statsAudioFailed{0};         // wrapal.cpp: no audio device
+
+namespace
+{
+uint64_t s_statsFrameLast = 0;
+int s_statsMaterialReported = 0, s_statsShaderReported = 0;
+
+// the Graphics preset as one of the five values the server takes (VR: New Look = high, Original = original;
+// desktop with no preset chosen yet: high with the Reforge pack, else original)
+const char *StatsPreset()
+{
+    GfxSettings::Init();
+    switch ( GfxSettings::GetPreset() )
+    {
+    case GfxSettings::PRESET_ORIGINAL: return "original";
+    case GfxSettings::PRESET_LOW: return "low";
+    case GfxSettings::PRESET_MEDIUM: return "medium";
+    case GfxSettings::PRESET_HIGH: return "high";
+    case GfxSettings::PRESET_ULTRA: return "ultra";
+    case GfxSettings::PRESET_VR: return "high";
+    case GfxSettings::PRESET_VRCLASSIC: return "original";
+    default:
+    {
+        const char *hd = getenv("UA_HDMODELS_DIR");
+        return (hd && hd[0]) ? "high" : "original";
+    }
+    }
+}
+
+// counted problems: reported once (with how many) when they first show up
+void StatsReportCounts(int level)
+{
+    const int mm = g_statsMaterialMapsMissing.load();
+    if ( mm > 0 && !s_statsMaterialReported )
+    {
+        s_statsMaterialReported = mm;
+        UsageStats::Error("material_map_missing", mm, StatsPreset(), level);
+    }
+    const int sh = g_statsShaderFailures.load();
+    if ( sh > 0 && !s_statsShaderReported )
+    {
+        s_statsShaderReported = sh;
+        UsageStats::Error("shader_load_failed", sh, StatsPreset(), level);
+    }
+}
+
+void StatsStart()
+{
+#if defined(__ANDROID__)
+    const char *app = "vr", *platform = "quest";
+#elif defined(__APPLE__)
+    const char *app = "desktop", *platform = "mac";
+#elif defined(_WIN32)
+    const char *app = "desktop", *platform = "windows";
+#else
+    return; // other platforms never send
+#endif
+    UsageStats::Init(std::string(), app, platform, Common::PortVersion, UA_BUILD_ID);
+    UsageStats::SetCrashContext(StatsPreset(), -1);
+    const char *gpu = (const char *)glGetString(GL_RENDERER);
+    UsageStats::Launch(StatsPreset(), gpu ? gpu : "");
+    if ( g_statsAudioFailed.load() )
+        UsageStats::Error("audio_device_failed");
+    StatsReportCounts(-1);
+}
+
+// a mission starts (new, restarted, loaded or network): the level_start event and a fresh perf record
+void StatsLevelBegin(int level)
+{
+    UsageStats::LevelStart(level, StatsPreset());
+    UsageStats::PerfBegin(level);
+    s_statsFrameLast = 0;
+    StatsReportCounts(level);
+}
+
+// a mission ends (quitting = the app is closing during it)
+void StatsLevelEnd(bool quitting)
+{
+    if ( !UsageStats::PerfRunning() )
+        return;
+    int w = GFX::Engine.GetScreenW(), h = GFX::Engine.GetScreenH(), hz = 0;
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+        VR::StatsDisplay(&w, &h, &hz);
+#endif
+    UsageStats::PerfEnd(StatsPreset(), w, h, hz, quitting);
+    UsageStats::SetCrashContext(StatsPreset(), -1);
+}
+
+void StatsGameplayFrame()
+{
+    const uint64_t now = SDL_GetPerformanceCounter();
+    if ( s_statsFrameLast )
+        UsageStats::PerfFrame((now - s_statsFrameLast) * 1000.0 / SDL_GetPerformanceFrequency());
+    s_statsFrameLast = now;
+#ifdef UA_TEST_HOOKS
+    // test builds only: UA_TEST_CRASH=segv|abort crashes 120 frames into the first mission
+    static int crashIn = -1;
+    if ( crashIn < 0 )
+    {
+        const char *c = getenv("UA_TEST_CRASH");
+        crashIn = (c && c[0]) ? 120 : 0;
+    }
+    if ( crashIn > 0 && --crashIn == 0 )
+        UsageStats::TestCrashNow(getenv("UA_TEST_CRASH"));
+#endif
+}
+}
+
 // Graphics benchmark bracket: sound and frame cap off while it runs.
 void BenchBracket(bool on)
 {
@@ -254,6 +375,7 @@ void BenchBracket(bool on)
 int ProcessGameplayFrame()
 {
     FFSelfTest();
+    StatsGameplayFrame();
 
     if ( GfxSettings::BenchRunning() )
     {
@@ -285,6 +407,7 @@ int ProcessGameplayFrame()
     case TLevelInfo::STATE_COMPLETED:
     case TLevelInfo::STATE_ABORTED:
     {
+        StatsLevelEnd(false);
         if ( GfxSettings::BenchRunning() )
         {
             GfxSettings::BenchLevelEnded();
@@ -364,10 +487,13 @@ int ProcessGameplayFrame()
 
     case TLevelInfo::STATE_RESTART:
     {
+        const int restartLevel = levelInfo.LevelID;
+        StatsLevelEnd(false);
         ypaworld->DeleteLevel();
 
         if ( !ypaworld->LoadGame( fmt::sprintf("save:%s/%d.rst", userdata.UserName, levelInfo.LevelID) ) )
             ypa_log_out("Warning, load error\n");
+        StatsLevelBegin(restartLevel);
 
         Input::Engine.QueryInput(&input_states);
     }
@@ -384,10 +510,12 @@ int ProcessGameplayFrame()
 
     case TLevelInfo::STATE_LOAD:
     {
+        StatsLevelEnd(false);
         ypaworld->DeleteLevel();
 
         if ( !ypaworld->LoadGame( fmt::sprintf("save:%s/%d.sgm", userdata.UserName, 0) ) )
             ypa_log_out("Warning, load error\n");
+        StatsLevelBegin(ypaworld->GetLevelInfo().LevelID);
 
         Input::Engine.QueryInput(&input_states);
     }
@@ -610,7 +738,7 @@ int ProcessMenuFrame()
     // Dev aid (graphics settings): UA_SHOW_OPTIONS=1 opens Options after 200
     // menu frames (menu screenshots); =<code>,<code>,... then plays Graphics-row
     // clicks (1142 preset, 1143 feature, 1144 level, 1145 Original, 1146 Skies) one per 30
-    // frames, 1124 = OK, 1125 = Cancel. UA_SHOW_OPTIONS_AFTER=N waits until N
+    // frames, 1124 = OK, 1125 = Cancel, 1240 = SEND ANONYMOUS USAGE STATS. UA_SHOW_OPTIONS_AFTER=N waits until N
     // autostart levels were played (runtime-switch tests); autostart waits for
     // the clicks. Inert unless set.
     static bool optPending = false;
@@ -658,6 +786,11 @@ int ProcessMenuFrame()
                     userdata.sb_0x46aa8c();
                 else if ( code == 1125 )
                     userdata.sub_46A3C0();
+                else if ( code == 1240 ) // SEND ANONYMOUS USAGE STATS
+                {
+                    yw_UsageStatsToggle();
+                    userdata.video_button->SetText(1240, yw_UsageStatsCaption());
+                }
                 optWait = 30;
             }
             else
@@ -709,10 +842,12 @@ int ProcessMenuFrame()
         if ( !ypaworld->ypaworld_func183(&v22) )
         {
             ypa_log_out("Sorry, unable to init this level!\n");
+            UsageStats::Error("level_load_failed", -1, StatsPreset(), v22.lvlID);
 
             ypaworld->DeinitGameShell();
             return 0;
         }
+        StatsLevelBegin(v22.lvlID);
         GameScreenMode = GAME_SCREEN_MODE_GAME;
         Input::Engine.QueryInput(&input_states);
     }
@@ -735,6 +870,7 @@ int ProcessMenuFrame()
             ypaworld->DeinitGameShell();
             return 0;
         }
+        StatsLevelBegin(ypaworld->GetLevelInfo().LevelID);
         GameScreenMode = GAME_SCREEN_MODE_GAME;
         Input::Engine.QueryInput(&input_states);
     }
@@ -758,10 +894,12 @@ int ProcessMenuFrame()
         if ( !ypaworld->ypaworld_func179(&v22) )
         {
             ypa_log_out("Sorry, unable to init this level for network!\n");
+            UsageStats::Error("level_load_failed", -1, StatsPreset(), v22.lvlID);
             ypaworld->DeinitGameShell();
 
             return 0;
         }
+        StatsLevelBegin(v22.lvlID);
 
         GameScreenMode = GAME_SCREEN_MODE_GAME;
         Input::Engine.QueryInput(&input_states);
@@ -1251,6 +1389,9 @@ int main(int argc, char *argv[])
 
     System::IniConf::ReadFromNucleusIni();
 
+    // anonymous usage stats (opt-in): the answer, the crash handler, "launch"
+    StatsStart();
+
     uint32_t ticks = 0;
     
     Gui::Root::Instance.SetHwCompose(true);
@@ -1341,6 +1482,10 @@ int main(int argc, char *argv[])
 
     }
     
+    // quitting: a mission in progress keeps its perf summary for the next start; unsent events too
+    StatsLevelEnd(true);
+    UsageStats::Shutdown();
+
     ypaworld->DeleteNewGuiElements();
     
     sub_4113E8();

@@ -1,4 +1,5 @@
 #include "platform/xr/xr_platform.h"
+#include "usage_stats.h"
 
 #include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>
@@ -399,8 +400,12 @@ void XrPlatform::handleSessionState(XrSessionState s) {
             xrEndSession(session_);
             running_ = false;
             break;
-        case XR_SESSION_STATE_EXITING:
         case XR_SESSION_STATE_LOSS_PENDING:
+            UsageStats::Error("vr_session_lost");  // anonymous usage stats (no-op unless the player said yes)
+            running_ = false;
+            exit_ = true;
+            break;
+        case XR_SESSION_STATE_EXITING:
             running_ = false;
             exit_ = true;
             break;
@@ -418,6 +423,7 @@ void XrPlatform::pollEvents() {
                 break;
             case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
                 LOGW("instance loss pending");
+                UsageStats::Error("vr_session_lost");
                 exit_ = true;
                 break;
             case XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB: {

@@ -30,8 +30,13 @@
 #
 # Dialogs show no file paths: a player's path holds their account name. launcher.log keeps the paths.
 #
+# Anonymous usage stats (docs/usage-stats.md): asked once after the setup ("Help make UA Reforged better?",
+# consent.js); off unless the player says yes; Options in the game changes it. The answer lives in
+# usage-stats.txt next to launcher.log; the game (UA_SETTINGS_DIR) does the sending.
+#
 # Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup,
-# UA_CAMPAIGN=base|ghor|taer skips the launcher. Arguments go to the engine.
+# UA_CAMPAIGN=base|ghor|taer skips the launcher (and, without UA_STATS_AUTO, the stats question). Arguments go to
+# the engine.
 
 CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="$CONTENTS/MacOS/UA_source"
@@ -74,6 +79,9 @@ GAME="${UA_GAME_DIR:-}"
 setup_first
 [ -n "${UA_GAME_DIR:-}" ] || printf '%s\n' "$GAME" > "$CONF"
 echo "game folder: $GAME"
+# anonymous usage stats: asked once (off unless the player says yes); the game reads the answer from here
+stats_ask
+export UA_SETTINGS_DIR="$SUPPORT"
 # a Meta Quest plugged in (or Option held): offer to install UA Reforged VR on it
 quest_offer
 # the launcher: campaign, Play, Install on my Quest, Get the Reforge pack (UA_CAMPAIGN skips it)

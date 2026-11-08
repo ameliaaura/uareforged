@@ -140,7 +140,7 @@ $script:SETUP_ON = $false; $script:SETUP_BASE = 0; $script:SETUP_SPAN = 100; $sc
 $script:PACK_ASKED = $false
 $script:L_GAME_URL = ''; $script:L_GAME_MIN = ''; $script:L_GAME_MAX = ''; $script:L_PACK_URL = ''; $script:L_PACK_PARTS = @()
 $script:L_HELP = ''; $script:L_PACK_HELP = ''; $script:L_MESSAGE = ''
-$script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''; $script:DL_WHY = ''
+$script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''; $script:DL_WHY = ''; $script:ST_DETAIL = ''
 
 function Conf([string]$k) {
     if (-not [IO.File]::Exists($script:DL_CONF)) { return }
@@ -173,6 +173,7 @@ function Quote-Arg([string]$a) {
 
 # ---------------------------------------------------------------- dialogs
 $script:SNAP_N = 0
+$script:AskNoFocus = $false   # Stats-Ask: no button has the focus (nothing pre-selected)
 function Snap-Form($form, [string]$what) {
     try {
         $script:SNAP_N++
@@ -241,7 +242,7 @@ function Ask-Ex([string]$heading, [string]$text, [string]$default, [string[]]$bu
         if ($t -eq $default) { $f.AcceptButton = $b; $script:AskDefault = $b }
     }
     $f.Add_KeyDown({ if ($_.KeyCode -eq 'Escape') { $script:AskResult = ''; $this.Close() } })
-    $f.Add_Shown({ $this.Activate(); if ($script:AskDefault) { [void]$script:AskDefault.Focus() } })
+    $f.Add_Shown({ $this.Activate(); if ($script:AskDefault) { [void]$script:AskDefault.Focus() } elseif ($script:AskNoFocus) { $this.ActiveControl = $null } })
     [void]$tbl.Controls.Add($flow, 0, $row)
     [void]$f.Controls.Add($tbl)
     if ($env:UA_DIALOG_SNAP) {
@@ -397,6 +398,7 @@ function Links-Load {
             Log "links: $src accepted"
         } catch {
             Log "links: $src rejected ($($_.Exception.Message)); built-in links used"
+            Stats-Error 'links_json_invalid' ''
         }
     } elseif ($src) {
         Log "links: $src not reachable; built-in links used"
@@ -534,7 +536,7 @@ function Dl-Progress {
 # sets PC_SIZE (0 = unknown), PC_RANGES (1/0); on failure returns $false with PC_WHY in plain words
 function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact = 0, [bool]$quiet = $false) {
     $h = Join-Path $script:DL_DIR 'check.h'; $b = Join-Path $script:DL_DIR 'check.b'
-    $script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''
+    $script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''; $script:ST_DETAIL = ''
     foreach ($x in @($h, $b)) { if ([IO.File]::Exists($x)) { [IO.File]::Delete($x) } }
     if (-not [IO.File]::Exists($script:CURL)) {
         $script:PC_WHY = 'this version of Windows has no curl.exe (Windows 10 version 1803 or newer is needed)'
@@ -546,6 +548,7 @@ function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact 
     $i = $w.IndexOf("`t")
     if ($i -ge 0) { $code = $w.Substring(0, $i); $type = $w.Substring($i + 1).ToLowerInvariant() } else { $code = $w; $type = '' }
     if ($rc -ne 0) {
+        $script:ST_DETAIL = "$rc"
         switch ($rc) {
             6 { $script:PC_WHY = 'the server name could not be found' }
             7 { $script:PC_WHY = 'the server could not be reached' }
@@ -555,7 +558,7 @@ function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact 
         }
         Log "link check: $url -> $($script:PC_WHY)"; return $false
     }
-    if ($code -ne '200' -and $code -ne '206') { $script:PC_WHY = "the server answered HTTP $code instead of the file"; Log "link check: $url -> $($script:PC_WHY)"; return $false }
+    if ($code -ne '200' -and $code -ne '206') { $script:ST_DETAIL = "$code"; $script:PC_WHY = "the server answered HTTP $code instead of the file"; Log "link check: $url -> $($script:PC_WHY)"; return $false }
     if ($type -like 'text/html*' -or $type -like 'application/xhtml*') { $script:PC_WHY = 'the link now leads to a web page, not to the file'; Log "link check: $url -> $($script:PC_WHY) ($type)"; return $false }
     $magic = ''
     try { $fs = [IO.File]::OpenRead($b); $buf = New-Object byte[] 4; $n = $fs.Read($buf, 0, 4); $fs.Dispose(); if ($n -eq 4) { $magic = [BitConverter]::ToString($buf) } } catch { }
@@ -601,6 +604,7 @@ function Dl-Fetch([string]$url, [string]$f) {
         if ($rc -eq 0) { break }
         if ($rc -eq 130) { $script:DL_PROGRESS = $null; return 130 }
         if ($rc -eq 33) { $script:PC_RANGES = 0; if ([IO.File]::Exists($f)) { [IO.File]::Delete($f) } }
+        $script:ST_DETAIL = "$rc"
         switch ($rc) {
             28 { $script:DL_WHY = 'the download stalled (no data for 30 seconds)' }
             { $_ -in 18, 52, 55, 56, 92 } { $script:DL_WHY = 'the connection dropped during the download' }
@@ -726,6 +730,7 @@ function Game-Broken([string]$why) {
     try { Remove-Tree $script:GAME_DL } catch { Log "cleanup: $_" }
     Dl-UiClose
     Log "get the game: broken - $why"
+    Stats-Error 'game_download_failed' $script:ST_DETAIL
     $b = '' + $env:UA_NOTICE_AUTO
     $msg = "The game download link isn't working right now (it's hosted by the Metropolis Dawn community). We'll open the UA Reforged help page with other ways to get it.`r`n`r`nWhat went wrong: $(No-Paths $why)."
     Log ('notice: ' + ($msg -replace '\s+', ' '))
@@ -784,10 +789,12 @@ function Game-Get {
 }
 
 # ======================================================================== Reforge pack
-function Pack-Broken([string]$why) { # explain, offer the help page; the game always starts (1998 look)
+function Pack-Broken([string]$why, [string]$code = 'pack_download_failed', [string]$detail = $script:ST_DETAIL) {
+    # explain, offer the help page; the game always starts (1998 look). $code / $detail: for the usage stats
     try { Remove-Tree $script:PACK_DL } catch { Log "cleanup: $_" }
     Dl-UiClose
     Log "reforge pack: broken - $why"
+    Stats-Error $code $detail
     $b = '' + $env:UA_NOTICE_AUTO
     $msg = "The Reforge pack download isn't working right now. The game starts with its 1998 look; UA Reforged offers the pack again on a later start.`r`n`r`nWhat went wrong: $(No-Paths $why)."
     Log ('notice: ' + ($msg -replace '\s+', ' '))
@@ -808,7 +815,7 @@ function Pack-Parts {
 function Pack-Total { $t = [long]0; foreach ($p in @(Pack-Parts)) { $t += $p.Bytes }; return $t }
 
 function Pack-Download {
-    $total = Pack-Total; $done = [long]0
+    $total = Pack-Total; $done = [long]0; $script:ST_DETAIL = ''; $part = 0
     $script:DL_DIR = $script:PACK_DL
     try { [void][IO.Directory]::CreateDirectory($script:DL_DIR) } catch { return 1 }
     if ((Free-Bytes $SUPPORT) -lt [long]($total * 2.8)) { return (Pack-Broken "there is not enough free disk space (it needs about $(Human ([long]($total * 2.8))))") }
@@ -821,7 +828,7 @@ function Pack-Download {
         if ($script:DL_CANCEL) { Dl-UiClose; return 130 }
     }
     foreach ($p in $parts) {
-        $f = Join-Path $script:DL_DIR $p.Name
+        $f = Join-Path $script:DL_DIR $p.Name; $part++
         if ([IO.File]::Exists($f + '.ok') -and [IO.File]::Exists($f)) { $done += $p.Bytes; continue }
         if ((File-Size $f) -gt $p.Bytes) { [IO.File]::Delete($f) }
         Log "reforge pack: downloading $($script:L_PACK_URL)$($p.Name)"
@@ -835,7 +842,7 @@ function Pack-Download {
         Dl-Status ([int](($done + $p.Bytes) * 90 / $total)) "Checking $($p.Name)..."
         $got = Get-Sha256 $f
         if ($script:DL_CANCEL) { Dl-UiClose; return 130 }
-        if ($got -ne $p.Sum) { return (Pack-Broken "a downloaded part is damaged or not the expected file ($($p.Name))") }
+        if ($got -ne $p.Sum) { return (Pack-Broken "a downloaded part is damaged or not the expected file ($($p.Name))" 'pack_checksum_mismatch' "$part") }
         [IO.File]::WriteAllText($f + '.ok', ''); $done += $p.Bytes
     }
     # 2. unpack next to the download, rebuild the shared files and check them, then move into place
@@ -1062,6 +1069,48 @@ function Game-Pick {
     }
     if (Is-GameDir $g) { $script:GAME = $g; return $true }
     if ($env:UA_TEST_FOLDER) { Log 'folder picker (test run): not a game folder'; return $false }
+    Stats-Error 'game_folder_invalid' ''
     [void](Ask 'That folder has no DATA and LEVELS folders. Pick the folder of your Urban Assault install.' 'OK' @('OK'))
     return $false
+}
+
+# ======================================================================== anonymous usage stats (docs/usage-stats.md)
+# Stats-Ask: the question, once (when usage-stats.txt doesn't exist yet). Nothing is pre-selected: no button has the
+# focus and Enter presses nothing; Esc or closing the window = No. Only the answer is written here; the game makes
+# the random install number and does all the sending. Test runs: UA_STATS_AUTO=yes|no|dismiss answers it;
+# UA_CAMPAIGN without UA_STATS_AUTO skips it; UA_DIALOG_SNAP saves the dialog as a PNG and answers it as dismissed.
+$script:STATS_YES = 'Yes, send anonymous stats'
+$script:STATS_NO = 'No thanks'
+function Stats-Ask {
+    $f = Join-Path $SUPPORT 'usage-stats.txt'
+    if ([IO.File]::Exists($f)) { return }
+    $b = '' + $env:UA_STATS_AUTO
+    if ($b) { Log "usage stats: test answer $b" }
+    elseif ($env:UA_CAMPAIGN) { Log 'usage stats: not asked (test run)'; return }
+    else {
+        $text = "With anonymous usage stats on, UA Reforged sends a crash report if the game crashes and a short performance " +
+                "summary after each mission, so we can find and fix crashes, slowdowns and bugs quickly. It also counts how many people play." +
+                "`r`n`r`nNo name, no IP, no files, no personal data, and it's completely optional. You can change it anytime in Options."
+        $script:AskNoFocus = $true
+        try { $b = (Ask-Ex 'Help make UA Reforged better?' $text '' @($script:STATS_YES, $script:STATS_NO) '' $false '' @() 0).Button }
+        finally { $script:AskNoFocus = $false }
+        if ($env:UA_DIALOG_SNAP) { $b = '' }
+    }
+    $ans = if ($b -eq $script:STATS_YES -or $b -eq 'yes') { 'yes' } else { 'no' }
+    [IO.File]::WriteAllText($f + '.tmp', "# UA Reforged: anonymous usage stats (Options > Send anonymous usage stats)`nanswer = $ans`n")
+    Move-Item -LiteralPath ($f + '.tmp') -Destination $f -Force
+    Log "usage stats: answer $ans ($(if ($b) { $b } else { 'dismissed' }))"
+}
+
+# Stats-Error <code> <number or ''>: a problem the game reports at its next start, only while the player has said yes.
+# One line per problem (a code from the fixed list, a number), nothing else; the game keeps at most 20 events.
+function Stats-Error([string]$code, [string]$detail) {
+    $f = Join-Path $SUPPORT 'usage-stats.txt'
+    try {
+        if (-not [IO.File]::Exists($f) -or -not (@([IO.File]::ReadAllLines($f)) -contains 'answer = yes')) { return }
+        $line = "event=error`tcode=$code"
+        if ($detail -match '^[0-9]{1,9}$') { $line += "`tdetail=$detail" }
+        [IO.File]::AppendAllText((Join-Path $SUPPORT 'usage-stats-queue.txt'), $line + "`n")
+        Log "usage stats: $code kept for the game"
+    } catch { Log "usage stats: $_" }
 }

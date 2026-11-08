@@ -23,6 +23,7 @@
 //   UA_SETUP_EXIT=1   stop after the setup screens instead of starting the game
 //   UA_SETUP=skip     no screens at all when the game is present (benchmarks)
 #include "setup/setup_flow.h"
+#include "usage_stats.h"
 
 #include <android/asset_manager.h>
 #include <android_native_app_glue.h>
@@ -229,7 +230,10 @@ void LoadLinks(Ctx& c, Http& http) {
         }, &r);
         if (ok) {
             if (ApplyLinksJson(body, c.allowLocal, &c.L, &w)) LOGI("setup: links: %s accepted", src.c_str());
-            else LOGI("setup: links: %s rejected (%s); built-in links used", src.c_str(), w.c_str());
+            else {
+                LOGI("setup: links: %s rejected (%s); built-in links used", src.c_str(), w.c_str());
+                UsageStats::Error("links_json_invalid");
+            }
         } else {
             LOGI("setup: links: %s not reachable (%s); built-in links used", src.c_str(), r.errText.c_str());
         }
@@ -579,8 +583,9 @@ class Panel {
 public:
     bool init(android_app* app, XrPlatform& xr);
     void shutdown(XrPlatform& xr);
+    // noFocus: no button has the focus until the player points at one or moves the thumbstick (A does nothing)
     void show(const std::string& title, const std::string& body, const std::vector<std::string>& buttons,
-              double progress = -1, const std::string& status = "");
+              double progress = -1, const std::string& status = "", bool noFocus = false);
     void progress(double f, const std::string& status);
     // One XR frame. Returns the clicked button index, -2 for back (B / Y), -1 for nothing.
     int frame(XrPlatform& xr);
@@ -665,11 +670,11 @@ void Panel::shutdown(XrPlatform&) {
 }
 
 void Panel::show(const std::string& title, const std::string& body, const std::vector<std::string>& buttons,
-                 double progress, const std::string& status) {
+                 double progress, const std::string& status, bool noFocus) {
     title_s_ = title; body_s_ = body; progress_ = progress; status_ = status;
     btn_.clear();
     for (auto& b : buttons) btn_.push_back({b, {}});
-    focus_ = 0;
+    focus_ = noFocus ? -1 : 0;
     hover_[0] = hover_[1] = -1;
     version_++;
 }
@@ -844,10 +849,10 @@ int Panel::frame(XrPlatform& xr) {
     if (std::fabs(sx) < 0.3f) stickLatch_ = 0;
     if (dir && !stickLatch_ && n) {
         stickLatch_ = dir;
-        focus_ = (focus_ + dir + n) % n;
+        focus_ = focus_ < 0 ? (dir > 0 ? 0 : n - 1) : (focus_ + dir + n) % n;
         version_++;
     }
-    if ((in.aPressed || in.xPressed) && n && clicked < 0) clicked = focus_;
+    if ((in.aPressed || in.xPressed) && n && clicked < 0 && focus_ >= 0) clicked = focus_;
     if ((in.bPressed || in.yPressed) && clicked < 0) clicked = -2;
 
     XrCompositionLayerQuad q{XR_TYPE_COMPOSITION_LAYER_QUAD}, c[2] = {{XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}};
@@ -964,7 +969,11 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
         return finish(ok);
     }
 
-    enum class S { Links, Choose, CopyHelp, GameWork, GameBroken, PackOffer, PackWork, PackBroken, PackStopped, Campaign, Start, Quit };
+    enum class S { Links, Choose, CopyHelp, GameWork, GameBroken, PackOffer, PackWork, PackBroken, PackStopped, Stats, Campaign, Start, Quit };
+    // anonymous usage stats (docs/usage-stats.md): asked once, after the downloads, before the campaign;
+    // UA_STATS_AUTO=yes|no|dismiss answers it (tests)
+    const std::string statsAuto = Env("UA_STATS_AUTO");
+    bool statsAsk = !UsageStats::Asked() && !UsageStats::SettingsDir().empty();
     // The site's links.json first (as on the desktop): it can fix a link or set the pack address without a new app.
     // Only needed when something may be downloaded.
     const bool needGame = !GameValid(c.data);
@@ -981,7 +990,10 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
 
     for (;;) {
         PumpEvents(true);
-        if (GetHost()->quitPosted) { w.cancel = true; w.join(); P.shutdown(xr); return finish(false); }
+        if (GetHost()->quitPosted) {
+            if (shown == S::Stats) UsageStats::RecordAnswer(false);  // closed while asked = No
+            w.cancel = true; w.join(); P.shutdown(xr); return finish(false);
+        }
         // pick the next screen
         if (s == S::PackOffer) {
             if (packAsked || PackInstalled(c) || !c.L.packUrlSet() || c.L.questParts.empty() ||
@@ -990,6 +1002,7 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
                 s = S::Campaign;
             }
         }
+        if (s == S::Campaign && statsAsk) s = S::Stats;
         if (s == S::Campaign) {
             const bool md = !FindChild(c.data, "Ghor_env", true).empty() && !FindChild(c.data, "Taer_env", true).empty();
             if (!md || !campaign.empty() || !Env("UA_AUTOSTART_LEVEL").empty()) s = S::Start;
@@ -1062,6 +1075,15 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
                            "The game starts with the 1998 look. Next time UA Reforged offers to resume the download.",
                            {"Start the game"});
                     break;
+                case S::Stats:
+                    P.show("Help make UA Reforged better?",
+                           "With anonymous usage stats on, UA Reforged sends a crash report if the game crashes and a short "
+                           "performance summary after each mission, so we can find and fix crashes, slowdowns and bugs "
+                           "quickly. It also counts how many people play.\n\n"
+                           "No name, no IP, no files, no personal data, and it's completely optional. You can change it "
+                           "anytime in Options (pause menu > Settings > CONTROLS, PRIVACY).",
+                           {"Yes, send anonymous stats", "No thanks"}, -1, "", true);
+                    break;
                 case S::Campaign:
                     P.show("Which campaign?", "Metropolis Dawn is the expansion (two campaigns).",
                            {"Urban Assault", "Metropolis Dawn: Ghorkov", "Metropolis Dawn: Taerkasten"});
@@ -1078,6 +1100,7 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
             click = noticeAuto == "help" ? 0 : 1;
         else if (s == S::PackStopped && !packAuto.empty()) click = 0;
         else if (s == S::CopyHelp && !gameAuto.empty()) click = 2;
+        else if (s == S::Stats && !statsAuto.empty()) click = statsAuto == "yes" ? 0 : 1;  // "no" / "dismiss" (B) = No
 
         int ui = P.frame(xr);
         if (click < 0) click = ui;
@@ -1108,12 +1131,21 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
                 if (s == S::GameWork) {
                     if (rc == 0) { LOGI("SETUP RESULT game ok"); s = S::PackOffer; }
                     else if (rc == 2 || w.cancel) { LOGI("SETUP RESULT game cancelled"); s = gameAuto.empty() ? S::Choose : S::Quit; }
-                    else { LOGI("SETUP RESULT game broken: %s", why.c_str()); s = S::GameBroken; }
+                    else {
+                        LOGI("SETUP RESULT game broken: %s", why.c_str());
+                        UsageStats::Error("game_download_failed");
+                        s = S::GameBroken;
+                    }
                 } else {
                     packAsked = true;
                     if (rc == 0) { LOGI("SETUP RESULT pack ok"); s = S::Campaign; }
                     else if (rc == 2 || w.cancel) { LOGI("SETUP RESULT pack cancelled"); s = S::PackStopped; }
-                    else { LOGI("SETUP RESULT pack broken: %s", why.c_str()); s = S::PackBroken; }
+                    else {
+                        LOGI("SETUP RESULT pack broken: %s", why.c_str());
+                        UsageStats::Error(why.find("not the expected file") != std::string::npos ? "pack_checksum_mismatch"
+                                                                                                  : "pack_download_failed");
+                        s = S::PackBroken;
+                    }
                 }
             }
             continue;
@@ -1130,7 +1162,7 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
             case S::CopyHelp:
                 if (click == 0) {
                     if (GameValid(c.data)) { ExtractEngineAssets(app, c.data, c.setupDir); s = S::PackOffer; }
-                    else { P.progress(-1, ""); P.show("Copy your game files",
+                    else { UsageStats::Error("game_folder_invalid"); P.progress(-1, ""); P.show("Copy your game files",
                            "The game files are not there yet: the folder needs DATA and LEVELS from your Urban Assault "
                            "install.\n\n" + folder, {"Check again", "Open help page", "Back"}); }
                 } else if (click == 1) OpenUrl(app, c.L.helpUrl);
@@ -1163,6 +1195,14 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
                 } else s = S::Campaign;
                 break;
             case S::PackStopped: s = S::Campaign; break;
+            case S::Stats:
+                if (click == 0 || click == 1 || click == -2) {
+                    UsageStats::RecordAnswer(click == 0);  // B / Y (back) = No
+                    LOGI("setup: usage stats: %s", click == 0 ? "yes" : "no");
+                    statsAsk = false;
+                    s = S::Campaign;
+                }
+                break;
             case S::Campaign:
                 if (click == 0) campaign = "base";
                 else if (click == 1) campaign = "ghor";

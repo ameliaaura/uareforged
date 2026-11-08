@@ -25,6 +25,7 @@
 #include "system/inivals.h"
 #include "locale/locale.h"
 #include "version.h"
+#include "usage_stats.h"
 #include "system/radio.h"
 #include "system/perf.h"
 #include "reforge_sky.h"
@@ -4429,6 +4430,18 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                                                                                                                                                                                 btn_64arg.caption = "SKIES: NEW";
                                                                                                                                                                                 btn_64arg.upCode = 1146;
                                                                                                                                                                                 btn_64arg.button_id = 1180;
+                                                                                                                                                                                gfxOk = gfxOk && _GameShell->video_button->Add(&btn_64arg);
+
+                                                                                                                                                                                // Port addition (anonymous usage stats, opt-in): the page's empty
+                                                                                                                                                                                // row 4, full width. Applied at once (not on OK/Cancel): off stops
+                                                                                                                                                                                // sending and deletes the install number. VR: the pause panel's
+                                                                                                                                                                                // Settings > CONTROLS, PRIVACY page has the same switch.
+                                                                                                                                                                                btn_64arg.xpos = 0;
+                                                                                                                                                                                btn_64arg.ypos = 4 * (vertMenuSpace + _fontH);
+                                                                                                                                                                                btn_64arg.width = gx + gw;
+                                                                                                                                                                                btn_64arg.caption = yw_UsageStatsCaption();
+                                                                                                                                                                                btn_64arg.upCode = 1240;
+                                                                                                                                                                                btn_64arg.button_id = 1240;
                                                                                                                                                                                 gfxOk = gfxOk && _GameShell->video_button->Add(&btn_64arg);
 
                                                                                                                                                                                 if ( gfxOk )

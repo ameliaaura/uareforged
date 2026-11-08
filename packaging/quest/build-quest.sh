@@ -62,6 +62,7 @@ PMAP="-ffile-prefix-map=$REPO=. -ffile-prefix-map=$(cd "$REPO" && pwd -P)=. -ffi
     -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-32 -DANDROID_STL=c++_static \
     -DCMAKE_C_FLAGS="$PMAP" -DCMAKE_CXX_FLAGS="$PMAP" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DUAVR_PREFIX="$PREFIX" -DOPENXR_AAR_DIR="$OPENXR_AAR_DIR" \
+    -DUA_BUILD_ID="${UA_BUILD_ID:-dev}" -DUA_TEST_HOOKS="${UA_TEST_HOOKS:-OFF}" \
     > "$OUT/configure.log" 2>&1 || { tail -40 "$OUT/configure.log"; exit 1; }
 "$CMAKE_DIR/cmake" --build "$OUT/cmake" -j "$JOBS"
 

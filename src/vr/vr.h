@@ -341,6 +341,8 @@ int DisplayRateSetting();
 void SetDisplayRateSetting(int hz);
 int NextDisplayRateSetting(int hz); // AUTO -> 72 -> 90 -> 120 -> AUTO
 const char *DisplayRateLabel(int hz);
+// anonymous usage stats (perf event): one eye's image size and the display rate (left as they are when VR is off)
+void StatsDisplay(int *eyeW, int *eyeH, int *hz);
 
 // menu: FPS counter player setting (Settings row
 // "FPS COUNTER", pause panel Settings page, profile ";#!vr_fps"; default off).

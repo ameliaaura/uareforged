@@ -83,6 +83,9 @@ bool yw_PatchInputProfileFile(const std::string &path, NC_STACK_ypaworld *yw);
 // single player, desktop: the in-mission menu (or its confirm box) is open, so the
 // mission is held (NC_STACK_ypaworld::Process)
 bool yw_MenuHoldsMission(NC_STACK_ypaworld *yw);
+// Options: "SEND ANONYMOUS USAGE STATS: ON / OFF" (docs/usage-stats.md); the click flips it at once
+std::string yw_UsageStatsCaption();
+void yw_UsageStatsToggle();
 #ifdef UA_VR_ENABLED
 std::vector<std::string> yw_VRProfileLines();
 // rewrite only the;#!vr_* lines (ywRes != NULL also the resolution lines)

@@ -100,6 +100,14 @@ The launcher writes %LOCALAPPDATA%\UA Reforged\launcher.log, the engine
 %LOCALAPPDATA%\UA Reforged\game\ENV\ypa_log.txt.
 
 
+PRIVACY
+-------
+Anonymous usage stats are optional and off unless you say yes (the first start
+asks once; Options > SEND ANONYMOUS USAGE STATS changes it). When on: crash
+reports, a performance summary after each mission, error codes and a usage
+count. No name, no IP, no files, no personal data. Details:
+https://github.com/ameliaaura/uareforged/blob/main/docs/usage-stats.md
+
 LICENCE
 -------
 Engine: GNU GPL version 2 (LICENSE-engine-GPL-2.0.txt). The matching source

@@ -24,7 +24,8 @@
 # answers the folder picker); UA_PACK_AUTO=yes|no answers the pack offer; UA_NOTICE_AUTO=help|folder|later answers
 # the notices (and opens no browser); UA_PLAY_AUTO=play|quest|pack|quit answers the launcher once (UA_CAMPAIGN skips
 # it); UA_PACK_NOUI=1 shows no progress window; UA_DIALOG_SNAP=<folder> saves each setup/launcher dialog as a PNG
-# there and answers it with its default.
+# there and answers it with its default (the usage stats question: dismissed = no); UA_STATS_AUTO=yes|no|dismiss
+# answers the usage stats question.
 
 DL_CONF="$CONTENTS/Resources/downloads.txt"
 PACK_DL="$SUPPORT/reforge-pack-download"
@@ -104,6 +105,7 @@ links_load() {
             echo "links: $src accepted"
         else
             echo "links: $src rejected (${out##*: }); built-in links used"
+            stats_error links_json_invalid
         fi
     else
         echo "links: $src not reachable; built-in links used"
@@ -157,17 +159,18 @@ dl_progress() {
 # sets PC_SIZE (0 = unknown), PC_RANGES (1/0); on failure returns 1 with PC_WHY in plain words
 dl_precheck() {
     local url="$1" min="${2:-0}" max="${3:-0}" exact="${4:-0}" h="$DL_DIR/check.h" b="$DL_DIR/check.b" w rc code type
-    PC_SIZE=0; PC_RANGES=0; PC_WHY=""
+    PC_SIZE=0; PC_RANGES=0; PC_WHY=""; ST_DETAIL=""
     w="$(/usr/bin/curl -sS -L --max-time 20 --connect-timeout 10 --max-redirs 8 -r 0-1023 -A "$DL_UA" \
          -D "$h" -o "$b" -w '%{http_code}\t%{content_type}' "$url" </dev/null 2>"$DL_DIR/check.err")"; rc=$?
     code="${w%%$'\t'*}"; type="$(printf '%s' "${w#*$'\t'}" | tr 'A-Z' 'a-z')"
     if [ $rc -ne 0 ]; then
+        ST_DETAIL=$rc
         case $rc in 6) PC_WHY="the server name could not be found" ;; 7) PC_WHY="the server could not be reached" ;;
             28) PC_WHY="the server did not answer in time" ;; 35|51|60) PC_WHY="the secure connection failed" ;;
             *) PC_WHY="the connection failed (curl $rc)" ;; esac
         echo "link check: $url -> $PC_WHY"; return 1
     fi
-    case "$code" in 200|206) ;; *) PC_WHY="the server answered HTTP $code instead of the file"; echo "link check: $url -> $PC_WHY"; return 1 ;; esac
+    case "$code" in 200|206) ;; *) ST_DETAIL="$code"; PC_WHY="the server answered HTTP $code instead of the file"; echo "link check: $url -> $PC_WHY"; return 1 ;; esac
     case "$type" in text/html*|application/xhtml*) PC_WHY="the link now leads to a web page, not to the file"; echo "link check: $url -> $PC_WHY ($type)"; return 1 ;; esac
     if [ "$(head -c 4 "$b" | od -An -tx1 | tr -d ' \n')" != "504b0304" ]; then
         PC_WHY="the link does not lead to a zip file"; echo "link check: $url -> $PC_WHY"; return 1
@@ -202,6 +205,7 @@ dl_fetch() {
         [ $rc -eq 0 ] && break
         [ $rc -eq 130 ] && { DL_PROGRESS=""; return 130; }
         [ $rc -eq 33 ] && { PC_RANGES=0; rm -f "$f"; }
+        ST_DETAIL=$rc
         case $rc in
             28) DL_WHY="the download stalled (no data for 30 seconds)" ;;
             18|52|55|56|92) DL_WHY="the connection dropped during the download" ;;
@@ -235,6 +239,7 @@ game_valid() {
 game_broken() {
     rm -rf "$GAME_DL"; dl_ui_close
     echo "get the game: broken - $1"
+    stats_error game_download_failed "${ST_DETAIL:-}"
     local b="${UA_NOTICE_AUTO:-}" msg="The game download link isn't working right now (it's hosted by the Metropolis Dawn community). We'll open the UA Reforged help page with other ways to get it.
 
 What went wrong: $(no_paths "$1")."
@@ -292,9 +297,10 @@ $L_MESSAGE"
 }
 
 # ======================================================================== Reforge pack
-pack_broken() { # explain, offer the help page; the game always starts (1998 look)
+pack_broken() { # explain, offer the help page; the game always starts (1998 look). [code [number]] for the stats
     rm -rf "$PACK_DL"; dl_ui_close
     echo "reforge pack: broken - $1"
+    stats_error "${2:-pack_download_failed}" "${3:-${ST_DETAIL:-}}"
     local b="${UA_NOTICE_AUTO:-}" msg="The Reforge pack download isn't working right now. The game starts with its 1998 look; UA Reforged offers the pack again on a later start.
 
 What went wrong: $(no_paths "$1")."
@@ -307,8 +313,8 @@ What went wrong: $(no_paths "$1")."
 pack_total() { local t=0 n b s; while IFS="$(printf '\t')" read -r n b s; do t=$((t + b)); done <<< "$L_PACK_PARTS"; echo $t; }
 
 pack_download() {
-    local total done_b=0 name bytes sum f got rc
-    total=$(pack_total)
+    local total done_b=0 name bytes sum f got rc part=0
+    total=$(pack_total); ST_DETAIL=""
     DL_DIR="$PACK_DL"; mkdir -p "$DL_DIR" || return 1
     local free_k; free_k=$(df -k "$SUPPORT" | awk 'NR == 2 { print $4 }')
     if [ "$((free_k * 1024))" -lt "$((total * 28 / 10))" ]; then
@@ -321,7 +327,7 @@ pack_download() {
         dl_precheck "$L_PACK_URL$name" 0 0 "$bytes" || { pack_broken "$PC_WHY"; return 1; }
     done <<< "$L_PACK_PARTS"
     while IFS="$(printf '\t')" read -r name bytes sum; do
-        f="$DL_DIR/$name"
+        f="$DL_DIR/$name"; part=$((part + 1))
         if [ -f "$f.ok" ] && [ -f "$f" ]; then done_b=$((done_b + bytes)); continue; fi
         [ "$(stat -f %z "$f" 2>/dev/null || echo 0)" -gt "$bytes" ] && rm -f "$f"
         echo "reforge pack: downloading $L_PACK_URL$name"
@@ -334,7 +340,7 @@ pack_download() {
         fi
         dl_status "$(( (done_b + bytes) * 90 / total ))" "Checking $name..."
         got="$(/usr/bin/shasum -a 256 "$f" | cut -d' ' -f1)"
-        [ "$got" = "$sum" ] || { pack_broken "a downloaded part is damaged or not the expected file ($name)"; return 1; }
+        [ "$got" = "$sum" ] || { pack_broken "a downloaded part is damaged or not the expected file ($name)" pack_checksum_mismatch $part; return 1; }
         : > "$f.ok"; done_b=$((done_b + bytes))
     done <<< "$L_PACK_PARTS"
     # 2. unpack next to the download, rebuild the shared files and check them, then move into place
@@ -574,6 +580,43 @@ game_pick() {
     g="${g%/}"
     if is_game_dir "$g"; then GAME="$g"; return 0; fi
     [ -n "${UA_TEST_FOLDER:-}" ] && { echo "folder picker (test run): not a game folder"; return 1; }
+    stats_error game_folder_invalid
     ask "That folder has no DATA and LEVELS folders. Pick the folder of your Urban Assault install." "OK" "OK" >/dev/null
     return 1
+}
+
+# ======================================================================== anonymous usage stats (docs/usage-stats.md)
+# stats_ask: the question, once (when usage-stats.txt doesn't exist yet). Nothing is pre-selected: Return presses
+# nothing, Esc or closing = No. Only the answer is written here; the game makes the random install number and does
+# all the sending. Test runs: UA_STATS_AUTO=yes|no|dismiss answers it; UA_CAMPAIGN without UA_STATS_AUTO skips it.
+STATS_HEADING="Help make UA Reforged better?"
+STATS_TEXT="With anonymous usage stats on, UA Reforged sends a crash report if the game crashes and a short performance summary after each mission, so we can find and fix crashes, slowdowns and bugs quickly. It also counts how many people play.
+
+No name, no IP, no files, no personal data, and it's completely optional. You can change it anytime in Options."
+STATS_YES="Yes, send anonymous stats"
+STATS_NO="No thanks"
+stats_ask() {
+    local f="$SUPPORT/usage-stats.txt" b ans=no
+    [ -f "$f" ] && return 0
+    b="${UA_STATS_AUTO:-}"
+    if [ -n "$b" ]; then
+        echo "usage stats: test answer $b"
+    elif [ -n "${UA_CAMPAIGN:-}" ]; then
+        echo "usage stats: not asked (test run)"; return 0
+    else
+        b="$(/usr/bin/osascript -l JavaScript "$CONTENTS/Resources/consent.js" "$ICON" "$STATS_HEADING" "$STATS_TEXT" "$STATS_YES" "$STATS_NO" 2>/dev/null </dev/null)"
+    fi
+    case "$b" in "$STATS_YES"|yes) ans=yes ;; esac
+    printf '# UA Reforged: anonymous usage stats (Options > Send anonymous usage stats)\nanswer = %s\n' "$ans" > "$f.tmp" && mv -f "$f.tmp" "$f"
+    echo "usage stats: answer $ans (${b:-dismissed})"
+}
+
+# stats_error <code> [number]: a problem the game reports at its next start, only while the player has said yes.
+# One line per problem (a code from the fixed list, a number), nothing else; the game keeps at most 20 events.
+stats_error() {
+    grep -qx 'answer = yes' "$SUPPORT/usage-stats.txt" 2>/dev/null || return 0
+    local d=""
+    case "${2:-}" in ''|*[!0-9]*) ;; *) d="$(printf '\tdetail=%s' "$2")" ;; esac
+    printf 'event=error\tcode=%s%s\n' "$1" "$d" >> "$SUPPORT/usage-stats-queue.txt"
+    echo "usage stats: $1 kept for the game"
 }

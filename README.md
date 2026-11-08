@@ -145,6 +145,31 @@ are no public servers.
 
 More on the site's [FAQ](https://uareforged.pages.dev/faq/).
 
+## Privacy
+
+The apps send nothing about you. **Anonymous usage stats are optional and off unless you say yes**: the first start
+asks once ("Help make UA Reforged better?", nothing pre-selected; closing it means no), and *Options* has
+**Send anonymous usage stats** on the desktop (*Options*, the button under the settings text) and in VR
+(*Pause > Settings > CONTROLS, PRIVACY*). Turning it off stops sending at once and deletes the app's random
+install number, its unsent queue and any crash file.
+
+When they are on, the app sends small messages to `https://uareforged.pages.dev/api/ping`:
+
+| When | What |
+|---|---|
+| Every message | a random install number made on your device (128 random bits, never from your hardware; a new one each time you turn stats on), desktop or VR, Mac / Windows / Quest, the app version, the graphics preset |
+| App start | the operating system name and version (`macOS 15.2`, `Windows 11 23H2`) and the graphics chip's name (`Apple M2`, `NVIDIA GeForce RTX 3070`) |
+| Mission start | the level number |
+| Mission end | a performance summary: level, render resolution, average fps, 1 % low fps, 95th-percentile frame time, seconds played, frames over 100 ms, the headset's display rate in VR |
+| Next start after a crash | crash type (signal / exception code), app build, the program module's base name and code offsets (up to 32, e.g. `UA_source+0x1a2f40`), level, preset, minutes played |
+| A problem | one code from a fixed list (e.g. `pack_download_failed`, `shader_load_failed`), sometimes one number |
+
+**Never sent:** your name or any account, your IP address (the site doesn't store it), hardware IDs or serial
+numbers, device or user names, file paths or file names from your disk, memory contents, saves, anything you
+typed, your location. No cookies, a fixed `User-Agent: UA-Reforged`. The exact format and every limit:
+[docs/usage-stats.md](docs/usage-stats.md); what the site keeps and for how long:
+[uareforged.pages.dev/privacy](https://uareforged.pages.dev/privacy/#usage-stats).
+
 ## Build from source
 
 ```sh

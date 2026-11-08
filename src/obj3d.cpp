@@ -12,6 +12,9 @@
 #include "system/perf.h"
 #include <cmath>
 #include <algorithm>
+#include <atomic>
+
+extern std::atomic<int> g_statsMaterialMapsMissing; // main.cpp (anonymous usage stats)
 #ifdef _WIN32
 #include "winport.h"
 #define UA_ABSPATH(s) uaIsAbsPath(s)
@@ -946,6 +949,7 @@ ResBitmap *NC_STACK_Obj3D::LoadMap(const std::string &mtlDir, const std::string 
     if (!surf)
     {
         printf("obj3d: material map '%s' not loaded\n", path.c_str());
+        g_statsMaterialMapsMissing++; // anonymous usage stats: counted, never named
         return NULL;
     }
 

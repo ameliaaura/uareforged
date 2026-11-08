@@ -13,6 +13,8 @@
 #include "common/common.h"
 #include "system/sound.h"
 
+extern std::atomic<int> g_statsAudioFailed; // main.cpp (anonymous usage stats)
+
 
 #define WRAP_AL_BUFFS   3
 #define WRAP_AL_BUFFSZ  1024
@@ -257,12 +259,16 @@ waldev::waldev()
         else
         {
             printf("OpenAL: context not created!\n");
+            g_statsAudioFailed = 1; // anonymous usage stats: "audio_device_failed"
             alcCloseDevice(dev);
             dev = NULL;
         }
     }
     else
+    {
         printf("OpenAL: no dev!\n");
+        g_statsAudioFailed = 1; // anonymous usage stats: "audio_device_failed"
+    }
 }
 
 waldev::~waldev()
