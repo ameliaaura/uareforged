@@ -1,6 +1,6 @@
 # Developer Certificate of Origin: every commit in a pull request needs a
 # "Signed-off-by: Name <email>" line that matches its author (git commit -s).
-# See CONTRIBUTING.md#sign-off-dco.
+# See CONTRIBUTING.md#sign-off-dco. Dependabot pull requests are exempt.
 name: DCO
 
 on:
@@ -19,7 +19,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      # Dependabot's commits are made by GitHub's bot and cannot carry a sign-off,
+      # so its pull requests are exempt. The job still runs (and passes), so the
+      # required "DCO sign-off" check is reported on them.
+      - name: Skip bot pull requests
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
+        run: echo "Sign-off is not required on Dependabot pull requests."
+
       - name: Check every commit
+        if: github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
