@@ -63,7 +63,7 @@ ffmpeg-8.1.2|https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz|SKIP
 fetch() { # name url sha -> extracted dir $SRCDIR/name
     local name="$1" url="$2" sha="$3" file="$SRCDIR/${url##*/}"
     mkdir -p "$SRCDIR"
-    [ -f "$file" ] || curl -fsSL -o "$file" "$url"
+    [ -f "$file" ] || curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors --connect-timeout 20 -o "$file" "$url"
     local got; got="$(shasum -a 256 "$file" | awk '{print $1}')"
     if [ "$sha" != SKIP ] && [ "$got" != "$sha" ]; then die "sha256 mismatch for $file: $got"; fi
     echo "$got  ${url##*/}" >> "$SRCDIR/fetched.sha256"
