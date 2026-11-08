@@ -35,7 +35,7 @@ jobs:
           (cd "$RUNNER_TEMP" && ./controller_settings_test)
 
       - name: Cache third-party libraries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/macos/deps
           key: mac-deps-${{ hashFiles('packaging/macos/build-mac.sh') }}
@@ -69,7 +69,7 @@ jobs:
         run: brew install mingw-w64 makensis cmake
 
       - name: Cache dependency sysroot
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/windows/deps
           key: win-deps-${{ hashFiles('packaging/windows/fetch-deps.py') }}
