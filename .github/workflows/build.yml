@@ -50,7 +50,7 @@ jobs:
           cat build/macos/*.zip.sha256
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: UA-Reforged-macOS-arm64
           path: |
@@ -83,7 +83,7 @@ jobs:
           cat build/windows/*.sha256
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: UA-Reforged-Windows-x64
           path: |
