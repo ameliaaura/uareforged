@@ -23,7 +23,7 @@ units of 1,048,576 bytes, so it shows the game package as "424 MB" and the Refor
 
 | What | Download | On the headset | Notes |
 |---|---|---|---|
-| UA Reforged VR (APK) | **14 MB** (14,242,171 bytes) | | Installed from a computer (*Install on my Quest*), SideQuest or adb |
+| UA Reforged VR (APK) | **14 MB** (14,258,555 bytes) | | Installed from a computer (*Install on my Quest*), SideQuest or adb |
 | The game: OpenUA Standalone Package | **445 MB** | 660 MB | Downloaded inside the headset, or copied from the computer |
 | The Reforge pack for Quest | **712 MB** (712,134,306 bytes) | 1.1 GB | The Quest's own pack (textures made for its GPU), not the desktop parts |
 | Together inside the headset | **1.2 GB** | 1.7 GB | Plus room to unpack; keep about 3 GB free |

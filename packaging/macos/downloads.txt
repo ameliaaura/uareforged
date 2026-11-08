@@ -18,12 +18,15 @@ allow_host	metropolisdawn.net
 allow_host	metropolisdawn.org
 allow_host	uareforged.pages.dev
 allow_host	dl.google.com
-# allow_host	<the R2 download host, added at release>
+# The release download host (Cloudflare R2: the Reforge pack parts and the VR app). github.com is allowed so that
+# links.json can point at the GitHub release copies if the R2 address ever has to move.
+allow_host	pub-9574664f67b04217aa2ca93f509638ad.r2.dev
+allow_host	github.com
 # Reforge pack: url = the folder that holds the parts (PACK-URL-NOT-SET = no download offered; set at release).
 # part = file name, size in bytes, SHA-256. The app refuses a part whose checksum differs.
 # pack_disk_bytes = the installed pack on disk (shared files stored once), for the dialogs (docs/SIZES.md).
 version	0.8.0 (2026-11-01)
-url	https://PACK-URL-NOT-SET/
+url	https://pub-9574664f67b04217aa2ca93f509638ad.r2.dev/pack/
 part	UA-Reforged-pack-0.8.0-1of2.zip	699598021	afb815b7de26a078097d9ef0fd2190f2434655232f4e903d3e822019b3eca98f
 part	UA-Reforged-pack-0.8.0-2of2.zip	914081357	3854c505647ea9e4939ad55a29a76aea159069eeb081c02be8a9bf767f9bec4c
 pack_disk_bytes	2415853568
@@ -33,8 +36,8 @@ pack_disk_bytes	2415853568
 quest_package	io.github.ameliaaura.uareforged.vr
 quest_help_url	https://uareforged.pages.dev/downloads/#quest-computer-h
 quest_devmode_url	https://uareforged.pages.dev/downloads/#quest-devmode-h
-quest_apk_url	https://APK-URL-NOT-SET/UA-Reforged-VR-0.9.0-Quest3.apk
-quest_apk	UA-Reforged-VR-0.9.0-Quest3.apk	14242171	6410965ea25cae331632e33a25e7df3ad0be6d483e1c4d12c20470233e0ea9b8	900	0.9.0
+quest_apk_url	https://pub-9574664f67b04217aa2ca93f509638ad.r2.dev/quest/UA-Reforged-VR-0.9.0-Quest3.apk
+quest_apk	UA-Reforged-VR-0.9.0-Quest3.apk	14258555	6ab822abf58c5f87d20144fce3a9adfbfb9b6ed526df560601fa97cc004e364c	900	0.9.0
 # adb: Google's Android SDK Platform-Tools. Google's licence for them does not allow passing them on, so they are not
 # in the app: on first use it downloads Google's own zip (this pinned release, checked by size and SHA-256).
 adb_mac	https://dl.google.com/android/repository/platform-tools_r37.0.1-darwin.zip	16110554	ee39ad5967e95c2a07f04dbcbde96b1a0c916ba376096db5d2f498b7727a5d1d

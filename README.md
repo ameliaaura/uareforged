@@ -44,10 +44,10 @@ Choose its folder instead. We never host or ship Microsoft's game files.
 
 | | macOS | Windows | Meta Quest 3 |
 |---|---|---|---|
-| **1** | [Download](https://uareforged.pages.dev/downloads/#install-h) the zip, drag *UA Reforged* to Applications | [Download](https://uareforged.pages.dev/downloads/) and run the installer | Turn on [Developer Mode](https://uareforged.pages.dev/downloads/#quest-devmode-h) and plug the headset into your Mac or PC |
+| **1** | [Download](https://uareforged.pages.dev/downloads/#install-h) the zip, drag *UA Reforged* to Applications | [Download](https://uareforged.pages.dev/downloads/#install-win-h) and run the installer | Turn on [Developer Mode](https://uareforged.pages.dev/downloads/#quest-devmode-h) and plug the headset into your Mac or PC |
 | **2** | First open: *System Settings > Privacy & Security >* **Open Anyway** (needs an admin password) | SmartScreen: **More info > Run anyway** | Start UA Reforged on the computer and click **[Install on my Quest](https://uareforged.pages.dev/downloads/#quest-computer-h)** |
 | **3** | Click **Set up everything** (the game + the Reforge pack in one step), then **Play** | Click **Set up everything** (the game + the Reforge pack in one step), then **Play** | In the headset: *Unknown Sources > UA Reforged VR*, then **Get the game** and the pack |
-| ▶ | [Install video](https://uareforged.pages.dev/downloads/#video-mac) | [Install video](https://uareforged.pages.dev/downloads/#video-windows) | [Install video](https://uareforged.pages.dev/downloads/#video-quest) |
+| ▶ | [Step by step](docs/INSTALL.md#macos) | [Step by step](docs/INSTALL.md#windows) | [Step by step](docs/INSTALL.md#meta-quest-3) |
 
 Full steps, troubleshooting and uninstalling: **[docs/INSTALL.md](docs/INSTALL.md)**.
 

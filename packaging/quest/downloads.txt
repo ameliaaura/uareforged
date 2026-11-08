@@ -14,12 +14,15 @@ allow_host	metropolisdawn.com
 allow_host	metropolisdawn.net
 allow_host	metropolisdawn.org
 allow_host	uareforged.pages.dev
-# allow_host	<the R2 download host, added at release>
+# The release download host (Cloudflare R2: the Reforge pack parts and the VR app). github.com is allowed so that
+# links.json can point at the GitHub release copies if the R2 address ever has to move.
+allow_host	pub-9574664f67b04217aa2ca93f509638ad.r2.dev
+allow_host	github.com
 # Quest pack: url = the folder that holds it, next to the desktop pack parts (PACK-URL-NOT-SET = no download offered;
 # set at release). One zip with the Reforge pack's files the headset uses (models, menus, ground; no desktop DDS maps,
 # sharp textures or videos) + ASTC textures for the Quest GPU (tools/vr/make_quest_full_pack.py).
 # quest_part = file name, size in bytes, SHA-256. The app refuses a file whose checksum differs. The desktop pack parts
 # (packaging/macos/downloads.txt part lines, links.json pack_parts) are not downloaded on the headset.
 version	0.9.0 (2026-11-02)
-url	https://PACK-URL-NOT-SET/
+url	https://pub-9574664f67b04217aa2ca93f509638ad.r2.dev/pack/
 quest_part	UA-Reforged-Quest-pack-0.9.0.zip	712134306	e2b5447e831dfd75afa0ba1c0b193546e4fa9bce330860fb130faaa52f1dfb78
