@@ -246,6 +246,8 @@ int NC_STACK_ypaworld::LevelCommonLoader(TLevelDescription *mapp, int levelID, i
     _makingWaypointsMode = false;
     _gamePaused = false;
     _gamePausedTimeStamp = 0;
+    _menuHoldActive = false;
+    _menuHoldTimeStamp = 0;
     _joyIgnoreX = 1;
     _joyIgnoreY = 1;
     _joyIgnoreZ = 0;
@@ -4340,6 +4342,22 @@ int ypaworld_func64__sub4(NC_STACK_ypaworld *yw, base_64arg *arg)
             FontUA::set_end(&v10);
 
             GFX::Engine.ProcessDrawSeq(v10);
+        }
+
+        // a game controller is connected: say which of its buttons continues
+        // (any key still does; the pad's other buttons are not keys)
+        if ( Input::Engine.PadThrottleButtons() )
+        {
+            CmdStream v11;
+            v11.reserve(256);
+
+            FontUA::select_tileset(&v11, 15);
+            FontUA::set_xpos(&v11, 0);
+            FontUA::set_center_ypos(&v11, yw->_fontH);
+            FontUA::FormateCenteredSkipableItem(yw->_guiTiles[15], &v11, Locale::Text::Advanced(Locale::ADV_PAUSEPAD), yw->_screenSize.x);
+            FontUA::set_end(&v11);
+
+            GFX::Engine.ProcessDrawSeq(v11);
         }
 
         SFXEngine::SFXe.sb_0x424c74();

@@ -340,6 +340,12 @@ public:
     static void SetEngineRumble(bool on);
     static bool EngineRumble();
 
+    // True while the joystick input comes from an SDL game controller, whose
+    // throttle (R1/L1) is a pair of momentary buttons: released = 0. A joystick's
+    // throttle axis stays wherever it was left, so only the pad's may also drive a
+    // tank in the "stick drives" layout.
+    static bool PadThrottleButtons();
+
     void AddClickBoxFront(ClickBox *box);
     void AddClickBoxBack(ClickBox *box);
     void RemClickBox(ClickBox *box);

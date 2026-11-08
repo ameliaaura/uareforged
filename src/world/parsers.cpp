@@ -178,6 +178,10 @@ bool InputParser::IsScope(ScriptParser::Parser &parser, const std::string &word,
         // whichever profile was loaded before it.
         _o._preferences &= ~World::PREF_ENGINERUMBLE;
         Input::Engine.SetEngineRumble(false);
+
+        // Same for the vertical aim inverts: off (push up = aim up) unless the
+        // profile being loaded says otherwise.
+        _o._preferences &= ~(World::PREF_INVERTAIM_TANK | World::PREF_INVERTAIM_AIR);
 #ifdef UA_VR_ENABLED
         // the keys never leak from the previously loaded profile:
         // PANELS FIXED, no moved layout, QUICK STATION follows the mode, unless the
@@ -276,6 +280,20 @@ int InputParser::Handle(ScriptParser::Parser &parser, const std::string &p1, con
             _o._GameShell->altJoystickEnabled = false;
             _o._preferences &= ~World::PREF_ALTJOYSTICK;
         }
+    }
+    else if ( !StriCmp(p1, "invertaim_tank") )
+    {
+        if ( StrGetBool(p2) )
+            _o._preferences |= World::PREF_INVERTAIM_TANK;
+        else
+            _o._preferences &= ~World::PREF_INVERTAIM_TANK;
+    }
+    else if ( !StriCmp(p1, "invertaim_air") )
+    {
+        if ( StrGetBool(p2) )
+            _o._preferences |= World::PREF_INVERTAIM_AIR;
+        else
+            _o._preferences &= ~World::PREF_INVERTAIM_AIR;
     }
     else if ( !StriCmp(p1, "forcefeedback") )
     {

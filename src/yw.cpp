@@ -411,6 +411,30 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
 
         _netChatSystem = false;
 
+        // Single player: while the in-mission menu (or its confirm box) is open the
+        // mission holds. The menu, the map and the frame are still drawn from the
+        // current state, but no unit moves, no timer runs (game clock and the clock
+        // the renderer sees both stand still), world sounds go quiet (as in the 1998
+        // pause) and no script, radio or recorder step runs. Closing the menu goes on
+        // from the same moment.
+        const bool hold = !_doNotRender && _userUnit && yw_MenuHoldsMission(this);
+        if ( hold )
+        {
+            if ( !_menuHoldActive )
+            {
+                _menuHoldActive = true;
+                _menuHoldTimeStamp = arg->TimeStamp - arg->DTime;
+                ypa_log_out("in-mission menu: mission held\n");
+            }
+            arg->TimeStamp = _menuHoldTimeStamp;
+        }
+        else if ( _menuHoldActive )
+        {
+            _menuHoldActive = false;
+            arg->TimeStamp = _menuHoldTimeStamp + arg->DTime;
+            ypa_log_out("in-mission menu: mission goes on\n");
+        }
+
         if ( _screenShotSeq )
         {
             arg->TimeStamp -= arg->DTime;
@@ -429,7 +453,10 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
 
             vec3d a3 = _userUnit->_fly_dir * _userUnit->_fly_dir_length;
 
-            SFXEngine::SFXe.sub_423EFC(arg->DTime, _viewerPosition, a3, _viewerRotation);
+            if ( hold ) // the listener far above the world, as the 1998 pause does
+                SFXEngine::SFXe.sub_423EFC(1, _viewerPosition + vec3d::OY(50000.0), vec3d(0.0), mat3x3::Ident());
+            else
+                SFXEngine::SFXe.sub_423EFC(arg->DTime, _viewerPosition, a3, _viewerRotation);
         }
 
         if ( _framesElapsed == 1 )
@@ -440,6 +467,11 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             arg159.MsgID = 41;
 
             ypaworld_func159(&arg159);
+
+            // the controller settings the mission plays with (logs and harnesses)
+            fprintf(stderr, "input: level %d joystick %s, tank stick layout %s, invert aim tanks %s, aircraft %s\n", _levelInfo.LevelID,
+                    (_preferences & World::PREF_JOYDISABLE) ? "off" : "on", (_preferences & World::PREF_ALTJOYSTICK) ? "AIM" : "DRIVE",
+                    (_preferences & World::PREF_INVERTAIM_TANK) ? "on" : "off", (_preferences & World::PREF_INVERTAIM_AIR) ? "on" : "off");
         }
 
         ypaworld_func64__sub6(this);
@@ -470,7 +502,8 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             }
         }
 
-        _timeStamp += arg->DTime;
+        if ( !hold )
+            _timeStamp += arg->DTime;
         _frameTime = arg->DTime;
         _framesElapsed++;
 
@@ -482,7 +515,8 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
         _FPS = 1024 / arg->DTime;
         _profileVals[PFID_FPS] = _FPS;
 
-        HistoryEventAdd(World::History::Frame(_timeStamp));
+        if ( !hold )
+            HistoryEventAdd(World::History::Frame(_timeStamp));
 
         uint32_t v22 = profiler_begin();
         
@@ -517,9 +551,12 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             ypaworld_func64__sub16(this);
             ypaworld_func64__sub17(this);
             sub_4C40AC();
-            ypaworld_func64__sub9(this);
-            ypaworld_func64__sub19();
-            BuildingConstructUpdate(arg->DTime);
+            if ( !hold )
+            {
+                ypaworld_func64__sub9(this);
+                ypaworld_func64__sub19();
+                BuildingConstructUpdate(arg->DTime);
+            }
 
             if ( !_doNotRender )
             {
@@ -536,10 +573,10 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
                 _profileVals[PFID_GUITIME] = profiler_end(v33);
             }
 
-            if ( _doEnergyRecalc )
+            if ( _doEnergyRecalc && !hold )
                 DoSectorsEnergyRecalc();
 
-            if ( _replayRecorder->do_record )
+            if ( _replayRecorder->do_record && !hold )
                 recorder_update_time(this, arg->DTime);
 
             _guiVisor.field_0 = 0;
@@ -553,7 +590,7 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             VR::CommandWorldHook(this); // VR command layer -> _updateMessage (no-op when VR is off)
 #endif
             // Do user commands before any unit state can be changed
-            if (_userRobo)
+            if (_userRobo && !hold)
             {
                 if (_userRobo->_bact_type == BACT_TYPES_ROBO)
                     ((NC_STACK_yparobo *)_userRobo)->HandleUserCommands(&_updateMessage);
@@ -561,6 +598,9 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
 
             for ( NC_STACK_ypabact *unit : _unitsList.safe_iter() )
             {
+                if ( hold )
+                    break;
+
                 if (_isNetGame && unit != _userRobo && unit->_bact_type == BACT_TYPES_ROBO)
                     unit->NetUpdate(&_updateMessage);
                 else
@@ -617,14 +657,17 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
 
             //ypaworld_func64__sub22(this); // scene events
             
-            if (_script)
-                _script->CallUpdate(_timeStamp, arg->DTime);
-                        
-            VoiceMessageUpdate(); // update sound messages
+            if ( !hold )
+            {
+                if (_script)
+                    _script->CallUpdate(_timeStamp, arg->DTime);
 
-            // UA_RADIO=1 only: poll the flavour-chatter sidecar (self-throttled
-            // to ~250ms) and push any line into the info log. No-op otherwise.
-            Radio::Update(this, _timeStamp);
+                VoiceMessageUpdate(); // update sound messages
+
+                // UA_RADIO=1 only: poll the flavour-chatter sidecar (self-throttled
+                // to ~250ms) and push any line into the info log. No-op otherwise.
+                Radio::Update(this, _timeStamp);
+            }
 
             const mat3x3 &v57 = SFXEngine::SFXe.sb_0x424c74();
             TF::TForm3D *v58 = TF::Engine.GetViewPoint();
@@ -635,12 +678,16 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             // (yw_game.cpp SndGetTopShake -> Input FF_TYPE_SHAKE).
             if ( !VR::SuppressViewShake(v57.m00 + v57.m11 + v57.m22) ) // shake angle -> haptics (cockpit)
 #endif
-            v58->SclRot = v57 * v58->SclRot;
+            if ( !hold ) // held: no unit update resets the view, so no shake on top
+                v58->SclRot = v57 * v58->SclRot;
 
-            if ( _replayRecorder->do_record )
-                recorder_write_frame();
+            if ( !hold )
+            {
+                if ( _replayRecorder->do_record )
+                    recorder_write_frame();
 
-            ypaworld_func64__sub3(this);
+                ypaworld_func64__sub3(this);
+            }
 
             if ( !_doNotRender )
             {
@@ -648,7 +695,16 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
 
                 if ( _userUnit->_cellId ) // if cell is not 0,0
                 {
-                    RenderGame(arg, 1);
+                    if ( hold )
+                    {
+                        // particles, trails and animated textures stand still too
+                        base_64arg held = *arg;
+                        held.DTime = 0;
+                        RenderGame(&held, 1);
+                        arg->field_C = held.field_C;
+                    }
+                    else
+                        RenderGame(arg, 1);
 
                     if ( _isNetGame )
                         yw_NetDrawStats(this);
@@ -2990,6 +3046,57 @@ bool NC_STACK_ypaworld::CreateConfirmControls()
     _GameShell->confirm_button->HideScreen();
     return true;
 }
+// Input page: "Invert vertical aim (tanks)" and "(aircraft)", two checkboxes on one row
+// (left at the list's left edge, right in the joystick row's right column).
+static bool AddInputInvertRow(NC_STACK_ypaworld *yw, int ypos, int menuWidth)
+{
+    NC_STACK_button::button_64_arg a;
+    const struct { int x, w; int id, down, up; Locale::ADV cap; } boxes[2] = {
+        { 0, menuWidth / 2 - checkBoxWidth - 2 * buttonsSpace, 1067, 1070, 1071, Locale::ADV_INVERTAIM_TANK },
+        { buttonsSpace + menuWidth / 2, menuWidth / 2 - checkBoxWidth - 2 * buttonsSpace, 1068, 1072, 1073, Locale::ADV_INVERTAIM_AIR },
+    };
+    for (const auto &b : boxes)
+    {
+        a = NC_STACK_button::button_64_arg();
+        a.tileset_down = 19;
+        a.tileset_up = 18;
+        a.field_3A = 30;
+        a.button_type = NC_STACK_button::TYPE_CHECKBX;
+        a.xpos = b.x;
+        a.ypos = ypos;
+        a.width = checkBoxWidth;
+        a.caption = "g";
+        a.caption2 = "g";
+        a.flags = 0;
+        a.downCode = b.down;
+        a.upCode = b.up;
+        a.pressedCode = 0;
+        a.button_id = b.id;
+        if ( !yw->_GameShell->button_input_button->Add(&a) )
+            return false;
+
+        a.tileset_down = 16;
+        a.tileset_up = 16;
+        a.field_3A = 16;
+        a.button_type = NC_STACK_button::TYPE_CAPTION;
+        a.xpos = b.x + checkBoxWidth + buttonsSpace;
+        a.width = b.w;
+        a.caption = Locale::Text::Advanced(b.cap);
+        a.caption2.clear();
+        a.button_id = 2;
+        a.downCode = 0;
+        a.upCode = 0;
+        a.pressedCode = 0;
+        a.flags = NC_STACK_button::FLAG_TEXT;
+        a.txt_r = yw->_iniColors[60].r;
+        a.txt_g = yw->_iniColors[60].g;
+        a.txt_b = yw->_iniColors[60].b;
+        if ( !yw->_GameShell->button_input_button->Add(&a) )
+            return false;
+    }
+    return true;
+}
+
 bool NC_STACK_ypaworld::CreateInputControls()
 {
     int menuWidth = _screenSize.x * 0.7;
@@ -3141,13 +3248,15 @@ bool NC_STACK_ypaworld::CreateInputControls()
                                 btn_64arg.button_type = NC_STACK_button::TYPE_CAPTION;
                                 btn_64arg.xpos = (checkBoxWidth + (menuWidth / 2) + 2 * buttonsSpace);
                                 btn_64arg.width = ((menuWidth / 2) - buttonsSpace);
-                                btn_64arg.caption = Locale::Text::Advanced(Locale::ADV_ALTJOYMODEL);
+                                // "Tank stick layout: AIM / DRIVE", follows the checkbox
+                                // (UserData::RefreshInputControls); own id for SetText
+                                btn_64arg.caption = Locale::Text::Advanced(Locale::ADV_TANKSTICK_DRIVE);
                                 btn_64arg.caption2.clear();
                                 btn_64arg.downCode = 0;
                                 btn_64arg.upCode = 0;
                                 btn_64arg.pressedCode = 0;
                                 btn_64arg.flags = NC_STACK_button::FLAG_TEXT;
-                                btn_64arg.button_id = 2;
+                                btn_64arg.button_id = 1066;
                                 btn_64arg.txt_r = _iniColors[60].r;
                                 btn_64arg.txt_g = _iniColors[60].g;
                                 btn_64arg.txt_b = _iniColors[60].b;
@@ -3289,7 +3398,9 @@ bool NC_STACK_ypaworld::CreateInputControls()
 
                                                                     if ( _GameShell->button_input_button->Add(&btn_64arg) )
                                                                     {
-                                                                        v70 = 1;
+                                                                        // Port addition: the vertical aim inverts, one row
+                                                                        // below, laid out like the joystick row.
+                                                                        v70 = AddInputInvertRow(this, 9 * vertMenuSpace + 17 * _fontH, menuWidth) ? 1 : 0;
                                                                     }
                                                                 }
                                                             }
@@ -6508,23 +6619,7 @@ void NC_STACK_ypaworld::UpdateGameShell()
     }
 #endif
 
-    NC_STACK_button::button_66arg v9;
-    v9.butID = 1050;
-    v9.field_4 = ((_GameShell->p_YW->_preferences & World::PREF_JOYDISABLE) != 0) + 1;
-
-    _GameShell->button_input_button->SetState(&v9);
-
-    v9.butID = 1061;
-    v9.field_4 = (_GameShell->altJoystickEnabled == false) + 1;
-    _GameShell->button_input_button->SetState(&v9);
-
-    v9.butID = 1055;
-    v9.field_4 = ((_GameShell->p_YW->_preferences & World::PREF_FFDISABLE) != 0) + 1;
-    _GameShell->button_input_button->SetState(&v9);
-
-    v9.butID = 1065;
-    v9.field_4 = ((_GameShell->p_YW->_preferences & World::PREF_ENGINERUMBLE) == 0) + 1;
-    _GameShell->button_input_button->SetState(&v9);
+    _GameShell->RefreshInputControls();
 
     if ( _GameShell->inpListActiveElement )
     {

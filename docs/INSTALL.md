@@ -98,6 +98,32 @@ controller to recentre.
 
 Step-by-step with pictures: the site's [Quest guide](https://uareforged.pages.dev/downloads/#quest-computer-h).
 
+## Game controllers (desktop)
+
+Any controller SDL knows works (DualSense, DualShock 4, Xbox and most others). Plug it in before starting
+the game.
+
+| Button | Does |
+|---|---|
+| Left stick | steer; tanks: aim the gun up / down (or drive, see below); aircraft: nose up / down |
+| R1/L1 (RB / LB) | drive forward / back; aircraft: faster / slower |
+| Right stick, D-pad | aim the gun (tanks) |
+| R2/L2 (RT / LT) | fire weapon / fire machine gun |
+| Triangle (Y) | missile camera |
+| Cross (A) | brake |
+| Options (Menu) | the in-mission menu (Esc) |
+| Share / Create, touchpad click (View on Xbox) | pause in single player; press again to continue |
+
+*Options > Input* and the in-mission menu's **CONTROLLER SETTINGS** have:
+- **Tank stick layout: AIM** (ticked): the left stick aims the gun, R1/L1 drive. **DRIVE** (not ticked): the
+  left stick drives, the right stick aims, and R1/L1 also drive while the left stick is centred.
+- **Invert vertical aim (tanks)** and **Invert vertical aim (aircraft)**: off = push the stick up and the gun /
+  nose goes up; on = the other way round (flight-sim style). The tank setting also covers station guns and
+  the host station's view. Keyboard and mouse keep their own keys.
+
+In single player the in-mission menu holds the mission while it is open. Settings changed there are saved
+to your profile straight away, without saving the mission.
+
 ## The Reforge pack
 
 The pack is the new look: rebuilt units and host stations, buildings, skies, HD textures, restored videos, sharp

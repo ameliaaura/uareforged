@@ -29,6 +29,11 @@ jobs:
       - name: Tools
         run: brew install cmake pkg-config
 
+      - name: Unit tests (no game data)
+        run: |
+          c++ -std=c++14 -Wall -Isrc tests/controller_settings_test.cpp src/profile_patch.cpp -o "$RUNNER_TEMP/controller_settings_test"
+          (cd "$RUNNER_TEMP" && ./controller_settings_test)
+
       - name: Cache third-party libraries
         uses: actions/cache@v4
         with:

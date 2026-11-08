@@ -1990,27 +1990,38 @@ void UserData::InputPageCancel()
 
     inputChangedParts = 0;
 
-    v6.butID = 1050;
-    v6.field_4 = (joystickEnabled == false) + 1;
-    button_input_button->SetState(&v6);
-
-    v6.field_4 = (altJoystickEnabled == false) + 1;
-    v6.butID = 1061;
-    button_input_button->SetState(&v6);
-
-    v6.butID = 1055;
-    v6.field_4 = ((p_YW->_preferences & World::PREF_FFDISABLE) != 0) + 1;
-    button_input_button->SetState(&v6);
-
-    v6.butID = 1065;
-    v6.field_4 = ((p_YW->_preferences & World::PREF_ENGINERUMBLE) == 0) + 1;
-    button_input_button->SetState(&v6);
+    RefreshInputControls();
 
     button_input_button->HideScreen();
 
     p_YW->GuiWinClose( &input_listview );
 
     titel_button->ShowScreen();
+}
+
+void UserData::RefreshInputControls()
+{
+    if ( !button_input_button )
+        return;
+
+    const uint32_t p = p_YW->_preferences;
+    NC_STACK_button::button_66arg v6;
+    // field_4: 1 = ticked, 2 = clear
+    const struct { int id; bool on; } boxes[] = {
+        { 1050, !(p & World::PREF_JOYDISABLE) },
+        { 1061, altJoystickEnabled },
+        { 1055, !(p & World::PREF_FFDISABLE) },   // ticked = force feedback on
+        { 1065, (p & World::PREF_ENGINERUMBLE) != 0 },
+        { 1067, (p & World::PREF_INVERTAIM_TANK) != 0 },
+        { 1068, (p & World::PREF_INVERTAIM_AIR) != 0 },
+    };
+    for (const auto &b : boxes)
+    {
+        v6.butID = b.id;
+        v6.field_4 = b.on ? 1 : 2;
+        button_input_button->SetState(&v6);
+    }
+    button_input_button->SetText(1066, Locale::Text::Advanced(altJoystickEnabled ? Locale::ADV_TANKSTICK_AIM : Locale::ADV_TANKSTICK_DRIVE));
 }
 
 void UserData::InputConfCopyToBackup()
@@ -3181,6 +3192,22 @@ void UserData::GameShellUiHandleInput()
                     p_YW->_preferences &= ~World::PREF_ALTJOYSTICK;
             }
 
+            if ( inputChangedParts & ICHG_INVERTAIMTANK )
+            {
+                if ( confInvertAimTank )
+                    p_YW->_preferences |= World::PREF_INVERTAIM_TANK;
+                else
+                    p_YW->_preferences &= ~World::PREF_INVERTAIM_TANK;
+            }
+
+            if ( inputChangedParts & ICHG_INVERTAIMAIR )
+            {
+                if ( confInvertAimAir )
+                    p_YW->_preferences |= World::PREF_INVERTAIM_AIR;
+                else
+                    p_YW->_preferences &= ~World::PREF_INVERTAIM_AIR;
+            }
+
             if ( inputChangedParts & ICHG_FORCEFEEDBACK )
             {
                 if ( confFFEnabled )
@@ -3234,11 +3261,23 @@ void UserData::GameShellUiHandleInput()
         {
             confAltJoystickEnabled = true;
             inputChangedParts |= ICHG_ALTJOYSTICK;
+            button_input_button->SetText(1066, Locale::Text::Advanced(Locale::ADV_TANKSTICK_AIM));
         }
         else if ( r.code == 1059 )
         {
             confAltJoystickEnabled = false;
             inputChangedParts |= ICHG_ALTJOYSTICK;
+            button_input_button->SetText(1066, Locale::Text::Advanced(Locale::ADV_TANKSTICK_DRIVE));
+        }
+        else if ( r.code == 1070 || r.code == 1071 )
+        {
+            confInvertAimTank = (r.code == 1070);
+            inputChangedParts |= ICHG_INVERTAIMTANK;
+        }
+        else if ( r.code == 1072 || r.code == 1073 )
+        {
+            confInvertAimAir = (r.code == 1072);
+            inputChangedParts |= ICHG_INVERTAIMAIR;
         }
         else if ( r.code == 1062 )
         {

@@ -675,6 +675,11 @@ static int RumbleHumEnvOverride()
     return cached;
 }
 
+bool INPEngine::PadThrottleButtons()
+{
+    return NC_STACK_winp::PadThrottleButtons();
+}
+
 bool INPEngine::EngineRumble()
 {
     int forced = RumbleHumEnvOverride();

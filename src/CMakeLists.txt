@@ -55,6 +55,7 @@ set(SOURCES
 	nucleas.cpp
 	obj3d.cpp
 	particle.cpp
+	profile_patch.cpp
 	rsrc.cpp
 	sample.cpp
 	skeleton.cpp

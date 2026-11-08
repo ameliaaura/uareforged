@@ -753,6 +753,17 @@ enum ADV
     // so it falls through to the built-in default and cannot caption the
     // checkbox with a translated string meant for something else.
     ADV_WALLSIG = 114,
+    // Port additions: controller settings (Options > Input and the in-mission menu)
+    // and the pad line of the pause screen. 2515..2520 are "<>" or absent in every
+    // shipped .lng (base game and Metropolis Dawn), so they always come from the
+    // built-in defaults. The tank stick layout no longer shows 2433 ("Alternate
+    // Joystick Tank Controls"): the game folder's own .lng would keep that old caption.
+    ADV_TANKSTICK_AIM = 115,
+    ADV_TANKSTICK_DRIVE = 116,
+    ADV_INVERTAIM_TANK = 117,
+    ADV_INVERTAIM_AIR = 118,
+    ADV_CTRLSETTINGS = 119,
+    ADV_PAUSEPAD = 120,
     ADV_MAX
 };
 

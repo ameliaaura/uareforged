@@ -54,6 +54,11 @@ The first public release of the desktop apps.
 - Dialogs show no file paths (your account name stays off streams and screenshots); *Show log in Finder* /
   *Show log in Explorer* where a log helps.
 - Sharp UI text, DualSense and other SDL game controllers.
+- **Controller settings** (*Options > Input* and the in-mission menu's *CONTROLLER SETTINGS*): *Tank stick
+  layout* AIM (the stick aims, R1/L1 drive) or DRIVE (the stick drives; R1/L1 drive too), and *Invert
+  vertical aim* for tanks and for aircraft. By default pushing the stick up aims up.
+- **Pause with the controller** in single player (Share / Create, the touchpad click, or View on Xbox), and the
+  in-mission menu holds the mission while it is open.
 
 ### Unchanged on purpose
 - Gameplay, units, levels and factions are the 1998 game's. The campaign map keeps its 1998 picture.

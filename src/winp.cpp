@@ -51,6 +51,8 @@ SDL_JoystickID       NC_STACK_winp::_joyInstanceId = -1;
 SDL_Haptic          *NC_STACK_winp::_joyHaptic = NULL;
 bool                 NC_STACK_winp::_joyDebug = false;
 bool                 NC_STACK_winp::_joyStartHeld = false;
+bool                 NC_STACK_winp::_joyPauseHeld = false;
+bool                 NC_STACK_winp::_padThrottle = false;
 
 std::array<int, 32>  NC_STACK_winp::_joyAxisMap;
 std::array<bool, 32> NC_STACK_winp::_joyAxisMapInv;
@@ -305,6 +307,13 @@ void NC_STACK_winp::JoyCloseDevice()
         KeyUp(Input::KC_ESCAPE);
         _joyStartHeld = false;
     }
+
+    if ( _joyPauseHeld )
+    {
+        KeyUp(Input::KC_PAUSE);
+        _joyPauseHeld = false;
+    }
+    _padThrottle = false;
 
     _joyXYpos = Common::Point();
     _joyZRZpos = Common::Point();
@@ -936,6 +945,8 @@ int NC_STACK_winp::GameCtrlAxisVal(SDL_GameControllerAxis axis)
 //   Triangle     -> JOYB2            (missile cam)   Cross -> JOYB3 (brake)
 //   Circle/Square/L3/R3 -> JOYB4..7  (free, bindable in the in-game input menu)
 //   Options      -> Esc              (synthesized keyboard key: menus/quit)
+//   Share/Create (DualSense), View/Back (Xbox), touchpad click -> Pause key
+//                                    (single player: pause, press again to continue)
 void NC_STACK_winp::CheckGameController(uint32_t *btnState)
 {
     _joyXYpos.x = GameCtrlAxisVal(SDL_CONTROLLER_AXIS_LEFTX);
@@ -997,6 +1008,23 @@ void NC_STACK_winp::CheckGameController(uint32_t *btnState)
             KeyUp(Input::KC_ESCAPE);
 
         _joyStartHeld = start;
+    }
+
+    // Pause: the Back button (DualSense Share/Create, Xbox View) on every SDL pad, and
+    // the DualSense / DualShock 4 touchpad click as a second choice (macOS may keep
+    // the Share button for its own screenshot shortcut).
+    bool pause = SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_BACK) != 0;
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    pause = pause || SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_TOUCHPAD) != 0;
+#endif
+    if ( pause != _joyPauseHeld )
+    {
+        if ( pause )
+            KeyDown(Input::KC_PAUSE);
+        else
+            KeyUp(Input::KC_PAUSE);
+
+        _joyPauseHeld = pause;
     }
 }
 
@@ -1282,6 +1310,9 @@ void NC_STACK_winp::CheckJoy()
         uint32_t newBtnState = 0;
         _joyXYpos = Common::Point();
         _joyZRZpos = Common::Point();
+        // R1/L1 are momentary throttle buttons only on a game controller (a joystick's
+        // throttle axis stays where it was left), see PadThrottleButtons().
+        _padThrottle = !vrPad && _gameCtrl != NULL;
 
         if ( vrPad )
         {

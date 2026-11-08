@@ -56,6 +56,8 @@ public:
     static bool Rumble(uint16_t lowFreq, uint16_t highFreq, uint32_t ms);
     static bool HasRumble();
     static bool JoyDebug() { return _joyDebug; };
+    // the last poll read a game controller (throttle = momentary R1/L1 buttons)
+    static bool PadThrottleButtons() { return _padThrottle; };
 
     static void QueryKeyboard(TInputState *arg);
     static void QueryPointer(TClickBoxInf *arg);
@@ -128,6 +130,8 @@ protected:
     static SDL_Haptic          *_joyHaptic;
     static bool                 _joyDebug;
     static bool                 _joyStartHeld;
+    static bool                 _joyPauseHeld;
+    static bool                 _padThrottle;
 
     static std::array<int, MAXJOYMAP>  _joyAxisMap;
     static std::array<bool, MAXJOYMAP> _joyAxisMapInv;

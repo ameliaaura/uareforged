@@ -23,6 +23,7 @@
 #include "env.h"
 #include "yw.h"
 #include "yparobo.h"
+#include "profile_patch.h"
 
 
 #ifdef UA_VR_ENABLED
@@ -394,6 +395,58 @@ bool yw_VRPatchProfileFile(const std::string &path, NC_STACK_ypaworld *ywRes)
 }
 #endif
 
+// The controller lines of the input section, as yw_write_input writes them.
+std::vector<std::string> yw_InputProfileLines(NC_STACK_ypaworld *yw)
+{
+    const uint32_t p = yw->_preferences;
+    const bool alt = yw->_GameShell ? yw->_GameShell->altJoystickEnabled : (p & World::PREF_ALTJOYSTICK) != 0;
+    std::vector<std::string> l;
+    l.push_back(std::string("joystick = ") + ((p & World::PREF_JOYDISABLE) ? "no" : "yes"));
+    l.push_back(std::string("altjoystick = ") + (alt ? "yes" : "no"));
+    l.push_back(std::string("invertaim_tank = ") + ((p & World::PREF_INVERTAIM_TANK) ? "yes" : "no"));
+    l.push_back(std::string("invertaim_air = ") + ((p & World::PREF_INVERTAIM_AIR) ? "yes" : "no"));
+    l.push_back(std::string("forcefeedback = ") + ((p & World::PREF_FFDISABLE) ? "no" : "yes"));
+    l.push_back(std::string("enginerumble = ") + ((p & World::PREF_ENGINERUMBLE) ? "yes" : "no"));
+    return l;
+}
+
+// In-mission settings change: a full profile save (SDF_ALL) would also write live
+// mission state, so only the controller lines of user.txt are patched. The file is
+// read whole (a failed or short read writes nothing) and replaced atomically through
+// a sibling temp file; on any failure the old profile stays as it was.
+bool yw_PatchInputProfileFile(const std::string &path, NC_STACK_ypaworld *yw)
+{
+    FSMgr::iNode *node = FSMgr::iDir::findNode(correctSeparatorAndExt(Common::Env.ApplyPrefix(path)));
+    if ( !node || node->getType() != FSMgr::iNode::NTYPE_FILE )
+        return false;
+    const std::string disk = node->getPath();
+    std::string text;
+    {
+        FILE *in = fopen(disk.c_str(), "rb");
+        if ( !in )
+            return false;
+        char buf[16384];
+        size_t n;
+        while ( (n = fread(buf, 1, sizeof(buf), in)) > 0 )
+            text.append(buf, n);
+        const bool readOk = !ferror(in) && feof(in);
+        fclose(in);
+        if ( !readOk || text.empty() )
+            return false;
+    }
+    const std::string before = text;
+    if ( !ProfilePatch::PatchInputSection(text, yw_InputProfileLines(yw)) )
+        return false;
+    if ( text == before )
+        return true;
+    return ProfilePatch::WriteFileAtomic(disk, text);
+}
+
+bool yw_PatchInputProfile(const std::string &userName, NC_STACK_ypaworld *yw)
+{
+    return yw_PatchInputProfileFile(fmt::sprintf("save:%s/user.txt", userName), yw);
+}
+
 std::string yw_ShellResCaption(const GFX::GfxMode &m)
 {
 #ifdef UA_VR_ENABLED
@@ -488,6 +541,9 @@ int yw_write_input(FSMgr::FileHandle *fil, UserData *usr)
         fil->printf("    altjoystick = yes\n");
     else
         fil->printf("    altjoystick = no\n");
+
+    fil->printf("    invertaim_tank = %s\n", (usr->p_YW->_preferences & World::PREF_INVERTAIM_TANK) ? "yes" : "no");
+    fil->printf("    invertaim_air = %s\n", (usr->p_YW->_preferences & World::PREF_INVERTAIM_AIR) ? "yes" : "no");
 
     if ( usr->p_YW->_preferences & World::PREF_FFDISABLE )
         fil->printf("    forcefeedback = no\n");

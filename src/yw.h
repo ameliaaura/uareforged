@@ -239,6 +239,12 @@ enum PREFERENCES_FLAGS
     // unless a profile asks for it; there is no nucleus.ini default because
     // the pixels it restores were deliberately retouched out.
     PREF_WALLSIG        =  (1 << 9),
+    // Port addition: "Invert vertical aim (tanks)" / "(aircraft)". Joystick and pad
+    // only (keyboard and mouse keep their bindings). Off = push the stick up and the
+    // gun / nose goes up. The tank setting also covers station guns and the host
+    // station's view. Profile keys invertaim_tank / invertaim_air, off when absent.
+    PREF_INVERTAIM_TANK =  (1 << 10),
+    PREF_INVERTAIM_AIR  =  (1 << 11),
 };
 
 enum INPUT_BIND
@@ -504,7 +510,9 @@ public:
         ICHG_JOYSTICK       = (1 << 0),
         ICHG_FORCEFEEDBACK  = (1 << 1),
         ICHG_ALTJOYSTICK    = (1 << 2),
-        ICHG_ENGINERUMBLE   = (1 << 3)
+        ICHG_ENGINERUMBLE   = (1 << 3),
+        ICHG_INVERTAIMTANK  = (1 << 4),
+        ICHG_INVERTAIMAIR   = (1 << 5)
     };
 
 public:
@@ -566,6 +574,8 @@ public:
     bool confAltJoystickEnabled; // Apply this to altJoystickEnabled on press "OK"
     bool confFFEnabled;
     bool confEngineRumbleEnabled; // Apply to PREF_ENGINERUMBLE on press "OK"
+    bool confInvertAimTank = false; // Apply to PREF_INVERTAIM_TANK on press "OK"
+    bool confInvertAimAir = false;  // Apply to PREF_INVERTAIM_AIR on press "OK"
     bool keyCatchMode; // mode for catch input to configure key
     uint8_t inputChangedParts;
     
@@ -818,6 +828,9 @@ public:
     void ShowLanguageMenu();
     void yw_returnToTitle();
     void InputPageCancel();
+    // Input page checkboxes (+ the tank stick layout caption) from the
+    // confirmed settings: page cancel, profile load, in-mission changes.
+    void RefreshInputControls();
     void InputConfCancel();
     void sub_46A3C0();
     void sub_46C914();
@@ -2529,6 +2542,9 @@ public:
     
     bool _gamePaused = false;
     uint32_t _gamePausedTimeStamp = 0;
+    // single player: the in-mission menu holds the mission (yw_MenuHoldsMission)
+    bool _menuHoldActive = false;
+    uint32_t _menuHoldTimeStamp = 0;
     
     int32_t _timeStamp = 0;
     int32_t _frameTime = 0;

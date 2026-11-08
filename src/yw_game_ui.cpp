@@ -20,6 +20,7 @@
 #include "ypagun.h"
 #include "windp.h"
 #include "world/analyzer.h"
+#include "input_aim.h"
 
 
 extern uint32_t bact_id;
@@ -324,6 +325,191 @@ static void VRPauseHeaderLine(NC_STACK_ypaworld *yw, CmdStream *cur, const std::
     }
 }
 #endif
+
+// Desktop in-mission menu (VR off; the VR pause panel above replaces it in a headset).
+//   main:       the 1998 rows (ids 8..12: exit, save, load, restart, continue) + 13 CONTROLLER SETTINGS
+//   controller: the Input page's controller settings (ids 8..14), applied live; when the
+//               menu closes they are written into the profile's controller lines only
+//               (yw_PatchInputProfile; a full save would also write the live mission).
+// In single player the open menu holds the mission (yw_MenuHoldsMission).
+void ypaworld_func64__sub7__sub2__sub8(NC_STACK_ypaworld *yw); // open the exit menu
+void ypaworld_func64__sub7__sub2__sub9(NC_STACK_ypaworld *yw); // close it
+static int s_dskPage = 0;       // 0 main, 1 controller settings
+static int s_dskRows = 0;       // rows the window is laid out for (0 = not yet)
+static bool s_dskDirty = false; // a setting changed: patch the profile on close
+enum DskRow { DSK_LAYOUT, DSK_INVTANK, DSK_INVAIR, DSK_JOY, DSK_FF, DSK_HUM, DSK_BACK, DSK_COUNT };
+static const int kDskMainRows = 6;
+static const int kDskMaxRows = DSK_COUNT;
+
+static bool DesktopMenu()
+{
+#ifdef UA_VR_ENABLED
+    return !VR::Active();
+#else
+    return true;
+#endif
+}
+
+static void DskLayout(NC_STACK_ypaworld *yw)
+{
+    const int rows = s_dskPage ? (int)DSK_COUNT : kDskMainRows;
+    if ( rows == s_dskRows )
+        return;
+    exit_menu.numEntries = exit_menu.shownEntries = rows;
+    exit_menu.minShownEntries = exit_menu.maxShownEntries = rows;
+    if ( exit_menu.buttons.size() < (size_t)(8 + kDskMaxRows) )
+        exit_menu.buttons.resize(8 + kDskMaxRows);
+    for (int i = 8; i < 8 + kDskMaxRows; i++)
+        exit_menu.buttons[i] = ButtonBox();
+    const int v5 = yw->_fontH + exit_menu.upperVborder + dword_5C8B84;
+    for (int r = 0; r < rows; r++)
+        exit_menu.buttons[8 + r] = ButtonBox(dword_5C8B80, r * dword_5C8B7C + v5, dword_5C8B88, yw->_fontH);
+    exit_menu.SetRect(yw, -2, -2);
+    s_dskRows = rows;
+}
+
+static void DskSetPage(NC_STACK_ypaworld *yw, int page)
+{
+    if ( s_dskPage == page )
+        return;
+    s_dskPage = page;
+    DskLayout(yw);
+}
+
+// menu closed (Continue, Esc, close box, Exit/Save/Load/Restart): main page next time,
+// changed settings into the profile
+static void DskClosed(NC_STACK_ypaworld *yw)
+{
+    DskSetPage(yw, 0);
+    if ( s_dskDirty && yw->_GameShell && !yw->_GameShell->UserName.empty() )
+    {
+        const bool ok = yw_PatchInputProfile(yw->_GameShell->UserName, yw);
+        ypa_log_out("controller settings saved to profile %s: %s\n", yw->_GameShell->UserName.c_str(), ok ? "ok" : "FAILED (the next profile save writes them)");
+    }
+    s_dskDirty = false;
+}
+
+static std::string DskOnOff(const std::string &caption, bool on)
+{
+    return caption + (on ? ": ON" : ": OFF");
+}
+
+static std::string DskLabel(NC_STACK_ypaworld *yw, int id)
+{
+    const uint32_t p = yw->_preferences;
+    if ( !s_dskPage )
+    {
+        switch ( id )
+        {
+        case 8:  return Locale::Text::Common(Locale::CMN_EXITMISN);
+        case 9:  return Locale::Text::Common(Locale::CMN_SAVE);
+        case 10: return Locale::Text::Common(Locale::CMN_LOAD);
+        case 11: return Locale::Text::Common(Locale::CMN_RESTART);
+        case 12: return Locale::Text::Common(Locale::CMN_CONTINUE);
+        case 13: return Locale::Text::Advanced(Locale::ADV_CTRLSETTINGS);
+        default: return " ";
+        }
+    }
+    switch ( id - 8 )
+    {
+    case DSK_LAYOUT:  return Locale::Text::Advanced((p & World::PREF_ALTJOYSTICK) ? Locale::ADV_TANKSTICK_AIM : Locale::ADV_TANKSTICK_DRIVE);
+    case DSK_INVTANK: return DskOnOff(Locale::Text::Advanced(Locale::ADV_INVERTAIM_TANK), p & World::PREF_INVERTAIM_TANK);
+    case DSK_INVAIR:  return DskOnOff(Locale::Text::Advanced(Locale::ADV_INVERTAIM_AIR), p & World::PREF_INVERTAIM_AIR);
+    case DSK_JOY:     return DskOnOff("Joystick / controller", !(p & World::PREF_JOYDISABLE));
+    case DSK_FF:      return DskOnOff("Force feedback", !(p & World::PREF_FFDISABLE));
+    case DSK_HUM:     return DskOnOff(Locale::Text::Advanced(Locale::ADV_ENGINERUMBLE), p & World::PREF_ENGINERUMBLE);
+    case DSK_BACK:    return Locale::Text::Advanced(Locale::ADV_BACK);
+    default:          return " ";
+    }
+}
+
+// controller page click (button up): toggle the row, applied live
+static void DskSettingClick(NC_STACK_ypaworld *yw, int id)
+{
+    uint32_t &p = yw->_preferences;
+    switch ( id - 8 )
+    {
+    case DSK_LAYOUT:
+        p ^= World::PREF_ALTJOYSTICK;
+        if ( yw->_GameShell )
+            yw->_GameShell->altJoystickEnabled = (p & World::PREF_ALTJOYSTICK) != 0;
+        break;
+    case DSK_INVTANK: p ^= World::PREF_INVERTAIM_TANK; break;
+    case DSK_INVAIR:  p ^= World::PREF_INVERTAIM_AIR; break;
+    case DSK_JOY:
+        p ^= World::PREF_JOYDISABLE;
+        if ( yw->_GameShell )
+            yw->_GameShell->joystickEnabled = !(p & World::PREF_JOYDISABLE);
+        break;
+    case DSK_FF:      p ^= World::PREF_FFDISABLE; break;
+    case DSK_HUM:
+        p ^= World::PREF_ENGINERUMBLE;
+        Input::Engine.SetEngineRumble( (p & World::PREF_ENGINERUMBLE) != 0 );
+        break;
+    case DSK_BACK:
+        DskSetPage(yw, 0);
+        return;
+    default:
+        return;
+    }
+    s_dskDirty = true;
+    ypa_log_out("in-mission controller setting: %s\n", DskLabel(yw, id).c_str());
+}
+
+// Dev aid (desktop; synthetic clicks never reach SDL on macOS, so this is the only way
+// to check the menu unattended): UA_MENU_AT=n[,controller][,toggle=R.R...][,close=m]
+// opens the in-mission menu at the n-th mission frame, optionally on the controller
+// page, toggles the listed controller rows (0 layout, 1 invert tanks, 2 invert aircraft,
+// 3 joystick, 4 force feedback, 5 engine vibration) as clicks would, and closes it at
+// frame m (which patches the profile like a real close). Inert unless set.
+static void DskDevAid(NC_STACK_ypaworld *yw)
+{
+    static int openAt = -2, closeAt = -1, frames = 0;
+    static bool page = false;
+    static std::string toggles;
+    if ( openAt == -2 )
+    {
+        openAt = -1;
+        if ( const char *v = getenv("UA_MENU_AT") )
+        {
+            openAt = atoi(v);
+            page = strstr(v, "controller") != NULL;
+            if ( const char *t = strstr(v, "toggle=") )
+                toggles = std::string(t + 7, strcspn(t + 7, ","));
+            if ( const char *c = strstr(v, "close=") )
+                closeAt = atoi(c + 6);
+        }
+    }
+    if ( openAt < 0 )
+        return;
+    frames++;
+    if ( frames == openAt )
+    {
+        if ( exit_menu.IsClosed() )
+            ypaworld_func64__sub7__sub2__sub8(yw);
+        if ( page || !toggles.empty() )
+            DskSetPage(yw, 1);
+        for (size_t i = 0; i < toggles.size(); i++)
+            if ( toggles[i] >= '0' && toggles[i] < '0' + DSK_BACK )
+                DskSettingClick(yw, 8 + (toggles[i] - '0'));
+        fprintf(stderr, "in-mission menu: dev aid UA_MENU_AT opened it at frame %d (page %s)\n", frames, s_dskPage ? "controller" : "main");
+    }
+    if ( frames == closeAt && exit_menu.IsOpen() )
+    {
+        ypaworld_func64__sub7__sub2__sub9(yw);
+        fprintf(stderr, "in-mission menu: dev aid UA_MENU_AT closed it at frame %d\n", frames);
+    }
+}
+
+bool yw_MenuHoldsMission(NC_STACK_ypaworld *yw)
+{
+    if ( !yw || yw->_isNetGame || !DesktopMenu() )
+        return false;
+    if ( exit_menu.IsOpen() )
+        return true;
+    // its "really exit / save / load / restart?" box
+    return dword_5BAF9C == 3 && lstvw2.IsOpen() && dword_5BAFAC == &exit_menu;
+}
 
 
 
@@ -2951,6 +3137,17 @@ void create_exit_menu(NC_STACK_ypaworld *yw)
     args.staticItems = true;
     args.closeChar = 85;
 
+    if ( DesktopMenu() )
+    {
+        // + CONTROLLER SETTINGS and its page (up to kDskMaxRows rows), wide enough for
+        // "Invert vertical aim (aircraft): OFF"
+        args.numEntries = args.shownEntries = args.maxShownEntries = args.minShownEntries = kDskMaxRows;
+        args.entryWidth = 4 * tmp + 16;
+        s_dskPage = 0;
+        s_dskRows = 0;
+        s_dskDirty = false;
+    }
+
 #ifdef UA_VR_ENABLED
     // menu: the VR pause panel needs up to 8 rows (ids 8..15) and room for the
     // longest Settings caption ("COCKPIT FRAME: CLASSIC").
@@ -2983,6 +3180,8 @@ void create_exit_menu(NC_STACK_ypaworld *yw)
     if ( VRPause() )
         VRPauseLayout(yw);
 #endif
+    if ( DesktopMenu() )
+        DskLayout(yw);
 }
 
 
@@ -7052,6 +7251,19 @@ void ypaworld_func64__sub7__sub6__sub3(NC_STACK_ypaworld *yw, int a2, int a4)
     }
 #endif
 
+    if ( DesktopMenu() )
+    {
+        // rows of the current page; bit (0x100 << (id - 8)) = disabled / pressed
+        for (int r = 0; r < s_dskRows; r++)
+        {
+            const int bit = 0x100 << r;
+            sub_4DA8DC(yw, &exit_menu.itemBlock, s_dskPage ? 0 : (a4 & bit), a2 & bit, DskLabel(yw, 8 + r));
+        }
+        exit_menu.ItemsPostLayout(yw, &exit_menu.itemBlock, 0, "xyz");
+        FontUA::set_end(&exit_menu.itemBlock);
+        return;
+    }
+
     sub_4DA8DC(yw, &exit_menu.itemBlock, a4 & 0x100, a2 & 0x100, Locale::Text::Common(Locale::CMN_EXITMISN));
     sub_4DA8DC(yw, &exit_menu.itemBlock, a4 & 0x200, a2 & 0x200, Locale::Text::Common(Locale::CMN_SAVE));
     sub_4DA8DC(yw, &exit_menu.itemBlock, a4 & 0x400, a2 & 0x400, Locale::Text::Common(Locale::CMN_LOAD));
@@ -7066,12 +7278,17 @@ void ypaworld_func64__sub7__sub6__sub3(NC_STACK_ypaworld *yw, int a2, int a4)
 
 void NC_STACK_ypaworld::ypaworld_func64__sub7__sub6(TInputState *inpt)
 {
+    if ( DesktopMenu() )
+        DskDevAid(this);
+
     if ( exit_menu.IsClosed() )
     {
 #ifdef UA_VR_ENABLED
         if ( VRPause() && (s_vrPausePage || s_vrPauseDirty) )
             VRPauseClosed(this);
 #endif
+        if ( DesktopMenu() && (s_dskPage || s_dskDirty) )
+            DskClosed(this);
         if ( _levelInfo.State != TLevelInfo::STATE_PLAYING )
         {
             if ( _levelInfo.State == TLevelInfo::STATE_SAVE )
@@ -7208,6 +7425,20 @@ void NC_STACK_ypaworld::ypaworld_func64__sub7__sub6(TInputState *inpt)
                 selId = -1; // handled: skip the original ids 8..12 below
             }
 #endif
+            // desktop: the controller page's rows and the main page's CONTROLLER SETTINGS
+            if ( DesktopMenu() && selId >= 8 && selId < 8 + s_dskRows && (s_dskPage || selId == 13) )
+            {
+                if ( winpt->flag & (TClickBoxInf::FLAG_BTN_DOWN | TClickBoxInf::FLAG_BTN_HOLD) )
+                    a2 |= 0x100 << (selId - 8);
+                if ( winpt->flag & TClickBoxInf::FLAG_BTN_UP )
+                {
+                    if ( s_dskPage )
+                        DskSettingClick(this, selId);
+                    else
+                        DskSetPage(this, 1);
+                }
+                selId = -1; // handled: skip the original ids 8..12 below
+            }
             switch ( selId )
             {
             case 7:
@@ -11831,6 +12062,26 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
         int v13 = _userUnit->_bact_type == BACT_TYPES_TANK || _userUnit->_bact_type == BACT_TYPES_CAR;
         int v34 = _userUnit->_bact_type == BACT_TYPES_ROBO;
 
+        // Vertical aim from the stick / right stick (input_aim.h): push up = aim up
+        // unless the profile inverts it. Tanks and cars use the tank setting, so do
+        // station guns and the host station's view; everything that flies uses the
+        // aircraft one.
+        bool invTank = (inPrefs & World::PREF_INVERTAIM_TANK) != 0;
+        bool invPitch = (v34 || _userUnit->_bact_type == BACT_TYPES_GUN) ? invTank
+                                                                       : (inPrefs & World::PREF_INVERTAIM_AIR) != 0;
+#ifdef UA_VR_ENABLED
+        // VR keeps its own tested controller mapping (the 1998 signs).
+        if ( VR::Active() )
+        {
+            invTank = false;
+            invPitch = true;
+        }
+#endif
+        // the pad's R1/L1 (momentary) may drive a tank in the "stick drives" layout
+        // while the stick's Y is idle; a joystick's throttle axis never does there.
+        const bool padThrottle = Input::Engine.PadThrottleButtons() && !_joyIgnoreZ
+                                 && fabs(inpt->Sliders[14]) >= 0.3;
+
         if ( !_framesElapsed )
         {
             _oldJoyX = inpt->Sliders[12];
@@ -11933,15 +12184,18 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
                 if ( inPrefs & World::PREF_ALTJOYSTICK )
                 {
                     if ( inpt->Sliders[16] != 0.0 )
-                        inpt->Sliders[5] += inpt->Sliders[16];
+                        inpt->Sliders[5] += InputAim::HatToGun(inpt->Sliders[16], invTank);
                     else
-                        inpt->Sliders[5] += inpt->Sliders[13] * 2.0;
+                        inpt->Sliders[5] += InputAim::StickToGun(inpt->Sliders[13], invTank);
                 }
                 else
                 {
 
                     if ( fabs(inpt->Sliders[13]) < 0.3 )
-                        inpt->Buttons.Set(3);
+                    {
+                        if ( !padThrottle )
+                            inpt->Buttons.Set(3);
+                    }
                     else
                         inpt->Sliders[4] += -inpt->Sliders[13];
 
@@ -11950,7 +12204,7 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
             }
             else
             {
-                inpt->Sliders[1] += inpt->Sliders[13];
+                inpt->Sliders[1] += InputAim::StickToPitch(inpt->Sliders[13], invPitch);
             }
         }
 
@@ -11975,7 +12229,15 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
                 else
                 {
                     if ( inpt->Sliders[5] == 0.0 )
-                        inpt->Sliders[5] += inpt->Sliders[16];
+                        inpt->Sliders[5] += InputAim::HatToGun(inpt->Sliders[16], invTank);
+
+                    // pad R1/L1: forward / back while the stick's Y is idle (the stick
+                    // wins when used; keyboard driving wins over both)
+                    if ( padThrottle && inpt->Sliders[4] == 0.0 && (_joyIgnoreY || fabs(inpt->Sliders[13]) < 0.3) )
+                    {
+                        inpt->Sliders[4] += inpt->Sliders[14];
+                        inpt->Buttons.Set(31);
+                    }
                 }
             }
             else
