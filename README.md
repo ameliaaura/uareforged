@@ -168,6 +168,12 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUC
 - Security problems: [SECURITY.md](SECURITY.md) (privately, please)
 - Help: [SUPPORT.md](SUPPORT.md)
 
+## Support
+
+UA Reforged is free and stays free. If you'd like to say thanks, you can leave an optional tip on
+[Patreon](https://www.patreon.com/AmeliaAura), or in bitcoin over Lightning at `ameliaaura@coinos.io`.
+A tip doesn't buy or unlock anything: every download and update is free for everyone.
+
 ## Licences
 
 | What | Licence |
