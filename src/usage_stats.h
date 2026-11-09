@@ -1,13 +1,15 @@
 #ifndef USAGE_STATS_H_INCLUDED
 #define USAGE_STATS_H_INCLUDED
 
-// Anonymous usage stats (opt-in). Wire format and every rule: docs/usage-stats.md (v2).
+// Anonymous usage stats (opt-in). Wire format and every rule: docs/usage-stats.md (v3).
 //
 // Off unless the player said yes. The question is asked once (desktop: the launcher's first-start
 // dialog; Quest: a start screen); Options has "Send anonymous usage stats" on the desktop and in VR.
 // When on, the game POSTs small JSON bodies to https://uareforged.pages.dev/api/ping:
-//   launch (+ os, gpu) · level_start · perf (after each mission) · crash (next start after a crash)
-//   · error (a code from a fixed list + a number)
+//   launch (+ os, gpu, coarse hardware) · level_start (+ loading time) · level_end (result, length, controls,
+//   Quest: table / unit time) · perf (after each mission) · session_end (minutes open, look / preset changes)
+//   · crash (next start after a crash) · error (a code from a fixed list + a number) · bug_report (a reference
+//   that matches the note the player writes on the site's form; the note itself never goes through here)
 // Background thread only, 3 s timeout, one retry, then a local queue of at most 20 events (oldest
 // dropped) sent on a later start. Never blocks the game; silent on failure; nothing about a request is
 // logged to disk (UA_STATS_DEBUG=1: one console line per request, never the install number).
@@ -16,10 +18,13 @@
 //   usage-stats.txt        answer + install number (deleted when turned off)
 //   usage-stats-queue.txt  unsent events (deleted when turned off)
 //   usage-stats-crash.txt  the last crash (deleted after sending, or at start when off)
+//   usage-stats-session.txt this session so far, rewritten once a minute (a killed / crashed session is sent
+//                          from it at the next start)
 //
 // The pure parts (state, records, body builder, perf maths, name clean-up) have no engine
 // dependencies and are unit-tested (tests/usage_stats_test.cpp).
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string>
 #include <utility>
@@ -86,6 +91,18 @@ std::string FormatQueue(const std::vector<Record> &q, size_t max);
 // Fixed error codes (docs/usage-stats.md)
 bool ValidErrorCode(const std::string &code);
 
+// Coarse hardware buckets (launch): 0 / "" = unknown (the field is left out).
+int BucketRamGb(long long mb);            // 2, 4, 8, 16, 32, 64 (= 64 or more)
+int BucketCores(int n);                   // 1, 2, 4, 6, 8, 12, 16, 24, 32 (= 32 or more)
+const char *DisplayBucket(int w, int h);  // sd, 720p, 1080p, 1440p, 4k, 5k+ (by height)
+// What was pressed: "keyboard_mouse" | "controller" | "mixed" | "vr_controllers" | "" (nothing).
+const char *InputKind(uint32_t kbm, uint32_t pad, bool vr);
+// Bug report reference: 8 characters from an unambiguous alphabet (not the install number).
+std::string MakeBugRef(const uint8_t bytes[16]);
+bool ValidBugRef(const std::string &ref);
+std::string BugReportUrl(const std::string &ref); // the site's feedback form with ?ref=
+extern const char *const kFeedbackUrl;
+
 // Coarse names: "NVIDIA GeForce RTX 3070/PCIe/SSE2" -> "NVIDIA GeForce RTX 3070", "Adreno (TM) 740" -> "Adreno 740".
 std::string CleanGpu(const std::string &raw);
 std::string CleanOs(const std::string &raw);
@@ -138,8 +155,14 @@ void SetEnabledByUser(bool on);
 void RecordAnswer(bool yes);
 
 // Events (each a no-op when off; return at once)
+struct Hardware
+{
+    int ramGb = 0, cores = 0, refreshHz = 0; // already bucketed / rounded; 0 = unknown
+    const char *display = "";                // DisplayBucket(); "" = unknown / not desktop
+};
 void Launch(const char *preset, const std::string &gpuRaw);
-void LevelStart(int level, const char *preset);
+void Launch(const char *preset, const std::string &gpuRaw, const Hardware &hw);
+void LevelStart(int level, const char *preset, long loadMs = -1);
 void Error(const char *code, long detail = -1, const char *preset = nullptr, int level = -1); // once per code per run
 // Perf: Begin at a mission start, Frame per played frame, End at its end (or quitting = true at quit,
 // then the record goes to the queue for the next start instead of the network).
@@ -147,9 +170,36 @@ void PerfBegin(int level);
 void PerfFrame(double ms);
 void PerfEnd(const char *preset, int resW, int resH, int vrHz, bool quitting);
 bool PerfRunning();
+
+// A whole mission (v3): Requested when the player asks for it (Play / Load / Restart / network), Begin when the
+// level is loaded, Frame on every gameplay frame (ms < 0 = no previous frame), End when it ends. The first Frame
+// sends level_start with the loading time; End sends perf + level_end (result: won | lost | quit | restart;
+// quitting = the app is closing: both wait in the queue for the next start). Frame is O(1): no allocation, no lock
+// (except once, on the first frame, to send level_start).
+enum VrView { VIEW_NONE = 0, VIEW_TABLE, VIEW_UNIT, VIEW_STATION }; // Quest only; desktop passes VIEW_NONE
+void MissionRequested();
+void MissionBegin(int level, const char *preset);
+void MissionFrame(double ms, int vrView, uintptr_t unit);
+void MissionEnd(const char *result, const char *preset, int resW, int resH, int vrHz, bool quitting);
+bool MissionRunning();
+
+// The session (session_end). Input counts: one relaxed atomic add per key press / click / pad button / stick push
+// (any thread). NotePreset: the Graphics preset as a stats value, called when it may have changed (counts preset
+// changes and New Look <-> Original switches). SessionTick: every frame; O(1), once a minute it hands the
+// session file to the background thread.
+enum InputSource { INPUT_KBM = 0, INPUT_PAD = 1 };
+void NoteInput(InputSource s);
+void NotePreset(const char *preset);
+void SessionTick();
+
+// "Report a bug": a new reference, the site's form opened in the browser with it, and (only when on) a
+// bug_report event with the same reference. Returns the reference ("" if no random bytes / too many this start).
+typedef bool (*UrlOpenFn)(const std::string &url);
+void SetUrlOpener(UrlOpenFn fn); // desktop: SDL_OpenURL; Quest: an Android VIEW intent
+std::string ReportBug(const char *preset, int level);
 // What the crash handler records about "now" (cheap; any thread).
 void SetCrashContext(const char *preset, int level);
-// At quit: waits up to 1 s for requests in flight, then keeps anything unsent in the queue.
+// At quit: session_end, then waits up to 1 s for requests in flight, then keeps anything unsent in the queue.
 void Shutdown();
 
 // Crash handler (usage_stats_crash.cpp): installs once; writes usage-stats-crash.txt only while on.

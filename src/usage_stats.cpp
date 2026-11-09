@@ -1,9 +1,10 @@
 // Anonymous usage stats: state, records, body builder, perf maths and the background sender.
-// Wire format: docs/usage-stats.md (v2). Platform parts: usage_stats_platform.cpp,
+// Wire format: docs/usage-stats.md (v3). Platform parts: usage_stats_platform.cpp,
 // usage_stats_net_apple.mm, usage_stats_crash.cpp.
 #include "usage_stats.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -142,19 +143,53 @@ bool ValidFrame(const std::string &f)
     return p != std::string::npos && p > 0 && ValidModule(f.substr(0, p)) && ValidOffset(f.substr(p + 1));
 }
 
-enum Kind { K_PRESET, K_LEVEL, K_NAME40, K_NAME64, K_RES, K_DEC, K_INT, K_SIGNAL, K_MODULE, K_OFFSET, K_FRAMES, K_BUILD, K_CODE };
+enum Kind
+{
+    K_PRESET, K_LEVEL, K_NAME40, K_NAME64, K_RES, K_DEC, K_INT, K_SIGNAL, K_MODULE, K_OFFSET, K_FRAMES, K_BUILD, K_CODE,
+    K_ENUM,   // one of opts (a string)
+    K_INTSET, // one of opts (an integer)
+    K_CODES,  // array of error codes, lo..hi entries
+    K_REF     // bug report reference
+};
 
 struct Spec
 {
     const char *key;
     Kind kind;
     bool required;
-    double lo, hi;
+    double lo, hi;           // numbers: range; K_FRAMES / K_CODES: entry count (hi 0 = 32)
+    const char *const *opts = nullptr; // K_ENUM / K_INTSET: nullptr-terminated list
 };
 
+const char *const kRamOpts[] = {"2", "4", "8", "16", "32", "64", nullptr};
+const char *const kCoreOpts[] = {"1", "2", "4", "6", "8", "12", "16", "24", "32", nullptr};
+const char *const kDisplayOpts[] = {"sd", "720p", "1080p", "1440p", "4k", "5k+", nullptr};
+const char *const kInputOpts[] = {"keyboard_mouse", "controller", "mixed", "vr_controllers", nullptr};
+const char *const kResultOpts[] = {"won", "lost", "quit", "restart", nullptr};
+const char *const kEndedOpts[] = {"quit", "killed", "crash", nullptr};
+
 const Spec kLaunch[] = {
-    {"preset", K_PRESET, true, 0, 0}, {"os", K_NAME40, true, 0, 0}, {"gpu", K_NAME64, true, 0, 0}};
-const Spec kLevelStart[] = {{"preset", K_PRESET, true, 0, 0}, {"level", K_LEVEL, true, 0, 9999}};
+    {"preset", K_PRESET, true, 0, 0},       {"os", K_NAME40, true, 0, 0},          {"gpu", K_NAME64, true, 0, 0},
+    {"ram_gb", K_INTSET, false, 0, 0, kRamOpts}, {"cpu_cores", K_INTSET, false, 0, 0, kCoreOpts},
+    {"refresh_hz", K_INT, false, 1, 500},   {"display", K_ENUM, false, 0, 0, kDisplayOpts}};
+const Spec kLevelStart[] = {
+    {"preset", K_PRESET, true, 0, 0}, {"level", K_LEVEL, true, 0, 9999}, {"load_ms", K_INT, false, 0, 600000}};
+const Spec kLevelEnd[] = {
+    {"preset", K_PRESET, true, 0, 0},       {"level", K_LEVEL, true, 0, 9999},
+    {"result", K_ENUM, true, 0, 0, kResultOpts}, {"duration_s", K_INT, true, 0, 86400},
+    {"input", K_ENUM, false, 0, 0, kInputOpts},  {"vr_table_s", K_INT, false, 0, 86400},
+    {"vr_unit_s", K_INT, false, 0, 86400},  {"vr_jumps", K_INT, false, 0, 100000}};
+const Spec kSessionEnd[] = {
+    {"preset", K_PRESET, true, 0, 0},           {"minutes", K_INT, true, 0, 100000},
+    {"levels", K_INT, true, 0, 10000},          {"ended", K_ENUM, true, 0, 0, kEndedOpts},
+    {"input", K_ENUM, false, 0, 0, kInputOpts}, {"look_switches", K_INT, true, 0, 1000},
+    {"preset_changes", K_INT, true, 0, 1000}};
+const Spec kBugReport[] = {
+    {"ref", K_REF, true, 0, 0},                 {"preset", K_PRESET, true, 0, 0},
+    {"level", K_LEVEL, false, 0, 9999},         {"minutes", K_INT, true, 0, 100000},
+    {"input", K_ENUM, false, 0, 0, kInputOpts}, {"errors", K_CODES, false, 0, 10},
+    {"crash_signal", K_SIGNAL, false, 0, 0},    {"crash_frames", K_FRAMES, false, 1, 5},
+    {"fps_avg", K_DEC, false, 0, 1000},         {"fps_p1low", K_DEC, false, 0, 1000}};
 const Spec kPerf[] = {
     {"preset", K_PRESET, true, 0, 0},     {"level", K_LEVEL, true, 0, 9999},
     {"res", K_RES, true, 0, 0},           {"fps_avg", K_DEC, true, 0, 1000},
@@ -179,9 +214,12 @@ bool SpecFor(const std::string &ev, const Spec **s, size_t *n)
 #define UAS_SPEC(name, arr) if ( ev == name ) { *s = arr; *n = sizeof(arr) / sizeof(arr[0]); return true; }
     UAS_SPEC("launch", kLaunch)
     UAS_SPEC("level_start", kLevelStart)
+    UAS_SPEC("level_end", kLevelEnd)
     UAS_SPEC("perf", kPerf)
+    UAS_SPEC("session_end", kSessionEnd)
     UAS_SPEC("crash", kCrash)
     UAS_SPEC("error", kError)
+    UAS_SPEC("bug_report", kBugReport)
 #undef UAS_SPEC
     return false;
 }
@@ -219,7 +257,9 @@ std::string Value(const Spec &sp, const std::string &v)
     case K_BUILD: return Charset(v, "._-", 1, 40) ? "\"" + v + "\"" : "";
     case K_CODE: return ValidErrorCode(v) ? "\"" + v + "\"" : "";
     case K_FRAMES:
+    case K_CODES:
     {
+        const size_t maxN = sp.hi > 0 ? (size_t)sp.hi : 32;
         std::string out = "[";
         size_t count = 0, a = 0;
         if ( !v.empty() )
@@ -228,7 +268,8 @@ std::string Value(const Spec &sp, const std::string &v)
             {
                 size_t b = v.find(',', a);
                 std::string f = v.substr(a, b == std::string::npos ? std::string::npos : b - a);
-                if ( !ValidFrame(f) || ++count > 32 )
+                const bool ok = sp.kind == K_FRAMES ? ValidFrame(f) : ValidErrorCode(f);
+                if ( !ok || ++count > maxN )
                     return "";
                 if ( count > 1 ) out += ",";
                 out += "\"" + f + "\"";
@@ -236,8 +277,17 @@ std::string Value(const Spec &sp, const std::string &v)
                 a = b + 1;
             }
         }
+        if ( count < (size_t)sp.lo )
+            return "";
         return out + "]";
     }
+    case K_ENUM:
+    case K_INTSET:
+        for (const char *const *o = sp.opts; o && *o; o++)
+            if ( v == *o )
+                return sp.kind == K_ENUM ? "\"" + v + "\"" : v;
+        return "";
+    case K_REF: return ValidBugRef(v) ? "\"" + v + "\"" : "";
     }
     return "";
 }
@@ -415,7 +465,7 @@ std::string BuildBody(const std::string &install, const Common &c, const Record 
         if ( !known )
             return "";
     }
-    std::string body = "{\"v\":2,\"install\":\"" + install + "\",\"app\":\"" + c.app + "\",\"platform\":\"" + c.platform +
+    std::string body = "{\"v\":3,\"install\":\"" + install + "\",\"app\":\"" + c.app + "\",\"platform\":\"" + c.platform +
                        "\",\"version\":\"" + version + "\",\"event\":\"" + ev + "\"";
     for (size_t i = 0; i < n; i++)
     {
@@ -498,6 +548,80 @@ std::string FormatQueue(const std::vector<Record> &q, size_t max)
     for (size_t i = from; i < q.size(); i++)
         t += FormatRecordLine(q[i]) + "\n";
     return t;
+}
+
+// ------------------------------------------------------------------ v3 helpers
+const char *const kFeedbackUrl = "https://uareforged.pages.dev/contribute/";
+
+int BucketRamGb(long long mb)
+{
+    if ( mb <= 0 )
+        return 0;
+    // what the system reports is a little under the nominal size (memory kept by the system / the graphics chip):
+    // anything from 85 % of a size up counts as that size (15.4 GB reported = 16, 7.4 GB = 8)
+    static const int b[] = {64, 32, 16, 8, 4};
+    for (int v : b)
+        if ( mb * 100 >= (long long)v * 1024 * 85 ) return v;
+    return 2;
+}
+
+int BucketCores(int n)
+{
+    if ( n <= 0 )
+        return 0;
+    static const int b[] = {32, 24, 16, 12, 8, 6, 4, 2};
+    for (int v : b)
+        if ( n >= v ) return v;
+    return 1;
+}
+
+const char *DisplayBucket(int w, int h)
+{
+    if ( w <= 0 || h <= 0 )
+        return "";
+    if ( h < 720 ) return "sd";
+    if ( h < 1080 ) return "720p";
+    if ( h < 1440 ) return "1080p";
+    if ( h < 2160 ) return "1440p";
+    if ( h < 2880 ) return "4k";
+    return "5k+";
+}
+
+const char *InputKind(uint32_t kbm, uint32_t pad, bool vr)
+{
+    if ( vr )
+        return "vr_controllers";
+    if ( !kbm && !pad )
+        return "";
+    const uint64_t lo = std::min(kbm, pad), hi = std::max(kbm, pad);
+    if ( lo > 0 && lo * 10 >= hi )
+        return "mixed";
+    return kbm > pad ? "keyboard_mouse" : "controller";
+}
+
+static const char kRefAlphabet[] = "abcdefghjkmnpqrstuvwxyz23456789"; // 31: no i, l, o, 0, 1
+
+std::string MakeBugRef(const uint8_t b[16])
+{
+    std::string r;
+    for (int i = 0; i < 8; i++)
+        r += kRefAlphabet[((unsigned)b[2 * i] << 8 | b[2 * i + 1]) % 31]; // 16 bits per character: bias < 0.05 %
+    return r;
+}
+
+bool ValidBugRef(const std::string &ref)
+{
+    if ( ref.size() != 8 )
+        return false;
+    for (char c : ref)
+        if ( !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) )
+            return false;
+    return true;
+}
+
+std::string BugReportUrl(const std::string &ref)
+{
+    return ValidBugRef(ref) ? std::string(kFeedbackUrl) + "?ref=" + ref + "#feedback" : std::string(kFeedbackUrl) + "#feedback";
 }
 
 // ------------------------------------------------------------------ names
@@ -642,6 +766,8 @@ bool UrlAllowed(const std::string &url)
 // ------------------------------------------------------------------ runtime
 namespace
 {
+typedef std::chrono::steady_clock Clock;
+
 struct Item
 {
     Record r;
@@ -658,15 +784,46 @@ struct Runtime
     uint32_t gen = 0;
     bool inited = false, debug = false, shutdown = false;
     State st;
-    std::string dir, statePath, queuePath, crashPath, url;
+    std::string dir, statePath, queuePath, crashPath, sessionPath, url;
     Common c;
     std::set<std::string> errorsSent;
+    std::vector<std::string> errorList;  // the same codes in the order sent (bug_report)
     SendFn send = nullptr;
     RandomFn rnd = nullptr;
-    // perf (main thread only)
+    UrlOpenFn openUrl = nullptr;
+    // the crash reported at this start (bug_report)
+    std::string lastCrashSignal, lastCrashFrames;
+    // session file: written by the worker (once a minute), never after shutdown
+    std::string sessionText;
+    bool sessionDirty = false;
+    std::mutex sessionFileM;
+    std::atomic<bool> sessionClosed{false};
+
+    // ---- main thread only (no lock)
     PerfHist perf;
     bool perfOn = false;
     int perfLevel = -1;
+    // mission
+    bool missionOn = false, missionStarted = false;
+    int missionLevel = -1;
+    char missionPreset[16] = "original";
+    bool reqValid = false;
+    Clock::time_point reqT, missionT0;
+    uint32_t mKbm0 = 0, mPad0 = 0;
+    double mTableMs = 0, mUnitMs = 0;
+    uint32_t mJumps = 0;
+    uintptr_t mUnit = 0;
+    // last perf of this session (bug_report)
+    std::string lastFpsAvg, lastFpsLow;
+    int lastLevel = -1;
+    // session
+    Clock::time_point sessionT0, nextCheckpoint;
+    uint32_t sessionLevels = 0, lookSwitches = 0, presetChanges = 0;
+    char sessionPreset[16] = "";
+    int bugReports = 0;
+
+    // ---- any thread
+    std::atomic<uint32_t> inKbm{0}, inPad{0};
 };
 
 // never destroyed: the detached worker may still run while the process exits
@@ -681,6 +838,13 @@ void Debug(const std::string &event, const char *what)
     if ( R().debug )
         fprintf(stderr, "usage stats: %s %s\n", event.c_str(), what);
 }
+
+void CopyPreset(char out[16], const char *preset)
+{
+    snprintf(out, 16, "%s", preset && preset[0] ? preset : "original");
+}
+
+bool IsVr(const Runtime &r) { return r.c.app == "vr"; }
 
 void SaveStateLocked(Runtime &r)
 {
@@ -701,13 +865,37 @@ void QueueAppendLocked(Runtime &r, const std::vector<Record> &add)
     FileWriteAtomic(r.queuePath, FormatQueue(q, kQueueMax));
 }
 
+// the session file: "" = remove it. Serialised with Shutdown / turning off by sessionFileM.
+void WriteSessionFile(Runtime &r, const std::string &text)
+{
+    std::lock_guard<std::mutex> g(r.sessionFileM);
+    if ( r.sessionClosed.load() || r.sessionPath.empty() )
+        return;
+    if ( text.empty() )
+        FileRemove(r.sessionPath);
+    else
+    {
+        MakeDir(r.dir);
+        FileWriteAtomic(r.sessionPath, text);
+    }
+}
+
 void Worker()
 {
     Runtime &r = R();
     std::unique_lock<std::mutex> lk(r.m);
     for (;;)
     {
-        r.cv.wait(lk, [&r] { return !r.pending.empty(); });
+        r.cv.wait(lk, [&r] { return !r.pending.empty() || r.sessionDirty; });
+        if ( r.sessionDirty )
+        {
+            r.sessionDirty = false;
+            const std::string text = Sending(r.st) ? r.sessionText : std::string();
+            lk.unlock();
+            WriteSessionFile(r, text);
+            lk.lock();
+            continue;
+        }
         Item it = r.pending.front();
         r.pending.pop_front();
         if ( !Sending(r.st) || r.shutdown )
@@ -751,6 +939,16 @@ void Worker()
     }
 }
 
+void StartWorkerLocked(Runtime &r)
+{
+    if ( !r.worker )
+    {
+        r.worker = true;
+        std::thread(Worker).detach();
+    }
+    r.cv.notify_all();
+}
+
 void EnqueueLocked(Runtime &r, const Item &it)
 {
     if ( !Sending(r.st) || r.shutdown )
@@ -758,12 +956,7 @@ void EnqueueLocked(Runtime &r, const Item &it)
     r.pending.push_back(it);
     while ( r.pending.size() > kQueueMax )
         r.pending.pop_front();
-    if ( !r.worker )
-    {
-        r.worker = true;
-        std::thread(Worker).detach();
-    }
-    r.cv.notify_all();
+    StartWorkerLocked(r);
 }
 
 void Enqueue(const Record &rec)
@@ -774,10 +967,68 @@ void Enqueue(const Record &rec)
     it.r = rec;
     EnqueueLocked(r, it);
 }
+
+// send now, or (the app is closing) keep it in the queue for the next start
+void SendOrKeep(const Record &rec, bool quitting)
+{
+    Runtime &r = R();
+    if ( quitting )
+    {
+        std::lock_guard<std::mutex> g(r.m);
+        QueueAppendLocked(r, {rec});
+        Debug(rec.Get("event"), "kept for the next start (quit)");
+    }
+    else
+        Enqueue(rec);
+}
+
+long MinutesSince(Clock::time_point t0)
+{
+    const long m = (long)std::chrono::duration_cast<std::chrono::minutes>(Clock::now() - t0).count();
+    return std::max(0L, std::min(100000L, m));
+}
+
+const char *SessionInput(const Runtime &r)
+{
+    return InputKind(r.inKbm.load(std::memory_order_relaxed), r.inPad.load(std::memory_order_relaxed), IsVr(r));
+}
+
+// this session as a session_end record (ended = quit; a leftover file is changed to killed / crash at the next start)
+Record SessionRecord(const Runtime &r)
+{
+    Record rec;
+    rec.Set("event", "session_end");
+    rec.Set("version", r.c.version);
+    rec.Set("preset", r.sessionPreset[0] ? r.sessionPreset : "original");
+    rec.Set("minutes", Int(MinutesSince(r.sessionT0)));
+    rec.Set("levels", Int(std::min<uint32_t>(10000, r.sessionLevels)));
+    rec.Set("ended", "quit");
+    const char *in = SessionInput(r);
+    if ( in[0] ) rec.Set("input", in);
+    rec.Set("look_switches", Int(std::min<uint32_t>(1000, r.lookSwitches)));
+    rec.Set("preset_changes", Int(std::min<uint32_t>(1000, r.presetChanges)));
+    return rec;
+}
+
+// hand the session file to the worker (main thread; once a minute and at mission ends)
+void Checkpoint()
+{
+    Runtime &r = R();
+    Record rec = SessionRecord(r);
+    rec.Set("ended", "killed");
+    const std::string line = FormatRecordLine(rec) + "\n";
+    std::lock_guard<std::mutex> g(r.m);
+    if ( !Sending(r.st) || r.shutdown || r.sessionPath.empty() )
+        return;
+    r.sessionText = line;
+    r.sessionDirty = true;
+    StartWorkerLocked(r);
+}
 } // namespace
 
 void SetSender(SendFn fn) { std::lock_guard<std::mutex> g(R().m); R().send = fn; }
 void SetRandom(RandomFn fn) { std::lock_guard<std::mutex> g(R().m); R().rnd = fn; }
+void SetUrlOpener(UrlOpenFn fn) { std::lock_guard<std::mutex> g(R().m); R().openUrl = fn; }
 
 void Init(const std::string &dirIn, const char *app, const char *platform, const char *version, const char *build)
 {
@@ -786,6 +1037,8 @@ void Init(const std::string &dirIn, const char *app, const char *platform, const
     if ( r.inited )
         return;
     r.inited = true;
+    r.sessionT0 = Clock::now();
+    r.nextCheckpoint = r.sessionT0; // the first frame writes the session file, then once a minute
     if ( !r.send ) r.send = DefaultSend;
     if ( !r.rnd ) r.rnd = OsRandom;
     r.c.app = app ? app : "";
@@ -808,6 +1061,7 @@ void Init(const std::string &dirIn, const char *app, const char *platform, const
     r.statePath = PathJoin(r.dir, "usage-stats.txt");
     r.queuePath = PathJoin(r.dir, "usage-stats-queue.txt");
     r.crashPath = PathJoin(r.dir, "usage-stats-crash.txt");
+    r.sessionPath = PathJoin(r.dir, "usage-stats-session.txt");
 
     std::string text;
     if ( FileRead(r.statePath, &text, 4096) )
@@ -823,7 +1077,8 @@ void Init(const std::string &dirIn, const char *app, const char *platform, const
     const bool on = Sending(r.st);
     // the last crash: sent now when on, deleted unsent when off
     std::string crash;
-    if ( FileRead(r.crashPath, &crash, 16384) )
+    const bool crashed = FileRead(r.crashPath, &crash, 16384);
+    if ( crashed )
     {
         Record rec;
         if ( on && ParseRecordLine(crash, &rec) && rec.Get("event") == "crash" )
@@ -832,9 +1087,29 @@ void Init(const std::string &dirIn, const char *app, const char *platform, const
             it.r = rec;
             it.crashFile = true;
             EnqueueLocked(r, it);
+            r.lastCrashSignal = rec.Get("signal");
+            const std::string fr = rec.Get("frames");
+            size_t cut = 0;
+            for (int n = 0; n < 5 && cut != std::string::npos; n++)
+                cut = fr.find(',', cut ? cut + 1 : 0);
+            r.lastCrashFrames = fr.substr(0, cut);
         }
         else
             FileRemove(r.crashPath);
+    }
+    // the previous session if it didn't close normally (killed by the system, force-quit, crashed)
+    std::string sess;
+    if ( FileRead(r.sessionPath, &sess, 4096) )
+    {
+        FileRemove(r.sessionPath);
+        Record rec;
+        if ( on && ParseRecordLine(sess, &rec) && rec.Get("event") == "session_end" )
+        {
+            rec.Set("ended", crashed ? "crash" : "killed");
+            Item it;
+            it.r = rec;
+            EnqueueLocked(r, it);
+        }
     }
     // unsent events from earlier starts (and launcher errors)
     std::string q;
@@ -849,6 +1124,7 @@ void Init(const std::string &dirIn, const char *app, const char *platform, const
                 {
                     if ( r.errorsSent.count(rec.Get("code")) ) continue;
                     r.errorsSent.insert(rec.Get("code"));
+                    r.errorList.push_back(rec.Get("code"));
                 }
                 Item it;
                 it.r = rec;
@@ -866,29 +1142,39 @@ bool Asked() { std::lock_guard<std::mutex> g(R().m); return R().st.answer != ANS
 static void Apply(bool on, bool answer)
 {
     Runtime &r = R();
-    std::lock_guard<std::mutex> g(r.m);
-    if ( r.dir.empty() )
-        return;
-    if ( answer ) ApplyAnswer(r.st, on, r.rnd);
-    else SetEnabled(r.st, on, r.rnd);
-    r.gen++;
-    if ( !Sending(r.st) )
     {
-        // off: nothing unsent stays behind, on the device or in memory
-        r.pending.clear();
-        FileRemove(r.queuePath);
-        FileRemove(r.crashPath);
+        std::lock_guard<std::mutex> g(r.m);
+        if ( r.dir.empty() )
+            return;
+        if ( answer ) ApplyAnswer(r.st, on, r.rnd);
+        else SetEnabled(r.st, on, r.rnd);
+        r.gen++;
+        if ( !Sending(r.st) )
+        {
+            // off: nothing unsent stays behind, on the device or in memory
+            r.pending.clear();
+            r.sessionDirty = false;
+            FileRemove(r.queuePath);
+            FileRemove(r.crashPath);
+        }
+        SaveStateLocked(r);
+        CrashHandlerEnabled(Sending(r.st));
+        Debug("setting", Sending(r.st) ? "on (new install number)" : "off (install number deleted)");
     }
-    SaveStateLocked(r);
-    CrashHandlerEnabled(Sending(r.st));
-    Debug("setting", Sending(r.st) ? "on (new install number)" : "off (install number deleted)");
+    if ( !on )
+        WriteSessionFile(r, std::string());
 }
 
 void SetEnabledByUser(bool on) { Apply(on, false); }
 void RecordAnswer(bool yes) { Apply(yes, true); }
 
-void Launch(const char *preset, const std::string &gpuRaw)
+void Launch(const char *preset, const std::string &gpuRaw) { Launch(preset, gpuRaw, Hardware()); }
+
+void Launch(const char *preset, const std::string &gpuRaw, const Hardware &hw)
 {
+    Runtime &rt = R();
+    if ( !rt.sessionPreset[0] )
+        CopyPreset(rt.sessionPreset, preset);
     if ( !Enabled() )
         return;
     Record r;
@@ -896,10 +1182,14 @@ void Launch(const char *preset, const std::string &gpuRaw)
     r.Set("preset", preset ? preset : "original");
     r.Set("os", CleanOs(OsName()));
     r.Set("gpu", CleanGpu(gpuRaw));
+    if ( hw.ramGb > 0 ) r.Set("ram_gb", Int(hw.ramGb));
+    if ( hw.cores > 0 ) r.Set("cpu_cores", Int(hw.cores));
+    if ( hw.refreshHz > 0 ) r.Set("refresh_hz", Int(std::min(500, hw.refreshHz)));
+    if ( hw.display && hw.display[0] ) r.Set("display", hw.display);
     Enqueue(r);
 }
 
-void LevelStart(int level, const char *preset)
+void LevelStart(int level, const char *preset, long loadMs)
 {
     SetCrashContext(preset, level);
     if ( !Enabled() )
@@ -908,6 +1198,7 @@ void LevelStart(int level, const char *preset)
     r.Set("event", "level_start");
     r.Set("preset", preset ? preset : "original");
     r.Set("level", Int(level));
+    if ( loadMs >= 0 ) r.Set("load_ms", Int(std::min(600000L, loadMs)));
     Enqueue(r);
 }
 
@@ -918,6 +1209,7 @@ void Error(const char *code, long detail, const char *preset, int level)
     if ( !Sending(rt.st) || !code || !ValidErrorCode(code) || rt.errorsSent.count(code) )
         return;
     rt.errorsSent.insert(code);
+    rt.errorList.push_back(code);
     Record r;
     r.Set("event", "error");
     r.Set("code", code);
@@ -953,16 +1245,190 @@ void PerfEnd(const char *preset, int resW, int resH, int vrHz, bool quitting)
         return;
     r.perfOn = false;
     Record rec;
-    if ( !Enabled() || !PerfRecord(r.perf, r.perfLevel, preset ? preset : "original", resW, resH, vrHz, &rec) )
+    if ( !PerfRecord(r.perf, r.perfLevel, preset ? preset : "original", resW, resH, vrHz, &rec) )
         return;
-    if ( quitting )
+    r.lastFpsAvg = rec.Get("fps_avg");
+    r.lastFpsLow = rec.Get("fps_p1low");
+    if ( Enabled() )
+        SendOrKeep(rec, quitting);
+}
+
+// ------------------------------------------------------------------ missions
+void MissionRequested()
+{
+    Runtime &r = R();
+    r.reqT = Clock::now();
+    r.reqValid = true;
+}
+
+void MissionBegin(int level, const char *preset)
+{
+    Runtime &r = R();
+    PerfBegin(level);
+    r.missionOn = true;
+    r.missionStarted = false;
+    r.missionLevel = level;
+    r.lastLevel = level;
+    CopyPreset(r.missionPreset, preset);
+    r.mKbm0 = r.inKbm.load(std::memory_order_relaxed);
+    r.mPad0 = r.inPad.load(std::memory_order_relaxed);
+    r.mTableMs = r.mUnitMs = 0;
+    r.mJumps = 0;
+    r.mUnit = 0;
+    SetCrashContext(r.missionPreset, level);
+}
+
+void MissionFrame(double ms, int vrView, uintptr_t unit)
+{
+    Runtime &r = R();
+    if ( !r.missionOn )
+        return;
+    if ( !r.missionStarted )
     {
-        std::lock_guard<std::mutex> g(r.m);
-        QueueAppendLocked(r, {rec}); // the app is closing: sent on the next start
-        Debug("perf", "kept for the next start (quit)");
+        // the first playable frame: level_start with the loading time (once per mission)
+        r.missionStarted = true;
+        r.missionT0 = Clock::now();
+        if ( r.sessionLevels < 100000 ) r.sessionLevels++;
+        long loadMs = -1;
+        if ( r.reqValid )
+            loadMs = (long)std::chrono::duration_cast<std::chrono::milliseconds>(r.missionT0 - r.reqT).count();
+        r.reqValid = false;
+        LevelStart(r.missionLevel, r.missionPreset, loadMs);
+        Checkpoint(); // the session file counts this mission even if the app is killed during it
     }
-    else
-        Enqueue(rec);
+    if ( ms >= 0 )
+    {
+        if ( r.perfOn )
+            r.perf.Add(ms);
+        if ( vrView == VIEW_TABLE ) r.mTableMs += ms;
+        else if ( vrView == VIEW_UNIT ) r.mUnitMs += ms;
+    }
+    if ( vrView != VIEW_NONE && unit && unit != r.mUnit )
+    {
+        if ( r.mUnit && vrView == VIEW_UNIT && r.mJumps < 100000 )
+            r.mJumps++; // into a (different) unit; back to the host station is not a jump
+        r.mUnit = unit;
+    }
+}
+
+bool MissionRunning() { return R().missionOn; }
+
+void MissionEnd(const char *result, const char *preset, int resW, int resH, int vrHz, bool quitting)
+{
+    Runtime &r = R();
+    if ( !r.missionOn )
+        return;
+    r.missionOn = false;
+    const char *p = preset ? preset : "original";
+    PerfEnd(p, resW, resH, vrHz, quitting);
+    SetCrashContext(p, -1);
+    if ( !r.missionStarted || !result )
+        return; // never reached a playable frame: no level_end (level_load_failed covers that)
+    Record rec;
+    rec.Set("event", "level_end");
+    rec.Set("preset", p);
+    rec.Set("level", Int(r.missionLevel));
+    rec.Set("result", result);
+    const long dur = (long)std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - r.missionT0).count();
+    rec.Set("duration_s", Int(std::max(0L, std::min(86400L, dur))));
+    const char *in = InputKind(r.inKbm.load(std::memory_order_relaxed) - r.mKbm0, r.inPad.load(std::memory_order_relaxed) - r.mPad0, IsVr(r));
+    if ( in[0] ) rec.Set("input", in);
+    if ( IsVr(r) )
+    {
+        rec.Set("vr_table_s", Int(std::min(86400L, (long)(r.mTableMs / 1000.0 + 0.5))));
+        rec.Set("vr_unit_s", Int(std::min(86400L, (long)(r.mUnitMs / 1000.0 + 0.5))));
+        rec.Set("vr_jumps", Int(r.mJumps));
+    }
+    if ( Enabled() )
+        SendOrKeep(rec, quitting);
+    if ( !quitting )
+        Checkpoint();
+}
+
+// ------------------------------------------------------------------ session
+void NoteInput(InputSource s)
+{
+    Runtime &r = R();
+    (s == INPUT_PAD ? r.inPad : r.inKbm).fetch_add(1, std::memory_order_relaxed);
+}
+
+void NotePreset(const char *preset)
+{
+    Runtime &r = R();
+    if ( !preset || !preset[0] )
+        return;
+    if ( !r.sessionPreset[0] )
+    {
+        CopyPreset(r.sessionPreset, preset); // the first value: not a change
+        return;
+    }
+    if ( !strcmp(r.sessionPreset, preset) )
+        return;
+    const bool wasOriginal = !strcmp(r.sessionPreset, "original"), isOriginal = !strcmp(preset, "original");
+    if ( r.presetChanges < 100000 ) r.presetChanges++;
+    if ( wasOriginal != isOriginal && r.lookSwitches < 100000 ) r.lookSwitches++;
+    CopyPreset(r.sessionPreset, preset);
+}
+
+void SessionTick()
+{
+    Runtime &r = R();
+    if ( !r.inited )
+        return;
+    const Clock::time_point now = Clock::now();
+    if ( now < r.nextCheckpoint )
+        return;
+    r.nextCheckpoint = now + std::chrono::seconds(60);
+    Checkpoint();
+}
+
+// ------------------------------------------------------------------ bug report
+std::string ReportBug(const char *preset, int level)
+{
+    Runtime &rt = R();
+    uint8_t b[16];
+    RandomFn rnd;
+    UrlOpenFn open;
+    {
+        std::lock_guard<std::mutex> g(rt.m);
+        rnd = rt.rnd ? rt.rnd : OsRandom;
+        open = rt.openUrl;
+    }
+    if ( rt.bugReports >= 5 || !rnd(b) )
+    {
+        if ( open ) open(BugReportUrl(""));
+        return "";
+    }
+    rt.bugReports++;
+    const std::string ref = MakeBugRef(b);
+    if ( Enabled() )
+    {
+        Record r;
+        r.Set("event", "bug_report");
+        r.Set("ref", ref);
+        r.Set("preset", preset ? preset : "original");
+        const int lv = level >= 0 ? level : rt.lastLevel;
+        if ( lv >= 0 && lv <= 9999 ) r.Set("level", Int(lv));
+        r.Set("minutes", Int(MinutesSince(rt.sessionT0)));
+        const char *in = SessionInput(rt);
+        if ( in[0] ) r.Set("input", in);
+        {
+            std::lock_guard<std::mutex> g(rt.m);
+            std::string codes;
+            for (size_t i = 0; i < rt.errorList.size() && i < 10; i++)
+                codes += (i ? "," : "") + rt.errorList[i];
+            if ( !codes.empty() ) r.Set("errors", codes);
+            if ( !rt.lastCrashSignal.empty() ) r.Set("crash_signal", rt.lastCrashSignal);
+            if ( !rt.lastCrashFrames.empty() ) r.Set("crash_frames", rt.lastCrashFrames);
+        }
+        if ( !rt.lastFpsAvg.empty() ) r.Set("fps_avg", rt.lastFpsAvg);
+        if ( !rt.lastFpsLow.empty() ) r.Set("fps_p1low", rt.lastFpsLow);
+        Enqueue(r);
+        Debug("bug_report", "queued with the report reference");
+    }
+    if ( open && !open(BugReportUrl(ref)) )
+        Debug("bug_report", "the browser could not be opened");
+    return ref;
 }
 
 void SetCrashContext(const char *preset, int level)
@@ -973,7 +1439,18 @@ void SetCrashContext(const char *preset, int level)
 void Shutdown()
 {
     Runtime &r = R();
+    // this session, closed normally: sent now or kept in the queue below; the session file goes
+    const Record sess = SessionRecord(r);
+    if ( r.inited && Enabled() )
+        Enqueue(sess);
+    r.sessionClosed = true;
+    {
+        std::lock_guard<std::mutex> g(r.sessionFileM);
+        if ( !r.sessionPath.empty() )
+            FileRemove(r.sessionPath);
+    }
     std::unique_lock<std::mutex> lk(r.m);
+    r.sessionDirty = false;
     r.cv.wait_for(lk, std::chrono::milliseconds(1000), [&r] { return r.pending.empty() && !r.inFlight; });
     std::vector<Record> left;
     bool crash = false;

@@ -70,8 +70,10 @@ thumbstick and press A).
   * Pause > Settings > DISPLAY sets the refresh rate (90 Hz by default).
   * Recentre the view: hold the Meta button on the right controller.
   * Anonymous usage stats: optional, off unless you say yes on the first start. Change it any time in
-    Pause > Settings > CONTROLS, PRIVACY. When on: crash reports, performance summaries, error codes and a
-    usage count; no name, no IP, no files, no personal data. Details: docs/usage-stats.md in the source.
+    Pause > Settings > CONTROLS, PRIVACY. When on: crash reports, performance summaries, how missions end
+    and how long they load, session length, time at the table / inside units, coarse headset details, error
+    codes and a usage count; no name, no IP, no files, no personal data. Details: docs/usage-stats.md.
+  * Pause > Report a Bug opens the feedback form on the website in the headset's browser.
 
 
 Uninstall: App Library > Unknown Sources > UA Reforged VR > ... > Uninstall (this also removes the

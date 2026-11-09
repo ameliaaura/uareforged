@@ -60,7 +60,7 @@ int dword_5C8B88;
 // menu: in a VR session the exit menu is the VR
 // pause panel. The VR Menu button toggles it from anywhere (yw case 24); it
 // pauses like the original. Two pages, laid out in the same window:
-//   main:     Continue / Settings / Show-Hide Controls / Save / Load / Restart / Exit Mission
+//   main:     Continue / Settings / Show-Hide Controls / Report a Bug / Save / Load / Restart / Exit Mission
 // settings: the VR Settings rows + FPS COUNTER (cycle on click, applied
 //             live, saved to the profile when the panel closes) / Back
 // Button ids stay in the list's 8..15 range: on the main page 8..12 keep their
@@ -76,7 +76,8 @@ static int s_vrPauseRows = 0;       // rows the window is laid out for (0 = not 
 static bool s_vrPauseCard = false;  // CONTROLS toggle: card beside the panel
 static bool s_vrPauseDirty = false; // a setting changed: save the profile on close
 static bool s_vrPauseResDirty = false; // RESTORE DEFAULTS reset the stored resolution
-static const int kVRPauseMain[7] = {12, 13, 14, 9, 10, 11, 8};
+static const int kVRPauseMain[8] = {12, 13, 14, 15, 9, 10, 11, 8}; // 15 = Report a Bug
+static std::string s_vrBugRef;      // the last report's reference, shown on its row
 
 // the Settings page grouped into
 // COMFORT / VIEW / CONTROLS with header rows, the new comfort rows (tunnel vision
@@ -115,7 +116,8 @@ static const int kVRPauseMaxRows = 15;
 
 static int VRPageRows(int page)
 {
-    return page == 2 ? (int)(sizeof(kVRPage2) / sizeof(int)) : page == 1 ? (int)(sizeof(kVRPage1) / sizeof(int)) : 7;
+    return page == 2 ? (int)(sizeof(kVRPage2) / sizeof(int)) : page == 1 ? (int)(sizeof(kVRPage1) / sizeof(int))
+                     : (int)(sizeof(kVRPauseMain) / sizeof(int));
 }
 
 // the VRSetRow shown at position `pos` of settings page `page` (1 or 2)
@@ -245,6 +247,9 @@ static std::string VRPauseLabel(int id)
     case 12: return Locale::Text::Common(Locale::CMN_CONTINUE);
     case 13: return "Settings";
     case 14: return s_vrPauseCard ? "Hide Controls" : "Show Controls";
+    // the site's feedback form opens in the headset's browser; the reference stays on the row (type it in by
+    // hand at uareforged.pages.dev/contribute if the browser didn't come up)
+    case 15: return s_vrBugRef.empty() ? "Report a Bug" : "Report a Bug (ref " + s_vrBugRef + ")";
     default: return " ";
     }
 }
@@ -3485,12 +3490,13 @@ static void yw_VRPointerAndCard(NC_STACK_ypaworld *yw)
     }
 
     // menu dev aid (headset lies unworn during automated Quest runs, so no
-    // Menu press): UA_VR_PAUSE_AT=n[,settings][,card][,fps] opens the pause panel
+    // Menu press): UA_VR_PAUSE_AT=n[,settings][,card][,fps][,bug] opens the pause panel
     // at the n-th HUD frame of the session, optionally on the settings page, with
-    // the controls card, and/or the FPS counter on (not saved). Inert unless set.
+    // the controls card, and/or the FPS counter on (not saved); bug = presses
+    // Report a Bug once. Inert unless set.
     {
         static int pauseAt = -2, hudFrames = 0;
-        static bool pSettings = false, pControls = false, pCard = false, pFps = false;
+        static bool pSettings = false, pControls = false, pCard = false, pFps = false, pBug = false;
         if ( pauseAt == -2 )
         {
             pauseAt = -1;
@@ -3501,6 +3507,7 @@ static void yw_VRPointerAndCard(NC_STACK_ypaworld *yw)
                 pControls = strstr(v, "controls") != NULL; // second page
                 pCard = strstr(v, "card") != NULL;
                 pFps = strstr(v, "fps") != NULL;
+                pBug = strstr(v, "bug") != NULL;
             }
         }
         if ( pauseAt >= 0 && ++hudFrames == pauseAt )
@@ -3512,6 +3519,8 @@ static void yw_VRPointerAndCard(NC_STACK_ypaworld *yw)
             s_vrPauseCard = pCard;
             if ( pFps )
                 VR::SetFpsCounterOn(true);
+            if ( pBug )
+                s_vrBugRef = StatsReportBug();
             fprintf(stderr, "UAVR pause: dev aid UA_VR_PAUSE_AT opened the panel at HUD frame %d\n", hudFrames);
         }
     }
@@ -7426,6 +7435,8 @@ void NC_STACK_ypaworld::ypaworld_func64__sub7__sub6(TInputState *inpt)
                         s_vrPauseCard = !s_vrPauseCard;
                         fprintf(stderr, "UAVR pause: controls card %s\n", s_vrPauseCard ? "shown" : "hidden");
                     }
+                    else if ( vid == 15 )
+                        s_vrBugRef = StatsReportBug(); // docs/usage-stats.md, bug_report
                 }
                 selId = -1; // handled: skip the original ids 8..12 below
             }

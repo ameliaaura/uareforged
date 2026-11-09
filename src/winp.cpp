@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "log.h"
 #include "gui/widget.h"
+#include "usage_stats.h"
 #ifdef UA_VR_ENABLED
 #include <cmath>
 #include "vr/vr.h"
@@ -451,6 +452,8 @@ int NC_STACK_winp::InputWatch(void *, SDL_Event *event)
     {
     case SDL_KEYDOWN:
         {
+            if ( !event->key.repeat )
+                UsageStats::NoteInput(UsageStats::INPUT_KBM); // usage stats: what kind of controls (a counter)
             auto it = KBDMapping.find(event->key.keysym.scancode);
             if (it != KBDMapping.end())
                 KeyDown(it->second);
@@ -479,6 +482,7 @@ int NC_STACK_winp::InputWatch(void *, SDL_Event *event)
 
     case SDL_MOUSEBUTTONDOWN:
     {
+        UsageStats::NoteInput(UsageStats::INPUT_KBM);
         Common::Point pos = GFX::GFXEngine::Instance.ConvertPosTo2DStuff( Common::Point(event->button.x, event->button.y) );
         if ( !Gui::Root::Instance.MouseDown(pos, event->button.button, event->button.clicks) )
             OnMouseDown(pos, event->button.button, event->button.clicks);
@@ -535,9 +539,20 @@ int NC_STACK_winp::InputWatch(void *, SDL_Event *event)
     }
     break;
 
+    case SDL_MOUSEWHEEL:
+        UsageStats::NoteInput(UsageStats::INPUT_KBM);
+        break;
+
+    case SDL_JOYBUTTONDOWN: // plain joysticks only (a game controller also sends SDL_CONTROLLERBUTTONDOWN)
+        if ( !SDL_GameControllerFromInstanceID(event->jbutton.which) )
+            UsageStats::NoteInput(UsageStats::INPUT_PAD);
+        break;
+
     case SDL_CONTROLLERBUTTONDOWN:
     case SDL_CONTROLLERBUTTONUP:
     {
+        if ( event->type == SDL_CONTROLLERBUTTONDOWN )
+            UsageStats::NoteInput(UsageStats::INPUT_PAD);
         if ( _joyDebug )
             sdlInputLog("Pad button %s: %s\n",
                         SDL_GameControllerGetStringForButton((SDL_GameControllerButton)event->cbutton.button),
@@ -547,6 +562,15 @@ int NC_STACK_winp::InputWatch(void *, SDL_Event *event)
 
     case SDL_CONTROLLERAXISMOTION:
     {
+        // usage stats: a stick or trigger pushed past a third of its travel counts once per push
+        if ( event->caxis.axis < SDL_CONTROLLER_AXIS_MAX )
+        {
+            static std::array<bool, SDL_CONTROLLER_AXIS_MAX> pushed = {};
+            const bool on = abs(event->caxis.value) > 10923;
+            if ( on && !pushed[event->caxis.axis] )
+                UsageStats::NoteInput(UsageStats::INPUT_PAD);
+            pushed[event->caxis.axis] = on;
+        }
         if ( _joyDebug && event->caxis.axis < SDL_CONTROLLER_AXIS_MAX )
         {
             // Log only deadzone crossings, not the event flood

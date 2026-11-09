@@ -3638,6 +3638,8 @@ void UserData::GameShellUiHandleInput()
             yw_UsageStatsToggle();
             video_button->SetText(1240, yw_UsageStatsCaption());
         }
+        else if ( r.code == 1241 )
+            StatsReportBug(); // REPORT A BUG: the site's form in the browser (docs/usage-stats.md, bug_report)
         else if ( r.code == 1250 )
             p_YW->_helpURL = Locale::Text::Help(Locale::HELP_SETTINGS);
     }

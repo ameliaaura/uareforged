@@ -4433,16 +4433,24 @@ bool NC_STACK_ypaworld::CreateVideoControls()
                                                                                                                                                                                 gfxOk = gfxOk && _GameShell->video_button->Add(&btn_64arg);
 
                                                                                                                                                                                 // Port addition (anonymous usage stats, opt-in): the page's empty
-                                                                                                                                                                                // row 4, full width. Applied at once (not on OK/Cancel): off stops
-                                                                                                                                                                                // sending and deletes the install number. VR: the pause panel's
-                                                                                                                                                                                // Settings > CONTROLS, PRIVACY page has the same switch.
-                                                                                                                                                                                btn_64arg.xpos = 0;
-                                                                                                                                                                                btn_64arg.ypos = 4 * (vertMenuSpace + _fontH);
-                                                                                                                                                                                btn_64arg.width = gx + gw;
-                                                                                                                                                                                btn_64arg.caption = yw_UsageStatsCaption();
-                                                                                                                                                                                btn_64arg.upCode = 1240;
-                                                                                                                                                                                btn_64arg.button_id = 1240;
-                                                                                                                                                                                gfxOk = gfxOk && _GameShell->video_button->Add(&btn_64arg);
+    // row 4. Left: the switch, applied at once (not on OK/Cancel): off stops
+    // sending and deletes the install number. VR: the pause panel's
+    // Settings > CONTROLS, PRIVACY page has the same switch. Right: REPORT A
+    // BUG opens the site's feedback form in the browser (VR: the pause menu).
+    btn_64arg.xpos = 0;
+    btn_64arg.ypos = 4 * (vertMenuSpace + _fontH);
+    btn_64arg.width = (gx + gw) * 0.64 - buttonsSpace;
+    btn_64arg.caption = yw_UsageStatsCaption();
+    btn_64arg.upCode = 1240;
+    btn_64arg.button_id = 1240;
+    gfxOk = gfxOk && _GameShell->video_button->Add(&btn_64arg);
+
+    btn_64arg.xpos = (gx + gw) * 0.64;
+    btn_64arg.width = (gx + gw) - (gx + gw) * 0.64;
+    btn_64arg.caption = "REPORT A BUG";
+    btn_64arg.upCode = 1241;
+    btn_64arg.button_id = 1241;
+    gfxOk = gfxOk && _GameShell->video_button->Add(&btn_64arg);
 
                                                                                                                                                                                 if ( gfxOk )
                                                                                                                                                                                     v70 = 1;

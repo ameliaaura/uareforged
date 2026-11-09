@@ -102,7 +102,9 @@ Step-by-step with pictures: the site's [Quest guide](https://uareforged.pages.de
 
 On the first start after installing or updating, UA Reforged asks once: **"Help make UA Reforged better?"**
 With **Yes, happy to help** the app sends a crash report if the game crashes, a short performance
-summary after each mission, a few error codes and a count of how many people play. **No thanks** (or closing the
+summary after each mission, how missions end and how long they take to load, how long the app is open, which kind
+of controls you use, a coarse description of the computer or headset, a few error codes and a count of how many
+people play. **No thanks** (or closing the
 question) keeps it off; nothing is pre-selected. Change it any time:
 
 - **Mac / Windows:** *Options* > **SEND ANONYMOUS USAGE STATS: ON / OFF** (under the text at the top; it applies
@@ -111,6 +113,12 @@ question) keeps it off; nothing is pre-selected. Change it any time:
 
 No name, no IP, no files, no personal data. Turning it off deletes the random install number, anything not yet
 sent and any crash file. Everything sent, field by field: [usage-stats.md](usage-stats.md).
+
+**Report a bug:** *Options* > **REPORT A BUG** (desktop, next to the stats switch) or *Pause >* **Report a Bug**
+(Quest) opens the feedback form on the site in your browser with a short reference already filled in. Type what
+happened there. With usage stats on, the game also sends that session's diagnostics under the same reference;
+with them off, only the browser opens. On the Quest the reference also stays on the menu row, in case the
+browser doesn't come up (type it into the form at uareforged.pages.dev/contribute).
 
 ## Game controllers (desktop)
 

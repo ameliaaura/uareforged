@@ -151,16 +151,19 @@ The apps send nothing about you. **Anonymous usage stats are optional and off un
 asks once ("Help make UA Reforged better?", nothing pre-selected; closing it means no), and *Options* has
 **Send anonymous usage stats** on the desktop (*Options*, the button under the settings text) and in VR
 (*Pause > Settings > CONTROLS, PRIVACY*). Turning it off stops sending at once and deletes the app's random
-install number, its unsent queue and any crash file.
+install number, its unsent queue, any crash file and the session file. **Report a bug** (desktop *Options*, next to
+the switch; VR *Pause* menu) opens the site's feedback form in your browser.
 
 When they are on, the app sends small messages to `https://uareforged.pages.dev/api/ping`:
 
 | When | What |
 |---|---|
 | Every message | a random install number made on your device (128 random bits, never from your hardware; a new one each time you turn stats on), desktop or VR, Mac / Windows / Quest, the app version, the graphics preset |
-| App start | the operating system name and version (`macOS 15.2`, `Windows 11 23H2`) and the graphics chip's name (`Apple M2`, `NVIDIA GeForce RTX 3070`) |
-| Mission start | the level number |
-| Mission end | a performance summary: level, render resolution, average fps, 1 % low fps, 95th-percentile frame time, seconds played, frames over 100 ms, the headset's display rate in VR |
+| App start | the operating system name and version (`macOS 15.2`, `Windows 11 23H2`), the graphics chip's name (`Apple M2`, `NVIDIA GeForce RTX 3070`), memory and processor cores in steps (`16` GB, `8` cores), the display's refresh rate, and on the desktop the screen size as a step (`1080p`, `4k`) |
+| Mission start | the level number and how long it took to load |
+| Mission end | how it ended (won, lost, quit, restarted), how long it lasted, which kind of controls were used (keyboard + mouse, controller, both, VR controllers); in VR also the seconds at the war table and inside units and how many times you jumped into a unit. A performance summary: level, render resolution, average fps, 1 % low fps, 95th-percentile frame time, seconds played, frames over 100 ms, the headset's display rate in VR |
+| App close | minutes the app was open, missions started, how it closed (normally, by the system, a crash; sent at the next start if it didn't close normally), the kind of controls, how many times you changed the graphics preset or switched New Look ⇄ Original |
+| Report a bug | only if you choose it: a short random reference (also put in the site's feedback form, which opens in your browser), the error codes and last crash locations of this session, the last performance summary. Your note is typed on the website, never in the game. With stats off, *Report a bug* only opens the form |
 | Next start after a crash | crash type (signal / exception code), app build, the program module's base name and code offsets (up to 32, e.g. `UA_source+0x1a2f40`), level, preset, minutes played |
 | A problem | one code from a fixed list (e.g. `pack_download_failed`, `shader_load_failed`), sometimes one number |
 

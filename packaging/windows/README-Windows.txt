@@ -104,8 +104,11 @@ PRIVACY
 -------
 Anonymous usage stats are optional and off unless you say yes (the first start
 asks once; Options > SEND ANONYMOUS USAGE STATS changes it). When on: crash
-reports, a performance summary after each mission, error codes and a usage
-count. No name, no IP, no files, no personal data. Details:
+reports, a performance summary after each mission, how missions end and how
+long they load, how long the app is open, the kind of controls used, coarse
+hardware steps (memory, cores, refresh rate, screen size), error codes and a
+usage count. No name, no IP, no files, no personal data. Options > REPORT A
+BUG opens the feedback form on the website in your browser. Details:
 https://github.com/ameliaaura/uareforged/blob/main/docs/usage-stats.md
 
 LICENCE

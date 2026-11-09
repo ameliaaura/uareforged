@@ -86,6 +86,8 @@ bool yw_MenuHoldsMission(NC_STACK_ypaworld *yw);
 // Options: "SEND ANONYMOUS USAGE STATS: ON / OFF" (docs/usage-stats.md); the click flips it at once
 std::string yw_UsageStatsCaption();
 void yw_UsageStatsToggle();
+// Options (desktop) / pause menu (VR): "REPORT A BUG" opens the site's feedback form with a new reference (main.cpp)
+std::string StatsReportBug();
 #ifdef UA_VR_ENABLED
 std::vector<std::string> yw_VRProfileLines();
 // rewrite only the;#!vr_* lines (ywRes != NULL also the resolution lines)

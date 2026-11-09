@@ -1355,4 +1355,10 @@ void StatsDisplay(int *eyeW, int *eyeH, int *hz)
     *hz = (int)(g_backend->RefreshHz() + 0.5f);
 }
 
+// anonymous usage stats (level_end): the war table is open (the miniature, or the token table at the station)
+bool StatsTableShown()
+{
+    return g_active && (Cmd::DioramaShown() || Cmd::DeckTableAtStation());
+}
+
 } // namespace VR
