@@ -36,8 +36,8 @@ pack_disk_bytes	2415853568
 quest_package	io.github.ameliaaura.uareforged.vr
 quest_help_url	https://uareforged.pages.dev/downloads/#quest-computer-h
 quest_devmode_url	https://uareforged.pages.dev/downloads/#quest-devmode-h
-quest_apk_url	https://pub-9574664f67b04217aa2ca93f509638ad.r2.dev/quest/UA-Reforged-VR-0.9.0-Quest3.apk
-quest_apk	UA-Reforged-VR-0.9.0-Quest3.apk	14258555	6ab822abf58c5f87d20144fce3a9adfbfb9b6ed526df560601fa97cc004e364c	900	0.9.0
+quest_apk_url	https://pub-9574664f67b04217aa2ca93f509638ad.r2.dev/quest/UA-Reforged-VR-0.9.1-Quest3.apk
+quest_apk	UA-Reforged-VR-0.9.1-Quest3.apk	14352763	c1f9dc51197fdd7a26418991054deb2b4d1fd9c3240e2021da0788acfdfd3769	910	0.9.1
 # adb: Google's Android SDK Platform-Tools. Google's licence for them does not allow passing them on, so they are not
 # in the app: on first use it downloads Google's own zip (this pinned release, checked by size and SHA-256).
 adb_mac	https://dl.google.com/android/repository/platform-tools_r37.0.1-darwin.zip	16110554	ee39ad5967e95c2a07f04dbcbde96b1a0c916ba376096db5d2f498b7727a5d1d
