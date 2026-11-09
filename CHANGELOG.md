@@ -4,7 +4,9 @@ What changed for players in each release. The format follows [Keep a Changelog](
 versions follow [Semantic Versioning](https://semver.org/) loosely (0.x: anything may still change).
 Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
-## [Unreleased] - 0.8.1 (desktop) / 0.9.1 (Quest)
+## [Unreleased]
+
+## [0.8.1] - Desktop / [0.9.1] - Quest - not yet released
 
 ### Added
 - **Anonymous usage stats, optional and off unless you say yes.** The first start asks once ("Help make UA
@@ -13,7 +15,7 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
   after a crash, a performance summary after each mission, a few error codes, and a count of app and mission
   starts. No name, no IP, no files, no personal data. Exactly what is sent: [docs/usage-stats.md](docs/usage-stats.md).
 
-## [0.9.0] - Quest - not yet released
+## [0.9.0] - Quest - 2026-11-08
 
 The first public release of **UA Reforged VR** for the Meta Quest 3.
 
@@ -32,7 +34,7 @@ The first public release of **UA Reforged VR** for the Meta Quest 3.
 - Tested on the Quest 3. The Quest 3S should work but is untested; Quest 2 and Quest Pro are untested.
 - In-game videos are skipped on the Quest.
 
-## [0.8.0] - Desktop - not yet released
+## [0.8.0] - Desktop - 2026-11-08
 
 The first public release of the desktop apps.
 
@@ -75,6 +77,8 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.1
+[0.8.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.1
 [0.9.0]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.0
 [0.8.0]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.0

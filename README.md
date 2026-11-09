@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ameliaaura/uareforged/releases"><img alt="Desktop 0.8.0" src="https://img.shields.io/badge/desktop-0.8.0-2f81f7"></a>
-  <a href="https://github.com/ameliaaura/uareforged/releases"><img alt="Quest 0.9.0" src="https://img.shields.io/badge/Quest-0.9.0-8957e5"></a>
+  <a href="https://github.com/ameliaaura/uareforged/releases"><img alt="Desktop 0.8.1" src="https://img.shields.io/badge/desktop-0.8.1-2f81f7"></a>
+  <a href="https://github.com/ameliaaura/uareforged/releases"><img alt="Quest 0.9.1" src="https://img.shields.io/badge/Quest-0.9.1-8957e5"></a>
   <img alt="Platforms: macOS, Windows, Meta Quest 3" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Quest%203-555">
   <a href="LICENSE"><img alt="Engine licence: GPL-2.0" src="https://img.shields.io/badge/engine-GPL--2.0-3fb950"></a>
   <a href="https://github.com/ameliaaura/uareforged/actions/workflows/build.yml"><img alt="Build" src="https://github.com/ameliaaura/uareforged/actions/workflows/build.yml/badge.svg"></a>
