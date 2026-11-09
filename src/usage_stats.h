@@ -33,7 +33,7 @@ enum Answer
 {
     ANSWER_UNASKED = 0, // never asked, or the file is missing / unreadable: off
     ANSWER_NO,          // "No thanks", dismissed, or turned off in Options
-    ANSWER_YES          // "Yes, send anonymous stats", or turned on in Options
+    ANSWER_YES          // "Yes, happy to help", or turned on in Options
 };
 
 struct State

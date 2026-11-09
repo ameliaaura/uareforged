@@ -590,10 +590,10 @@ game_pick() {
 # nothing, Esc or closing = No. Only the answer is written here; the game makes the random install number and does
 # all the sending. Test runs: UA_STATS_AUTO=yes|no|dismiss answers it; UA_CAMPAIGN without UA_STATS_AUTO skips it.
 STATS_HEADING="Help make UA Reforged better?"
-STATS_TEXT="With anonymous usage stats on, UA Reforged sends a crash report if the game crashes and a short performance summary after each mission, so we can find and fix crashes, slowdowns and bugs quickly. It also counts how many people play.
+STATS_TEXT="Share anonymous stats and crash reports, and we'll use them to fix bugs and keep the game running smoothly. Nothing personal is ever sent, and you can change your mind anytime in Options.
 
-No name, no IP, no files, no personal data, and it's completely optional. You can change it anytime in Options."
-STATS_YES="Yes, send anonymous stats"
+Want the details? uareforged.pages.dev/privacy"
+STATS_YES="Yes, happy to help"
 STATS_NO="No thanks"
 stats_ask() {
     local f="$SUPPORT/usage-stats.txt" b ans=no

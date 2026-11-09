@@ -101,7 +101,7 @@ Step-by-step with pictures: the site's [Quest guide](https://uareforged.pages.de
 ## Anonymous usage stats (optional)
 
 On the first start after installing or updating, UA Reforged asks once: **"Help make UA Reforged better?"**
-With **Yes, send anonymous stats** the app sends a crash report if the game crashes, a short performance
+With **Yes, happy to help** the app sends a crash report if the game crashes, a short performance
 summary after each mission, a few error codes and a count of how many people play. **No thanks** (or closing the
 question) keeps it off; nothing is pre-selected. Change it any time:
 

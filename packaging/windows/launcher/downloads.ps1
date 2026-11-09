@@ -174,6 +174,8 @@ function Quote-Arg([string]$a) {
 # ---------------------------------------------------------------- dialogs
 $script:SNAP_N = 0
 $script:AskNoFocus = $false   # Stats-Ask: no button has the focus (nothing pre-selected)
+$script:AskLinkText = ''      # Stats-Ask: this part of the text is a link to $script:AskLinkUrl (opens the browser,
+$script:AskLinkUrl = ''       # does not answer or close the dialog)
 function Snap-Form($form, [string]$what) {
     try {
         $script:SNAP_N++
@@ -207,8 +209,17 @@ function Ask-Ex([string]$heading, [string]$text, [string]$default, [string[]]$bu
         $h.Font = New-Object Drawing.Font('Segoe UI', 11, [Drawing.FontStyle]::Bold); $h.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 10)
         [void]$tbl.Controls.Add($h, 0, $row); $row++
     }
-    $lbl = New-Object Windows.Forms.Label
-    $lbl.Text = $text; $lbl.AutoSize = $true; $lbl.MaximumSize = New-Object Drawing.Size(520, 0)
+    $li = if ($script:AskLinkText -and $script:AskLinkUrl) { $text.IndexOf($script:AskLinkText) } else { -1 }
+    if ($li -ge 0) {
+        $lbl = New-Object Windows.Forms.LinkLabel
+        $lbl.Text = $text
+        $lbl.LinkArea = New-Object Windows.Forms.LinkArea($li, $script:AskLinkText.Length)
+        $lbl.Add_LinkClicked({ $this.FindForm().TopMost = $false; Open-Help $script:AskLinkUrl })
+    } else {
+        $lbl = New-Object Windows.Forms.Label
+        $lbl.Text = $text
+    }
+    $lbl.AutoSize = $true; $lbl.MaximumSize = New-Object Drawing.Size(520, 0)
     $lbl.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 16)
     [void]$tbl.Controls.Add($lbl, 0, $row); $row++
     $script:AskCombo = $null; $script:AskCheck = $null
@@ -1076,10 +1087,11 @@ function Game-Pick {
 
 # ======================================================================== anonymous usage stats (docs/usage-stats.md)
 # Stats-Ask: the question, once (when usage-stats.txt doesn't exist yet). Nothing is pre-selected: no button has the
-# focus and Enter presses nothing; Esc or closing the window = No. Only the answer is written here; the game makes
+# focus and Enter presses nothing; Esc or closing the window = No. The privacy address in the text is a link: it opens
+# the privacy page in the browser and leaves the question open. Only the answer is written here; the game makes
 # the random install number and does all the sending. Test runs: UA_STATS_AUTO=yes|no|dismiss answers it;
 # UA_CAMPAIGN without UA_STATS_AUTO skips it; UA_DIALOG_SNAP saves the dialog as a PNG and answers it as dismissed.
-$script:STATS_YES = 'Yes, send anonymous stats'
+$script:STATS_YES = 'Yes, happy to help'
 $script:STATS_NO = 'No thanks'
 function Stats-Ask {
     $f = Join-Path $SUPPORT 'usage-stats.txt'
@@ -1088,12 +1100,13 @@ function Stats-Ask {
     if ($b) { Log "usage stats: test answer $b" }
     elseif ($env:UA_CAMPAIGN) { Log 'usage stats: not asked (test run)'; return }
     else {
-        $text = "With anonymous usage stats on, UA Reforged sends a crash report if the game crashes and a short performance " +
-                "summary after each mission, so we can find and fix crashes, slowdowns and bugs quickly. It also counts how many people play." +
-                "`r`n`r`nNo name, no IP, no files, no personal data, and it's completely optional. You can change it anytime in Options."
+        $text = "Share anonymous stats and crash reports, and we'll use them to fix bugs and keep the game running smoothly. " +
+                "Nothing personal is ever sent, and you can change your mind anytime in Options." +
+                "`r`n`r`nWant the details? uareforged.pages.dev/privacy"
         $script:AskNoFocus = $true
+        $script:AskLinkText = 'uareforged.pages.dev/privacy'; $script:AskLinkUrl = 'https://uareforged.pages.dev/privacy/#usage-stats'
         try { $b = (Ask-Ex 'Help make UA Reforged better?' $text '' @($script:STATS_YES, $script:STATS_NO) '' $false '' @() 0).Button }
-        finally { $script:AskNoFocus = $false }
+        finally { $script:AskNoFocus = $false; $script:AskLinkText = ''; $script:AskLinkUrl = '' }
         if ($env:UA_DIALOG_SNAP) { $b = '' }
     }
     $ans = if ($b -eq $script:STATS_YES -or $b -eq 'yes') { 'yes' } else { 'no' }

@@ -1077,12 +1077,10 @@ bool RunSetup(android_app* app, XrPlatform& xr, const std::string& dataDir, std:
                     break;
                 case S::Stats:
                     P.show("Help make UA Reforged better?",
-                           "With anonymous usage stats on, UA Reforged sends a crash report if the game crashes and a short "
-                           "performance summary after each mission, so we can find and fix crashes, slowdowns and bugs "
-                           "quickly. It also counts how many people play.\n\n"
-                           "No name, no IP, no files, no personal data, and it's completely optional. You can change it "
-                           "anytime in Options (pause menu > Settings > CONTROLS, PRIVACY).",
-                           {"Yes, send anonymous stats", "No thanks"}, -1, "", true);
+                           "Share anonymous stats and crash reports, and we'll use them to fix bugs and keep the game running "
+                           "smoothly. Nothing personal is ever sent, and you can change your mind anytime in Settings.\n\n"
+                           "Want the details? uareforged.pages.dev/privacy",
+                           {"Yes, happy to help", "No thanks"}, -1, "", true);
                     break;
                 case S::Campaign:
                     P.show("Which campaign?", "Metropolis Dawn is the expansion (two campaigns).",
