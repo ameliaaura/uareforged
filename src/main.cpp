@@ -51,6 +51,9 @@
 #include "obj3d.h"
 #include "aituning.h"
 #include "gfxsettings.h"
+#include "usage_stats.h"
+#include <atomic>
+#include "version.h"
 
 
 int dword_513638 = 0;
@@ -138,6 +141,9 @@ static void FFSelfTest()
 //
 //   UA_AUTOSTART_LEVEL=1,2      play level 1, then level 2, in ONE process
 //   UA_AUTOSTART_SECONDS=25     end the running level after 25 s of gameplay
+//   UA_AUTOSTART_END=won|lost|quit|restart   how it ends (usage-stats tests; unset = as below):
+//                               won = COMPLETED, lost = host station marked destroyed + ABORTED,
+//                               quit = ABORTED, restart = RESTART (then the timer runs again)
 //
 // The timeout takes the engine's OWN level-end path (STATE_COMPLETED when the
 // level has a gate, else STATE_ABORTED), so the between-mission movie, the
@@ -220,8 +226,18 @@ void AutostartLevelTimeout()
     if ( (int)(SDL_GetTicks() - startedAt) < limit )
         return;
 
+    static std::string endAs = getenv("UA_AUTOSTART_END") ? getenv("UA_AUTOSTART_END") : "";
+    if ( !endAs.empty() && !GfxSettings::BenchRunning() )
+    {
+        if ( endAs == "won" ) { li.GateCompleteID = 0; li.State = TLevelInfo::STATE_COMPLETED; }
+        else if ( endAs == "lost" ) { ypaworld->_playerHSDestroyed = true; li.State = TLevelInfo::STATE_ABORTED; }
+        else if ( endAs == "restart" ) li.State = TLevelInfo::STATE_RESTART;
+        else li.State = TLevelInfo::STATE_ABORTED;
+        printf("[SEQ] level %d: forced end '%s' after %d ms\n", li.LevelID, endAs.c_str(), limit);
+        if ( endAs == "restart" ) endAs = "quit"; // the restarted level then ends as quit
+    }
     // The benchmark never completes a level (no campaign progress from it).
-    if ( !li.Gates.empty() && !GfxSettings::BenchRunning() )
+    else if ( !li.Gates.empty() && !GfxSettings::BenchRunning() )
     {
         li.GateCompleteID = 0;
         li.State = TLevelInfo::STATE_COMPLETED;
@@ -239,6 +255,223 @@ void AutostartLevelTimeout()
 
 }
 
+// ------------------------------------------------------------------ anonymous usage stats (opt-in)
+// docs/usage-stats.md. Every call is a cheap no-op while the player hasn't said yes.
+#ifndef UA_BUILD_ID
+#define UA_BUILD_ID "dev"
+#endif
+std::string yw_UsageStatsCaption(); // yw_func2.cpp
+void yw_UsageStatsToggle();
+std::atomic<int> g_statsMaterialMapsMissing{0}; // obj3d.cpp: "material map ... not loaded"
+std::atomic<int> g_statsShaderFailures{0};      // gfx.cpp: a shader that did not compile
+std::atomic<int> g_statsAudioFailed{0};         // wrapal.cpp: no audio device
+
+namespace
+{
+uint64_t s_statsFrameLast = 0;
+int s_statsMaterialReported = 0, s_statsShaderReported = 0;
+int s_statsPresetSeen = -1000; // the GfxSettings preset last told to NotePreset
+
+// the Graphics preset as one of the five values the server takes (VR: New Look = high, Original = original;
+// desktop with no preset chosen yet: high with the Reforge pack, else original)
+const char *StatsPreset()
+{
+    GfxSettings::Init();
+    switch ( GfxSettings::GetPreset() )
+    {
+    case GfxSettings::PRESET_ORIGINAL: return "original";
+    case GfxSettings::PRESET_LOW: return "low";
+    case GfxSettings::PRESET_MEDIUM: return "medium";
+    case GfxSettings::PRESET_HIGH: return "high";
+    case GfxSettings::PRESET_ULTRA: return "ultra";
+    case GfxSettings::PRESET_VR: return "high";
+    case GfxSettings::PRESET_VRCLASSIC: return "original";
+    default:
+    {
+        const char *hd = getenv("UA_HDMODELS_DIR");
+        return (hd && hd[0]) ? "high" : "original";
+    }
+    }
+}
+
+// counted problems: reported once (with how many) when they first show up
+void StatsReportCounts(int level)
+{
+    const int mm = g_statsMaterialMapsMissing.load();
+    if ( mm > 0 && !s_statsMaterialReported )
+    {
+        s_statsMaterialReported = mm;
+        UsageStats::Error("material_map_missing", mm, StatsPreset(), level);
+    }
+    const int sh = g_statsShaderFailures.load();
+    if ( sh > 0 && !s_statsShaderReported )
+    {
+        s_statsShaderReported = sh;
+        UsageStats::Error("shader_load_failed", sh, StatsPreset(), level);
+    }
+}
+
+#if !defined(__ANDROID__)
+bool StatsOpenUrl(const std::string &url)
+{
+    // test runs: UA_OPEN_URL_LOG=<file> notes the address instead of opening a browser window
+    if ( const char *log = getenv("UA_OPEN_URL_LOG") )
+        if ( log[0] )
+        {
+            FILE *f = fopen(log, "a");
+            if ( !f )
+                return false;
+            fprintf(f, "%s\n", url.c_str());
+            fclose(f);
+            return true;
+        }
+    return SDL_OpenURL(url.c_str()) == 0;
+}
+#endif
+
+void StatsStart()
+{
+#if defined(__ANDROID__)
+    const char *app = "vr", *platform = "quest";
+#elif defined(__APPLE__)
+    const char *app = "desktop", *platform = "mac";
+#elif defined(_WIN32)
+    const char *app = "desktop", *platform = "windows";
+#else
+    return; // other platforms never send
+#endif
+#if !defined(__ANDROID__)
+    UsageStats::SetUrlOpener(StatsOpenUrl); // the Quest app registers its own (an Android VIEW intent)
+#endif
+    UsageStats::Init(std::string(), app, platform, Common::PortVersion, UA_BUILD_ID);
+    UsageStats::SetCrashContext(StatsPreset(), -1);
+    const char *gpu = (const char *)glGetString(GL_RENDERER);
+    // coarse hardware: memory and cores bucketed, refresh rate, display size bucket (desktop)
+    UsageStats::Hardware hw;
+    hw.ramGb = UsageStats::BucketRamGb(SDL_GetSystemRAM());
+    hw.cores = UsageStats::BucketCores(SDL_GetCPUCount());
+    SDL_DisplayMode dm;
+    if ( SDL_GetDesktopDisplayMode(0, &dm) == 0 )
+    {
+        hw.refreshHz = dm.refresh_rate;
+#if !defined(__ANDROID__)
+        hw.display = UsageStats::DisplayBucket(dm.w, dm.h);
+#endif
+    }
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+    {
+        int ew = 0, eh = 0, hz = 0;
+        VR::StatsDisplay(&ew, &eh, &hz);
+        hw.refreshHz = hz; // the headset's rate, not a desktop display's
+        hw.display = "";
+    }
+#endif
+    UsageStats::Launch(StatsPreset(), gpu ? gpu : "", hw);
+    s_statsPresetSeen = GfxSettings::GetPreset();
+    if ( g_statsAudioFailed.load() )
+        UsageStats::Error("audio_device_failed");
+    StatsReportCounts(-1);
+}
+
+// a mission is asked for (Play, Load, Restart, network): the loading time runs from here
+void StatsLevelRequested()
+{
+    UsageStats::MissionRequested();
+}
+
+// a mission's level is loaded (new, restarted, loaded or network): a fresh mission record; level_start goes at
+// its first playable frame (with the loading time)
+void StatsLevelBegin(int level)
+{
+    UsageStats::MissionBegin(level, StatsPreset());
+    s_statsFrameLast = 0;
+    StatsReportCounts(level);
+}
+
+// how the mission ended (won / lost / quit / restart); nullptr for the graphics benchmark (not a player's mission)
+const char *StatsResult(int state)
+{
+    if ( GfxSettings::BenchRunning() )
+        return nullptr;
+    if ( ypaworld && ypaworld->_playerHSDestroyed )
+        return "lost";
+    switch ( state )
+    {
+    case TLevelInfo::STATE_COMPLETED: return "won";
+    case TLevelInfo::STATE_RESTART:
+    case TLevelInfo::STATE_LOAD: return "restart";
+    default: return "quit";
+    }
+}
+
+// a mission ends (quitting = the app is closing during it): perf + level_end
+void StatsLevelEnd(const char *result, bool quitting)
+{
+    if ( !UsageStats::MissionRunning() )
+        return;
+    int w = GFX::Engine.GetScreenW(), h = GFX::Engine.GetScreenH(), hz = 0;
+#ifdef UA_VR_ENABLED
+    if ( VR::Active() )
+        VR::StatsDisplay(&w, &h, &hz);
+#endif
+    UsageStats::MissionEnd(result, StatsPreset(), w, h, hz, quitting);
+}
+
+// every frame (menus too): the session clock and Graphics preset changes. O(1), no allocation, no lock.
+void StatsTick()
+{
+    UsageStats::SessionTick();
+    const int p = GfxSettings::GetPreset();
+    if ( p != s_statsPresetSeen )
+    {
+        s_statsPresetSeen = p;
+        UsageStats::NotePreset(StatsPreset());
+    }
+}
+
+void StatsGameplayFrame()
+{
+    const uint64_t now = SDL_GetPerformanceCounter();
+    const double ms = s_statsFrameLast ? (now - s_statsFrameLast) * 1000.0 / SDL_GetPerformanceFrequency() : -1.0;
+    s_statsFrameLast = now;
+    int view = UsageStats::VIEW_NONE;
+    uintptr_t unit = 0;
+#ifdef UA_VR_ENABLED
+    // Quest: at the war table / inside a unit / at the host station otherwise; unit = the viewer's id (jumps)
+    if ( VR::Active() && ypaworld )
+    {
+        NC_STACK_ypabact *u = ypaworld->_userUnit;
+        unit = u ? u->_gid : 0;
+        view = VR::StatsTableShown() ? UsageStats::VIEW_TABLE
+             : (u && u != ypaworld->_userRobo) ? UsageStats::VIEW_UNIT : UsageStats::VIEW_STATION;
+    }
+#endif
+    UsageStats::MissionFrame(ms, view, unit);
+#ifdef UA_TEST_HOOKS
+    // test builds only: UA_TEST_CRASH=segv|abort crashes 120 frames into the first mission
+    static int crashIn = -1;
+    if ( crashIn < 0 )
+    {
+        const char *c = getenv("UA_TEST_CRASH");
+        crashIn = (c && c[0]) ? 120 : 0;
+    }
+    if ( crashIn > 0 && --crashIn == 0 )
+        UsageStats::TestCrashNow(getenv("UA_TEST_CRASH"));
+#endif
+}
+}
+
+// "Report a bug" (desktop Options, VR pause menu): the site's form in the browser with a new reference; with
+// stats on also a bug_report event with it. Returns the reference ("" when none could be made).
+std::string StatsReportBug()
+{
+    const int level = UsageStats::MissionRunning() && ypaworld ? ypaworld->GetLevelInfo().LevelID : -1;
+    const std::string ref = UsageStats::ReportBug(StatsPreset(), level);
+    printf("report a bug: browser opened%s%s\n", ref.empty() ? "" : ", reference ", ref.c_str());
+    return ref;
+}
+
 // Graphics benchmark bracket: sound and frame cap off while it runs.
 void BenchBracket(bool on)
 {
@@ -254,6 +487,7 @@ void BenchBracket(bool on)
 int ProcessGameplayFrame()
 {
     FFSelfTest();
+    StatsGameplayFrame();
 
     if ( GfxSettings::BenchRunning() )
     {
@@ -285,6 +519,7 @@ int ProcessGameplayFrame()
     case TLevelInfo::STATE_COMPLETED:
     case TLevelInfo::STATE_ABORTED:
     {
+        StatsLevelEnd(StatsResult(levelInfo.State), false);
         if ( GfxSettings::BenchRunning() )
         {
             GfxSettings::BenchLevelEnded();
@@ -364,10 +599,14 @@ int ProcessGameplayFrame()
 
     case TLevelInfo::STATE_RESTART:
     {
+        const int restartLevel = levelInfo.LevelID;
+        StatsLevelEnd(StatsResult(levelInfo.State), false);
+        StatsLevelRequested();
         ypaworld->DeleteLevel();
 
         if ( !ypaworld->LoadGame( fmt::sprintf("save:%s/%d.rst", userdata.UserName, levelInfo.LevelID) ) )
             ypa_log_out("Warning, load error\n");
+        StatsLevelBegin(restartLevel);
 
         Input::Engine.QueryInput(&input_states);
     }
@@ -384,10 +623,13 @@ int ProcessGameplayFrame()
 
     case TLevelInfo::STATE_LOAD:
     {
+        StatsLevelEnd(StatsResult(levelInfo.State), false);
+        StatsLevelRequested();
         ypaworld->DeleteLevel();
 
         if ( !ypaworld->LoadGame( fmt::sprintf("save:%s/%d.sgm", userdata.UserName, 0) ) )
             ypa_log_out("Warning, load error\n");
+        StatsLevelBegin(ypaworld->GetLevelInfo().LevelID);
 
         Input::Engine.QueryInput(&input_states);
     }
@@ -610,7 +852,7 @@ int ProcessMenuFrame()
     // Dev aid (graphics settings): UA_SHOW_OPTIONS=1 opens Options after 200
     // menu frames (menu screenshots); =<code>,<code>,... then plays Graphics-row
     // clicks (1142 preset, 1143 feature, 1144 level, 1145 Original, 1146 Skies) one per 30
-    // frames, 1124 = OK, 1125 = Cancel. UA_SHOW_OPTIONS_AFTER=N waits until N
+    // frames, 1124 = OK, 1125 = Cancel, 1240 = SEND ANONYMOUS USAGE STATS. UA_SHOW_OPTIONS_AFTER=N waits until N
     // autostart levels were played (runtime-switch tests); autostart waits for
     // the clicks. Inert unless set.
     static bool optPending = false;
@@ -658,6 +900,13 @@ int ProcessMenuFrame()
                     userdata.sb_0x46aa8c();
                 else if ( code == 1125 )
                     userdata.sub_46A3C0();
+                else if ( code == 1240 ) // SEND ANONYMOUS USAGE STATS
+                {
+                    yw_UsageStatsToggle();
+                    userdata.video_button->SetText(1240, yw_UsageStatsCaption());
+                }
+                else if ( code == 1241 ) // REPORT A BUG
+                    StatsReportBug();
                 optWait = 30;
             }
             else
@@ -694,6 +943,7 @@ int ProcessMenuFrame()
         return 0;
     else if ( userdata.envAction.action == EnvAction::ACTION_PLAY )
     {
+        StatsLevelRequested();
         userdata.SaveSettings();
         ypaworld->CloseGameShell();
 
@@ -709,15 +959,18 @@ int ProcessMenuFrame()
         if ( !ypaworld->ypaworld_func183(&v22) )
         {
             ypa_log_out("Sorry, unable to init this level!\n");
+            UsageStats::Error("level_load_failed", -1, StatsPreset(), v22.lvlID);
 
             ypaworld->DeinitGameShell();
             return 0;
         }
+        StatsLevelBegin(v22.lvlID);
         GameScreenMode = GAME_SCREEN_MODE_GAME;
         Input::Engine.QueryInput(&input_states);
     }
     else if ( userdata.envAction.action == EnvAction::ACTION_LOAD )
     {
+        StatsLevelRequested();
         GameScreenMode = GAME_SCREEN_MODE_UNKNOWN;
 
         const TLevelInfo &a4 = ypaworld->GetLevelInfo();
@@ -735,11 +988,13 @@ int ProcessMenuFrame()
             ypaworld->DeinitGameShell();
             return 0;
         }
+        StatsLevelBegin(ypaworld->GetLevelInfo().LevelID);
         GameScreenMode = GAME_SCREEN_MODE_GAME;
         Input::Engine.QueryInput(&input_states);
     }
     else if ( userdata.envAction.action == EnvAction::ACTION_NETPLAY )
     {
+        StatsLevelRequested();
         userdata.SaveSettings();
 
         if ( !userdata.SaveBuildProtoState() )
@@ -758,10 +1013,12 @@ int ProcessMenuFrame()
         if ( !ypaworld->ypaworld_func179(&v22) )
         {
             ypa_log_out("Sorry, unable to init this level for network!\n");
+            UsageStats::Error("level_load_failed", -1, StatsPreset(), v22.lvlID);
             ypaworld->DeinitGameShell();
 
             return 0;
         }
+        StatsLevelBegin(v22.lvlID);
 
         GameScreenMode = GAME_SCREEN_MODE_GAME;
         Input::Engine.QueryInput(&input_states);
@@ -817,6 +1074,7 @@ int ProcessNextFrame()
 #ifdef UA_VR_ENABLED
     VR::FrameStart(); // backend pacing + timing; no-op when VR is off
 #endif
+    StatsTick(); // usage stats: session clock + preset changes (O(1))
 
     input_states = TInputState();
     Input::Engine.QueryInput(&input_states);
@@ -1251,6 +1509,9 @@ int main(int argc, char *argv[])
 
     System::IniConf::ReadFromNucleusIni();
 
+    // anonymous usage stats (opt-in): the answer, the crash handler, "launch"
+    StatsStart();
+
     uint32_t ticks = 0;
     
     Gui::Root::Instance.SetHwCompose(true);
@@ -1341,6 +1602,10 @@ int main(int argc, char *argv[])
 
     }
     
+    // quitting: a mission in progress keeps its perf summary for the next start; unsent events too
+    StatsLevelEnd(StatsResult(TLevelInfo::STATE_ABORTED), true);
+    UsageStats::Shutdown();
+
     ypaworld->DeleteNewGuiElements();
     
     sub_4113E8();

@@ -22,8 +22,13 @@
 # installed. All of it lives in downloads.ps1; every address is in downloads.txt (+ the site's links.json).
 # Dialogs show no file paths: a player's path holds their account name. launcher.log keeps the paths.
 #
+# Anonymous usage stats (docs/usage-stats.md): asked once after the setup ("Help make UA Reforged better?"); off
+# unless the player says yes; Options in the game changes it. The answer lives in usage-stats.txt next to
+# launcher.log; the game (UA_SETTINGS_DIR) does the sending.
+#
 # Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup, UA_CAMPAIGN=base|ghor|taer skips the
-# launcher, UA_DATA_DIR=<folder> uses that folder instead of %LOCALAPPDATA%\UA Reforged.
+# launcher (and, without UA_STATS_AUTO, the stats question), UA_DATA_DIR=<folder> uses that folder instead of
+# %LOCALAPPDATA%\UA Reforged.
 # Arguments go to the engine. "-UaPurge" (used by the uninstaller) removes %LOCALAPPDATA%\UA Reforged safely.
 # "-UaQuest" (the Start menu shortcut "Install UA Reforged VR on my Quest") runs only "Install on my Quest" (quest.ps1);
 # the first-launch dialog and the launcher have an "Install on my Quest" button, a Meta Quest plugged in at launch is
@@ -84,6 +89,8 @@ try {
     $GAME = [IO.Path]::GetFullPath($script:GAME).TrimEnd('\')
     if (-not $env:UA_GAME_DIR) { [IO.File]::WriteAllText($CONF, $GAME + "`r`n") }
     Log "game folder: $GAME"
+    # anonymous usage stats: asked once (off unless the player says yes); the game reads the answer from here
+    Stats-Ask
     # a Meta Quest plugged in (or Shift held): offer to install UA Reforged VR on it
     Quest-Offer $questAsked $false
     # the launcher: campaign, Play, Install on my Quest, Get the Reforge pack (UA_CAMPAIGN or -env skips it)
@@ -193,6 +200,8 @@ if (-not $campaign) { $campaign = 'from arguments' }
 
 # no network side features in this build
 Remove-Item Env:UA_RADIO, Env:UA_RADIO_LLM -ErrorAction SilentlyContinue
+# anonymous usage stats: the game keeps its answer, install number and queue next to launcher.log
+$env:UA_SETTINGS_DIR = $SUPPORT
 
 Log "campaign=$campaign"
 $psi = New-Object System.Diagnostics.ProcessStartInfo

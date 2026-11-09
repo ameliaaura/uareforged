@@ -104,6 +104,9 @@ public:
     bool get(const std::string& url, int64_t from, int64_t to, int stallMs,
              const std::function<bool(const HttpResponse&)>& onHead,
              const std::function<bool(const uint8_t*, size_t)>& sink, HttpResponse* res);
+    // POST a small JSON body (anonymous usage stats): connect and read timeouts `timeoutMs`, no redirects,
+    // no caches, fixed User-Agent. Returns the HTTP status, or -1 for a network error.
+    int postJson(const std::string& url, const std::string& body, int timeoutMs);
     ~Http();
 private:
     JNIEnv* env();

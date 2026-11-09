@@ -21,7 +21,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-VERSION="0.9.0"
+VERSION="0.9.1"
 SDK="${ANDROID_SDK_ROOT:?set ANDROID_SDK_ROOT}"
 NDK="${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}"
 : "${JAVA_HOME:?set JAVA_HOME to a JDK 17}"
@@ -62,6 +62,7 @@ PMAP="-ffile-prefix-map=$REPO=. -ffile-prefix-map=$(cd "$REPO" && pwd -P)=. -ffi
     -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-32 -DANDROID_STL=c++_static \
     -DCMAKE_C_FLAGS="$PMAP" -DCMAKE_CXX_FLAGS="$PMAP" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DUAVR_PREFIX="$PREFIX" -DOPENXR_AAR_DIR="$OPENXR_AAR_DIR" \
+    -DUA_BUILD_ID="${UA_BUILD_ID:-dev}" -DUA_TEST_HOOKS="${UA_TEST_HOOKS:-OFF}" \
     > "$OUT/configure.log" 2>&1 || { tail -40 "$OUT/configure.log"; exit 1; }
 "$CMAKE_DIR/cmake" --build "$OUT/cmake" -j "$JOBS"
 

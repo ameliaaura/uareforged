@@ -28,6 +28,9 @@
 #include "../utils.h"
 #include "common/common.h"
 #include "../ini.h"
+#include <atomic>
+
+extern std::atomic<int> g_statsShaderFailures; // main.cpp (anonymous usage stats)
 #include "../gui/root.h"
 #include "../bitmap.h"
 #include "../ilbm.h"
@@ -6777,6 +6780,7 @@ uint32_t GFXEngine::CompileShader(int32_t type, const std::string &string)
             char *logbuff = new char[tmpvar + 2];
             Glext::GLGetShaderInfoLog(sh, tmpvar, NULL, logbuff);
             printf("Shader error: %s\n", logbuff);
+            g_statsShaderFailures++; // anonymous usage stats: counted only
             log_d3dlog("Shader error: %s\n", logbuff);
             delete[] logbuff;
         }

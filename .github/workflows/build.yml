@@ -33,6 +33,9 @@ jobs:
         run: |
           c++ -std=c++14 -Wall -Isrc tests/controller_settings_test.cpp src/profile_patch.cpp -o "$RUNNER_TEMP/controller_settings_test"
           (cd "$RUNNER_TEMP" && ./controller_settings_test)
+          c++ -std=c++14 -Wall -DUA_TEST_HOOKS -Isrc tests/usage_stats_test.cpp src/usage_stats.cpp src/usage_stats_platform.cpp \
+              src/usage_stats_crash.cpp src/usage_stats_net_apple.mm -framework Foundation -o "$RUNNER_TEMP/usage_stats_test"
+          (cd "$RUNNER_TEMP" && ./usage_stats_test)
 
       - name: Cache third-party libraries
         uses: actions/cache@v6

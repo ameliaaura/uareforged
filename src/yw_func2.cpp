@@ -27,6 +27,7 @@ static int s_vrCockpitOnEntry = -1; // cockpit setting, restored by Cancel
 #include "loaders.h"
 #include "obj3d.h"
 #include "gfxsettings.h"
+#include "usage_stats.h"
 #include "reforge_sky.h"
 #include "system/atmos.h"
 #ifdef UA_VR_ENABLED
@@ -1721,11 +1722,26 @@ void UserData::GfxMenuCode(int code)
 }
 
 // Go to options menu
+std::string yw_UsageStatsCaption()
+{
+    return UsageStats::Enabled() ? "SEND ANONYMOUS USAGE STATS: ON" : "SEND ANONYMOUS USAGE STATS: OFF";
+}
+
+void yw_UsageStatsToggle()
+{
+    UsageStats::SetEnabledByUser(!UsageStats::Enabled());
+    printf("usage stats: %s (Options)\n", UsageStats::Enabled() ? "on" : "off");
+}
+
 void UserData::ShowOptionsMenu()
 {
     titel_button->HideScreen();
 
     GfxMenuLoad();
+#ifdef UA_VR_ENABLED
+    if ( !VR::Active() )
+#endif
+        video_button->SetText(1240, yw_UsageStatsCaption()); // may have changed in VR / at start-up
 
     video_button->ShowScreen();
 
@@ -3616,6 +3632,14 @@ void UserData::GameShellUiHandleInput()
 #endif
                 )
             GfxMenuCode(r.code);
+        else if ( r.code == 1240 )
+        {
+            // SEND ANONYMOUS USAGE STATS: applied at once (docs/usage-stats.md)
+            yw_UsageStatsToggle();
+            video_button->SetText(1240, yw_UsageStatsCaption());
+        }
+        else if ( r.code == 1241 )
+            StatsReportBug(); // REPORT A BUG: the site's form in the browser (docs/usage-stats.md, bug_report)
         else if ( r.code == 1250 )
             p_YW->_helpURL = Locale::Text::Help(Locale::HELP_SETTINGS);
     }

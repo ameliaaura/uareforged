@@ -40,6 +40,8 @@
 #include "platform/xr/xr_platform.h"
 #include "setup/setup_flow.h"
 #include "setup/setup_core.h"
+#include "usage_stats.h"
+#include "version.h"
 
 extern "C" int UA_main(int argc, char* argv[]);
 
@@ -60,6 +62,42 @@ namespace {
 Host g_host;
 EglContext g_egl;
 XrPlatform g_xr;
+JavaVM* g_vm = nullptr;
+
+// anonymous usage stats: POST through java.net.HttpURLConnection on the stats thread (docs/usage-stats.md)
+int StatsSend(const std::string& url, const std::string& body, int timeoutMs) {
+    if (!g_vm) return -1;
+    setup::Http h(g_vm);
+    return h.postJson(url, body, timeoutMs);
+}
+
+// "Report a bug" (pause menu): the site's feedback form in the headset's browser, by an Android VIEW intent.
+// Runs on the game thread (android_main's, attached to the VM). The browser comes to the front; the game pauses
+// as for any other app switch. The reference also stays on the pause menu row in case the browser didn't open.
+bool StatsOpenUrl(const std::string& url) {
+    android_app* app = g_host.app;
+    if (!g_vm || !app || !app->activity) return false;
+    JNIEnv* e = nullptr;
+    if (g_vm->GetEnv((void**)&e, JNI_VERSION_1_6) != JNI_OK || !e) return false;
+    bool ok = false;
+    e->PushLocalFrame(16);
+    jclass cUri = e->FindClass("android/net/Uri");
+    jclass cIntent = e->FindClass("android/content/Intent");
+    jclass cAct = e->GetObjectClass(app->activity->clazz);
+    if (cUri && cIntent && cAct) {
+        jobject uri = e->CallStaticObjectMethod(cUri, e->GetStaticMethodID(cUri, "parse", "(Ljava/lang/String;)Landroid/net/Uri;"),
+                                                e->NewStringUTF(url.c_str()));
+        jobject it = e->NewObject(cIntent, e->GetMethodID(cIntent, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V"),
+                                  e->NewStringUTF("android.intent.action.VIEW"), uri);
+        e->CallObjectMethod(it, e->GetMethodID(cIntent, "addFlags", "(I)Landroid/content/Intent;"), 0x10000000);  // NEW_TASK
+        e->CallVoidMethod(app->activity->clazz, e->GetMethodID(cAct, "startActivity", "(Landroid/content/Intent;)V"), it);
+        ok = !e->ExceptionCheck();
+    }
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->PopLocalFrame(nullptr);
+    LOGI("report a bug: browser %s", ok ? "asked to open the feedback form" : "could not be opened");
+    return ok;
+}
 
 // ---- stdout/stderr -> logcat --------------------------------------------------------------
 int g_logPipe[2] = {-1, -1};
@@ -214,6 +252,16 @@ void android_main(android_app* app) {
     else
         LOGI("data dir %s", g_host.dataDir.c_str());
     ApplyConfig(g_host.dataDir, false);
+
+    // anonymous usage stats (opt-in): the answer and install number live in the app's private storage
+    // (removed with the app or "clear data"); the start screens ask the question, the engine sends.
+    // A UA_SETTINGS_DIR from debug.uavr.env wins (testing: an empty folder shows the question again).
+    g_vm = app->activity->vm;
+    if (app->activity->internalDataPath && app->activity->internalDataPath[0])
+        setenv("UA_SETTINGS_DIR", app->activity->internalDataPath, 0);
+    UsageStats::SetSender(StatsSend);
+    UsageStats::SetUrlOpener(StatsOpenUrl);
+    UsageStats::Init(std::string(), "vr", "quest", Common::PortVersion, UA_BUILD_ID);
 
     XrPlatformOptions opt;
     opt.appName = "UA Reforged VR";

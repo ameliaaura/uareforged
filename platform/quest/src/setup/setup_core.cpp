@@ -713,5 +713,45 @@ bool Http::get(const std::string& urlStr, int64_t from, int64_t to, int stallMs,
     return ok;
 }
 
+int Http::postJson(const std::string& urlStr, const std::string& body, int timeoutMs) {
+    HttpResponse r;
+    JNIEnv* e = env();
+    if (!e) return -1;
+    LocalFrame frame(e);
+    jclass cUrl = e->FindClass("java/net/URL");
+    jclass cConn = e->FindClass("java/net/HttpURLConnection");
+    jclass cOut = e->FindClass("java/io/OutputStream");
+    if (!cUrl || !cConn || !cOut) { takeException(e, &r, false); return -1; }
+    jobject url = e->NewObject(cUrl, e->GetMethodID(cUrl, "<init>", "(Ljava/lang/String;)V"), e->NewStringUTF(urlStr.c_str()));
+    if (takeException(e, &r, false)) return -1;
+    jobject conn = e->CallObjectMethod(url, e->GetMethodID(cUrl, "openConnection", "()Ljava/net/URLConnection;"));
+    if (takeException(e, &r, false) || !e->IsInstanceOf(conn, cConn)) return -1;
+    jmethodID setProp = e->GetMethodID(cConn, "setRequestProperty", "(Ljava/lang/String;Ljava/lang/String;)V");
+    jmethodID disconnect = e->GetMethodID(cConn, "disconnect", "()V");
+    e->CallVoidMethod(conn, e->GetMethodID(cConn, "setConnectTimeout", "(I)V"), timeoutMs);
+    e->CallVoidMethod(conn, e->GetMethodID(cConn, "setReadTimeout", "(I)V"), timeoutMs);
+    e->CallVoidMethod(conn, e->GetMethodID(cConn, "setInstanceFollowRedirects", "(Z)V"), JNI_FALSE);
+    e->CallVoidMethod(conn, e->GetMethodID(cConn, "setUseCaches", "(Z)V"), JNI_FALSE);
+    e->CallVoidMethod(conn, e->GetMethodID(cConn, "setDoOutput", "(Z)V"), JNI_TRUE);
+    e->CallVoidMethod(conn, e->GetMethodID(cConn, "setRequestMethod", "(Ljava/lang/String;)V"), e->NewStringUTF("POST"));
+    e->CallVoidMethod(conn, e->GetMethodID(cConn, "setFixedLengthStreamingMode", "(I)V"), (jint)body.size());
+    // fixed headers: the default User-Agent would name the device model
+    e->CallVoidMethod(conn, setProp, e->NewStringUTF("User-Agent"), e->NewStringUTF("UA-Reforged"));
+    e->CallVoidMethod(conn, setProp, e->NewStringUTF("Content-Type"), e->NewStringUTF("application/json"));
+    if (takeException(e, &r, false)) { e->CallVoidMethod(conn, disconnect); e->ExceptionClear(); return -1; }
+    jobject out = e->CallObjectMethod(conn, e->GetMethodID(cConn, "getOutputStream", "()Ljava/io/OutputStream;"));
+    if (takeException(e, &r, false)) { e->CallVoidMethod(conn, disconnect); e->ExceptionClear(); return -1; }
+    jbyteArray jb = e->NewByteArray((jsize)body.size());
+    e->SetByteArrayRegion(jb, 0, (jsize)body.size(), (const jbyte*)body.data());
+    e->CallVoidMethod(out, e->GetMethodID(cOut, "write", "([B)V"), jb);
+    e->CallVoidMethod(out, e->GetMethodID(cOut, "close", "()V"));
+    if (takeException(e, &r, false)) { e->CallVoidMethod(conn, disconnect); e->ExceptionClear(); return -1; }
+    int code = e->CallIntMethod(conn, e->GetMethodID(cConn, "getResponseCode", "()I"));
+    if (takeException(e, &r, false)) code = -1;
+    e->CallVoidMethod(conn, disconnect);
+    e->ExceptionClear();
+    return code;
+}
+
 }  // namespace setup
 }  // namespace uavr

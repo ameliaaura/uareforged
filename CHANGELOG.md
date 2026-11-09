@@ -6,9 +6,22 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
-Nothing yet.
+## [0.8.1] - Desktop / [0.9.1] - Quest - not yet released
 
-## [0.9.0] - Quest - not yet released
+### Added
+- **Anonymous usage stats, optional and off unless you say yes.** The first start asks once ("Help make UA
+  Reforged better?"; nothing pre-selected, closing it = no); *Options > Send anonymous usage stats* (desktop) and
+  *Pause > Settings > CONTROLS, PRIVACY* (VR) change it any time. When on: a crash report on the next start
+  after a crash, a performance summary after each mission, how each mission ended and how long it took to load,
+  how long the app was open, which kind of controls were used, a coarse description of the computer or headset
+  (memory and cores in steps, refresh rate, screen size step), in VR the time at the war table and inside units, a
+  few error codes, and a count of app and mission starts. No name, no IP, no files, no personal data. Exactly what
+  is sent: [docs/usage-stats.md](docs/usage-stats.md).
+- **Report a bug** (desktop *Options*, VR *Pause* menu) opens the site's feedback form in the browser with a short
+  reference; with usage stats on, the game sends that session's diagnostics under the same reference so the note
+  and the details can be matched. The note itself is typed on the website.
+
+## [0.9.0] - Quest - 2026-11-08
 
 The first public release of **UA Reforged VR** for the Meta Quest 3.
 
@@ -27,7 +40,7 @@ The first public release of **UA Reforged VR** for the Meta Quest 3.
 - Tested on the Quest 3. The Quest 3S should work but is untested; Quest 2 and Quest Pro are untested.
 - In-game videos are skipped on the Quest.
 
-## [0.8.0] - Desktop - not yet released
+## [0.8.0] - Desktop - 2026-11-08
 
 The first public release of the desktop apps.
 
@@ -70,6 +83,8 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.1
+[0.8.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.1
 [0.9.0]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.0
 [0.8.0]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.0

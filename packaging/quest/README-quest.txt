@@ -26,7 +26,7 @@ In short:
 ------------------------------------
   a. Install SideQuest (Advanced Installer) from https://sidequestvr.com/setup-howto on your Mac or PC.
   b. Connect the headset. SideQuest shows a green dot when it sees it.
-  c. Drag UA-Reforged-VR-0.9.0-Quest3.apk onto the SideQuest window (or use "Install APK file from
+  c. Drag UA-Reforged-VR-0.9.1-Quest3.apk onto the SideQuest window (or use "Install APK file from
      folder" at the top). Wait for "Success".
 
 
@@ -35,8 +35,8 @@ In short:
 adb comes with Google's "SDK Platform-Tools":
 https://developer.android.com/tools/releases/platform-tools
 
-  Mac (Terminal):        ./adb install -r UA-Reforged-VR-0.9.0-Quest3.apk
-  Windows (PowerShell):  .\adb.exe install -r UA-Reforged-VR-0.9.0-Quest3.apk
+  Mac (Terminal):        ./adb install -r UA-Reforged-VR-0.9.1-Quest3.apk
+  Windows (PowerShell):  .\adb.exe install -r UA-Reforged-VR-0.9.1-Quest3.apk
 
 "Success" means it is installed. "unauthorized" means step 1d is still waiting in the headset.
 
@@ -69,6 +69,11 @@ thumbstick and press A).
   * Pause > Settings > LOOK switches between NEW LOOK and ORIGINAL (it applies at the next level).
   * Pause > Settings > DISPLAY sets the refresh rate (90 Hz by default).
   * Recentre the view: hold the Meta button on the right controller.
+  * Anonymous usage stats: optional, off unless you say yes on the first start. Change it any time in
+    Pause > Settings > CONTROLS, PRIVACY. When on: crash reports, performance summaries, how missions end
+    and how long they load, session length, time at the table / inside units, coarse headset details, error
+    codes and a usage count; no name, no IP, no files, no personal data. Details: docs/usage-stats.md.
+  * Pause > Report a Bug opens the feedback form on the website in the headset's browser.
 
 
 Uninstall: App Library > Unknown Sources > UA Reforged VR > ... > Uninstall (this also removes the

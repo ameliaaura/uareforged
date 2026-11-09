@@ -54,7 +54,8 @@ engine() {
     local PMAP="-ffile-prefix-map=$ROOT=. -ffile-prefix-map=$(cd "$ROOT" && pwd -P)=. -ffile-prefix-map=$OUT=build -ffile-prefix-map=$(cd "$OUT" && pwd -P)=build -ffile-prefix-map=$SYSROOT=sysroot -ffile-prefix-map=$(cd "$SYSROOT" && pwd -P)=sysroot"
     # CMAKE_BUILD_TYPE as the Mac build (RelWithDebInfo); the debug info is stripped when the files are assembled
     cmake -S "$ROOT/src" -B "$EBUILD" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_TOOLCHAIN_FILE="$PKG/toolchain.cmake" "-DCMAKE_C_FLAGS=$PMAP" "-DCMAKE_CXX_FLAGS=$PMAP" >"$OUT/engine-configure.log"
+          -DCMAKE_TOOLCHAIN_FILE="$PKG/toolchain.cmake" "-DCMAKE_C_FLAGS=$PMAP" "-DCMAKE_CXX_FLAGS=$PMAP" \
+          -DUA_BUILD_ID="${UA_BUILD_ID:-dev}" -DUA_TEST_HOOKS="${UA_TEST_HOOKS:-OFF}" >"$OUT/engine-configure.log"
     cmake --build "$EBUILD" -j "${JOBS:-6}" >"$OUT/engine-build.log" || { tail -30 "$OUT/engine-build.log"; die "engine build failed"; }
     [ -f "$EBUILD/UA_source.exe" ] || die "build produced no UA_source.exe"
     log "stub: UA Reforged.exe"

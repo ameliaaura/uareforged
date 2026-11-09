@@ -1344,4 +1344,21 @@ const char *DisplayRateLabel(int hz)
     }
 }
 
+// anonymous usage stats (perf event): one eye's image size and the display rate now
+void StatsDisplay(int *eyeW, int *eyeH, int *hz)
+{
+    if ( !g_active || !g_backend )
+        return;
+    int w = 0, h = 0;
+    g_backend->EyeSize(&w, &h);
+    if ( w > 0 && h > 0 ) { *eyeW = w; *eyeH = h; }
+    *hz = (int)(g_backend->RefreshHz() + 0.5f);
+}
+
+// anonymous usage stats (level_end): the war table is open (the miniature, or the token table at the station)
+bool StatsTableShown()
+{
+    return g_active && (Cmd::DioramaShown() || Cmd::DeckTableAtStation());
+}
+
 } // namespace VR

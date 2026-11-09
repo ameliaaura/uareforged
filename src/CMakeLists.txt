@@ -3,6 +3,15 @@ project(UA_source)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Anonymous usage stats (docs/usage-stats.md): the build identifier sent in crash reports (the source
+# commit of a release build; "dev" for local builds) and the test-only crash switch (never in releases).
+set(UA_BUILD_ID "dev" CACHE STRING "Build identifier for crash reports (e.g. the source commit)")
+option(UA_TEST_HOOKS "Test builds: UA_TEST_CRASH=segv|abort forces a crash in the first mission" OFF)
+if(APPLE)
+	# the macOS sender uses NSURLSession (Foundation, a system framework SDL already loads)
+	enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 14)
 
 set(SOURCES
@@ -56,6 +65,9 @@ set(SOURCES
 	obj3d.cpp
 	particle.cpp
 	profile_patch.cpp
+	usage_stats.cpp
+	usage_stats_crash.cpp
+	usage_stats_platform.cpp
 	rsrc.cpp
 	sample.cpp
 	skeleton.cpp
@@ -168,7 +180,7 @@ if(ANDROID)
 		${QUEST_DIR}/src
 		${UAVR_PREFIX}/include
 		${ANDROID_NDK}/sources/android/native_app_glue)
-	set(UAVR_APP_VERSION "0.9.0" CACHE STRING "App version shown on the start screens")
+	set(UAVR_APP_VERSION "0.9.1" CACHE STRING "App version shown on the start screens")
 	target_compile_definitions(${UA_TARGET} PUBLIC UA_NO_FMV=1 AL_LIBTYPE_STATIC=1 UAVR_APP_VERSION="${UAVR_APP_VERSION}"
 		# SDL's message box needs SDLActivity (JNI); the shell logs instead.
 		SDL_ShowSimpleMessageBox=UA_ShowSimpleMessageBox)
@@ -306,3 +318,15 @@ endif()
 # Reforge atmos night windows: the window detector runs at level load on night maps; the engine
 # builds at -O0 (above), this pure-CPU file at -O2 (~45 ms -> ~6 ms per trim). Last -O wins on clang.
 set_source_files_properties(system/atmos_winmask.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+
+# anonymous usage stats: platform parts (system libraries only)
+if(APPLE)
+	target_sources(${UA_TARGET} PRIVATE usage_stats_net_apple.mm)
+	target_link_libraries(${UA_TARGET} "-framework Foundation")
+elseif(WIN32)
+	target_link_libraries(${UA_TARGET} winhttp bcrypt)
+endif()
+target_compile_definitions(${UA_TARGET} PRIVATE UA_BUILD_ID="${UA_BUILD_ID}")
+if(UA_TEST_HOOKS)
+	target_compile_definitions(${UA_TARGET} PRIVATE UA_TEST_HOOKS=1)
+endif()
