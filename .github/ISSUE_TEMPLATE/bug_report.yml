@@ -28,7 +28,7 @@ body:
       label: UA Reforged version
       description: |
         Desktop: the corner of the main menu ("UA Reforged 0.8 (OpenUA)") or the download's file name. Quest: *App Library > Unknown Sources*, the app's details.
-      placeholder: "0.8.1"
+      placeholder: "0.8.2"
     validations:
       required: true
 

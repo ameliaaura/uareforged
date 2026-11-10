@@ -21,7 +21,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-VERSION="0.9.1"
+VERSION="0.9.2"
 SDK="${ANDROID_SDK_ROOT:?set ANDROID_SDK_ROOT}"
 NDK="${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}"
 : "${JAVA_HOME:?set JAVA_HOME to a JDK 17}"

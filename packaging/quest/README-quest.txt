@@ -26,7 +26,7 @@ In short:
 ------------------------------------
   a. Install SideQuest (Advanced Installer) from https://sidequestvr.com/setup-howto on your Mac or PC.
   b. Connect the headset. SideQuest shows a green dot when it sees it.
-  c. Drag UA-Reforged-VR-0.9.1-Quest3.apk onto the SideQuest window (or use "Install APK file from
+  c. Drag UA-Reforged-VR-0.9.2-Quest3.apk onto the SideQuest window (or use "Install APK file from
      folder" at the top). Wait for "Success".
 
 
@@ -35,8 +35,8 @@ In short:
 adb comes with Google's "SDK Platform-Tools":
 https://developer.android.com/tools/releases/platform-tools
 
-  Mac (Terminal):        ./adb install -r UA-Reforged-VR-0.9.1-Quest3.apk
-  Windows (PowerShell):  .\adb.exe install -r UA-Reforged-VR-0.9.1-Quest3.apk
+  Mac (Terminal):        ./adb install -r UA-Reforged-VR-0.9.2-Quest3.apk
+  Windows (PowerShell):  .\adb.exe install -r UA-Reforged-VR-0.9.2-Quest3.apk
 
 "Success" means it is installed. "unauthorized" means step 1d is still waiting in the headset.
 

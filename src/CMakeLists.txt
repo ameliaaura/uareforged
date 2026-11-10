@@ -181,7 +181,7 @@ if(ANDROID)
 		${QUEST_DIR}/src
 		${UAVR_PREFIX}/include
 		${ANDROID_NDK}/sources/android/native_app_glue)
-	set(UAVR_APP_VERSION "0.9.1" CACHE STRING "App version shown on the start screens")
+	set(UAVR_APP_VERSION "0.9.2" CACHE STRING "App version shown on the start screens")
 	target_compile_definitions(${UA_TARGET} PUBLIC UA_NO_FMV=1 AL_LIBTYPE_STATIC=1 UAVR_APP_VERSION="${UAVR_APP_VERSION}"
 		# SDL's message box needs SDLActivity (JNI); the shell logs instead.
 		SDL_ShowSimpleMessageBox=UA_ShowSimpleMessageBox)

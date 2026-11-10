@@ -16,9 +16,9 @@ namespace Common {
 // default "LOCALE" (see Locale::Text::Get).
 constexpr const char *PortName    = "Urban Assault: Reforged";
 #ifdef UA_VR_NEWLOOK
-constexpr const char *PortVersion = "0.9.1"; // the Quest app (UA Reforged VR)
+constexpr const char *PortVersion = "0.9.2"; // the Quest app (UA Reforged VR)
 #else
-constexpr const char *PortVersion = "0.8.1";
+constexpr const char *PortVersion = "0.8.2";
 #endif
 
 // Short label for the title screen (the corner next to the language button)

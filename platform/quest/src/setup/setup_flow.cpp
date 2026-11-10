@@ -54,7 +54,7 @@
 #include "setup/setup_core.h"
 
 #ifndef UAVR_APP_VERSION
-#define UAVR_APP_VERSION "0.9.1"
+#define UAVR_APP_VERSION "0.9.2"
 #endif
 
 namespace uavr {

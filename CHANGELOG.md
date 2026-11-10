@@ -6,7 +6,16 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
-## [0.8.1] - Desktop / [0.9.1] - Quest - not yet released
+## [0.8.2] - Desktop / [0.9.2] - Quest - not yet released
+
+### Fixed
+- **City walls: the 1998 artists' hidden joke graffiti no longer shows on the original textures** (it was already
+  gone from the sharp textures). Some buildings showed lettering such as "GURU MEDITATION ERROR" and a signature
+  along the bottom of a wall. Now cleaned on the Quest and on desktop with sharp textures off, with the same
+  touch-up the sharp textures got; nothing else in the look changes, and there is nothing new to download.
+  *Wall Signatures* (off by default) still brings the signature back.
+
+## [0.8.1] - Desktop / [0.9.1] - Quest - 2026-11-09
 
 ### Added
 - **Anonymous usage stats, optional and off unless you say yes.** The first start asks once ("Help make UA
@@ -83,7 +92,9 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.2
+[0.8.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.2
 [0.9.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.1
 [0.8.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.1
 [0.9.0]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.0
