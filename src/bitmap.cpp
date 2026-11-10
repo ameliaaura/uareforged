@@ -5,6 +5,7 @@
 #include "system/gfx_glow.h"
 #include "utils.h"
 #include "gfxsettings.h"
+#include "tex_cleanup.h"
 
 #include <SDL2/SDL_image.h>
 #include <sys/stat.h>
@@ -545,6 +546,68 @@ int UiPackScale()
 
 }
 
+// Runs TexCleanup on a loaded sheet. Only city1, shrttwnd and fhrttwnd get
+// past the name check, so every other texture costs one string compare. The
+// pixels are read into a plain RGBA buffer and written back with the
+// surface's own format, so the hashes and rules don't depend on the pixel
+// layout the platform picked.
+static void texCleanup(SDL_Surface *s, const std::string &rsrcName)
+{
+    const TexCleanup::Sheet sheet = TexCleanup::Classify(rsrcName);
+
+    if ( sheet == TexCleanup::SHEET_OTHER || !s || !s->format )
+        return;
+
+    if ( s->format->BytesPerPixel != 4 || s->w != 256 || s->h != 256 )
+        return;
+
+    if ( SDL_MUSTLOCK(s) && SDL_LockSurface(s) != 0 )
+        return;
+
+    const int w = s->w, h = s->h;
+    std::vector<uint8_t> rgba((size_t)w * h * 4);
+
+    for (int y = 0; y < h; y++)
+    {
+        const Uint32 *row = (const Uint32 *)((const uint8_t *)s->pixels + (size_t)y * s->pitch);
+        for (int x = 0; x < w; x++)
+        {
+            uint8_t *p = &rgba[((size_t)y * w + x) * 4];
+            SDL_GetRGBA(row[x], s->format, &p[0], &p[1], &p[2], &p[3]);
+        }
+    }
+
+    const std::vector<uint8_t> before(rgba);
+    int changed = 0;
+    const TexCleanup::Result r = TexCleanup::Apply(sheet, rgba.data(), w, h, w * 4,
+                                                   HDTex::SignaturesEnabled(), &changed);
+
+    if ( changed > 0 )
+    {
+        for (int y = 0; y < h; y++)
+        {
+            Uint32 *row = (Uint32 *)((uint8_t *)s->pixels + (size_t)y * s->pitch);
+            for (int x = 0; x < w; x++)
+            {
+                const size_t i = ((size_t)y * w + x) * 4;
+                if ( memcmp(&rgba[i], &before[i], 4) != 0 )
+                    row[x] = SDL_MapRGBA(s->format, rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]);
+            }
+        }
+    }
+
+    if ( SDL_MUSTLOCK(s) )
+        SDL_UnlockSurface(s);
+
+    // The hash after the change lets a test compare the result with the
+    // one the rules give on a dump of the same sheet. c_str(): resource
+    // names can end in a NUL byte, which would cut the line short in the
+    // Quest's log.
+    if ( r != TexCleanup::UNCHANGED )
+        fmt::printf("tex-cleanup: %s: %s, %d px, now %016llx\n", rsrcName.c_str(), TexCleanup::Describe(r), changed,
+                    (unsigned long long)TexCleanup::HashRGBA(rgba.data(), w, h, w * 4));
+}
+
 static void hdTexHooks(ResBitmap *bitm, const std::string &rsrcName)
 {
     if ( !bitm || !bitm->swTex )
@@ -564,6 +627,12 @@ static void hdTexHooks(ResBitmap *bitm, const std::string &rsrcName)
         if ( !hdFileExists(path) )
             IMG_SavePNG(bitm->swTex, path.c_str());
     }
+
+    // Paint out the 1998 artists' graffiti and signature on the original
+    // sheets (src/tex_cleanup.h). After the dump, so dumps stay as the game
+    // shipped them for the pack builder; before the HDTEX check, so the
+    // original textures are clean whether or not sharp textures are on.
+    texCleanup(bitm->swTex, rsrcName);
 
     // Graphics settings: HDTEX 0 (preset Original) = the 1998 textures; no pack
     // file is opened. No preset in force = on, as before the settings existed.

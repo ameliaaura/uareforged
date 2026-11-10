@@ -65,6 +65,7 @@ set(SOURCES
 	obj3d.cpp
 	particle.cpp
 	profile_patch.cpp
+	tex_cleanup.cpp
 	usage_stats.cpp
 	usage_stats_crash.cpp
 	usage_stats_platform.cpp
