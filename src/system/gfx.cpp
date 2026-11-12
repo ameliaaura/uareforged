@@ -18,6 +18,7 @@
 #include <algorithm>
 #endif
 
+#include <cstring>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -68,6 +69,76 @@ std::vector<TGFXDeviceInfo> GFXEngine::_devices
 {
     TGFXDeviceInfo("Opengl", "<primary>")         
 };
+
+// Allocates a 2D texture with no initial data. Its texels are then UNDEFINED:
+// Apple's GL hands back zeros, but Windows drivers commonly hand back recycled
+// video memory (old frames, old textures). Anything sampled from such a
+// texture before every texel was written shows that garbage.
+//
+// Dev aid: UA_GL_UNDEFINED_TEX=1 fills these allocations with noise instead,
+// so a Mac run shows exactly what such a driver would show.
+// UA_GL_UNDEFINED_TEX=check leaves the allocations alone and logs, for the 2D
+// screen and text layers, how many texels of the new texture are not zero
+// (CheckNewLayerTexture), which measures what the real driver hands back.
+// Inert unless set.
+static int UndefinedTexMode()
+{
+    static int mode = -1;
+    if ( mode < 0 )
+    {
+        const char *v = getenv("UA_GL_UNDEFINED_TEX");
+        if ( !v || !v[0] || v[0] == '0' )
+            mode = 0;
+        else if ( !strcmp(v, "check") )
+            mode = 2;
+        else
+            mode = 1;
+    }
+    return mode;
+}
+
+// UA_GL_UNDEFINED_TEX=check: read the bound, just allocated texture back.
+static void CheckNewLayerTexture(const char *what, int w, int h)
+{
+#ifndef UA_GLES
+    if ( UndefinedTexMode() != 2 || w <= 0 || h <= 0 )
+        return;
+    std::vector<uint32_t> px((size_t)w * h);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    size_t nz = 0;
+    for ( uint32_t p : px )
+        if ( p )
+            nz++;
+    fmt::printf("gfx: UA_GL_UNDEFINED_TEX=check: new %s texture %dx%d: %d of %d texels not zero\n",
+                what, w, h, (int)nz, (int)px.size());
+#else
+    (void)what; (void)w; (void)h;
+#endif
+}
+
+static void TexImageNoData(GLint internalFmt, int w, int h, GLenum fmt, GLenum type)
+{
+    const bool poison = UndefinedTexMode() == 1;
+
+    if ( poison && w > 0 && h > 0 && (fmt == GL_RGBA || fmt == GL_BGRA) )
+    {
+        // Every pixel format reaching here is 4 bytes per pixel.
+        std::vector<uint32_t> noise((size_t)w * h);
+        uint32_t x = 0x9E3779B9u ^ (uint32_t)(w * 73856093) ^ (uint32_t)(h * 19349663);
+        for ( uint32_t &px : noise )
+        {
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            px = x;
+        }
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFmt, w, h, 0, fmt, type, noise.data());
+        fmt::printf("gfx: UA_GL_UNDEFINED_TEX: %dx%d texture allocated with noise\n", w, h);
+        return;
+    }
+
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFmt, w, h, 0, fmt, type, NULL);
+}
 
 
 bool TRenderNode::CompareSolid(TRenderNode *a, TRenderNode *b)
@@ -4005,7 +4076,7 @@ void GFXEngine::Init()
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, FBOTEXTYPE, 640, 480, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        TexImageNoData(FBOTEXTYPE, 640, 480, GL_RGBA, GL_UNSIGNED_BYTE);
 
 
         Glext::GLGenRenderbuffers(1, &_fbod);
@@ -5500,7 +5571,8 @@ void GFXEngine::RecreateScreenSurface()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ScreenSurface->w, ScreenSurface->h, 0, _glPixfmt, _glPixtype, NULL);
+    TexImageNoData(GL_RGBA, ScreenSurface->w, ScreenSurface->h, _glPixfmt, _glPixtype);
+    CheckNewLayerTexture("screen layer", ScreenSurface->w, ScreenSurface->h);
 
     // Tiled upload only for the hi-density UI (UI pack on); the classic 1x path
     // (preset Original) keeps the full clear + upload exactly as before.
@@ -5844,7 +5916,8 @@ void GFXEngine::RecreateTextSurface()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, TextSurface->w, TextSurface->h, 0, _glPixfmt, _glPixtype, NULL);
+    TexImageNoData(GL_RGBA, TextSurface->w, TextSurface->h, _glPixfmt, _glPixtype);
+    CheckNewLayerTexture("text layer", TextSurface->w, TextSurface->h);
 
     ypa_log_out("gfx: hi-res UI text layer %dx%d (logical %dx%d)\n",
                 TextSurface->w, TextSurface->h, _resolution.x, _resolution.y);
@@ -6894,7 +6967,7 @@ void GFXEngine::UpdateFBOSizes()
         _states.TexMip = false;
         SetRenderStates(0);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, FBOTEXTYPE, scrSz.x, scrSz.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        TexImageNoData(FBOTEXTYPE, scrSz.x, scrSz.y, GL_RGBA, GL_UNSIGNED_BYTE);
 
         Glext::GLBindRenderbuffer(GL_RENDERBUFFER, _fbod);
         Glext::GLRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, scrSz.x, scrSz.y);
