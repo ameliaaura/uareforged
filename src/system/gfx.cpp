@@ -140,6 +140,22 @@ static void TexImageNoData(GLint internalFmt, int w, int h, GLenum fmt, GLenum t
     glTexImage2D(GL_TEXTURE_2D, 0, internalFmt, w, h, 0, fmt, type, NULL);
 }
 
+// (Re)allocates the bound texture as a copy of a 2D layer's CPU surface. The
+// screen and text layers are blended over the whole window but afterwards only
+// get partial uploads (dirty text rects, written tiles), so their texture must
+// start out holding the surface's own (cleared) pixels. Allocating them with
+// no data left the texels undefined: after a resolution change the text layer
+// showed the driver's recycled video memory (garbled menus and loading screens
+// on Windows; Apple's GL zero-fills, so Macs never showed it).
+static void TexImageFromSurface(SDL_Surface *s, GLenum fmt, GLenum type)
+{
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, s->pitch / s->format->BytesPerPixel);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, s->w, s->h, 0, fmt, type, s->pixels);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+}
+
 
 bool TRenderNode::CompareSolid(TRenderNode *a, TRenderNode *b)
 {
@@ -5571,7 +5587,8 @@ void GFXEngine::RecreateScreenSurface()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    TexImageNoData(GL_RGBA, ScreenSurface->w, ScreenSurface->h, _glPixfmt, _glPixtype);
+    // SDL_CreateRGBSurface zero-fills, so this is a cleared texture.
+    TexImageFromSurface(ScreenSurface, _glPixfmt, _glPixtype);
     CheckNewLayerTexture("screen layer", ScreenSurface->w, ScreenSurface->h);
 
     // Tiled upload only for the hi-density UI (UI pack on); the classic 1x path
@@ -5586,7 +5603,7 @@ void GFXEngine::RecreateScreenSurface()
         _scrTilesX = (ScreenSurface->w + SCR_TILE_W - 1) / SCR_TILE_W;
         _scrTilesY = (ScreenSurface->h + SCR_TILE_H - 1) / SCR_TILE_H;
         _scrTileNow.assign(_scrTilesX * _scrTilesY, 1);   // unknown content: clear + upload all once
-        _scrTileGpu.assign(_scrTilesX * _scrTilesY, 1);   // texture content undefined (NULL upload)
+        _scrTileGpu.assign(_scrTilesX * _scrTilesY, 1);   // conservative: re-upload every tile once
         _scrGpuAny = true;
     }
 
@@ -5916,7 +5933,8 @@ void GFXEngine::RecreateTextSurface()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    TexImageNoData(GL_RGBA, TextSurface->w, TextSurface->h, _glPixfmt, _glPixtype);
+    // Cleared just above: DrawTextLayer only uploads dirty rects from here on.
+    TexImageFromSurface(TextSurface, _glPixfmt, _glPixtype);
     CheckNewLayerTexture("text layer", TextSurface->w, TextSurface->h);
 
     ypa_log_out("gfx: hi-res UI text layer %dx%d (logical %dx%d)\n",

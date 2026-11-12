@@ -6,6 +6,12 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
+### Fixed
+- **Desktop: menus and loading screens no longer come out garbled after changing the screen resolution**
+  (seen on Windows). The screen after the change, often the campaign map with its tip, showed smeared
+  pieces of old pictures and noise behind the text. The hi-res text layer now starts out clean whenever
+  the resolution or the window size changes.
+
 ## [0.8.2] - Desktop / [0.9.2] - Quest - not yet released
 
 ### Fixed
