@@ -54,7 +54,12 @@ static std::string ValueOf(const std::string &l)
     return v;
 }
 
-bool PatchInputSection(std::string &text, const std::vector<std::string> &fresh)
+static bool HasPrefix(const std::string &w, const std::string &prefix)
+{
+    return !prefix.empty() && w.size() >= prefix.size() && SameWord(w.substr(0, prefix.size()), prefix);
+}
+
+bool PatchInputSection(std::string &text, const std::vector<std::string> &fresh, const std::string &dropPrefix)
 {
     std::vector<std::string> lines;
     for (size_t at = 0; at < text.size();)
@@ -81,6 +86,19 @@ bool PatchInputSection(std::string &text, const std::vector<std::string> &fresh)
     for (int i = begin + 1; i < end; i++)
     {
         const std::string k = FirstWord(lines[i]);
+        if ( HasPrefix(k, dropPrefix) )
+        {
+            bool fresh_key = false;
+            for (const std::string &f : fresh)
+                fresh_key = fresh_key || SameWord(k, FirstWord(f));
+            if ( !fresh_key )
+            {
+                lines.erase(lines.begin() + i);
+                i--;
+                end--;
+                continue;
+            }
+        }
         for (size_t f = 0; f < fresh.size(); f++)
         {
             if ( k.empty() || !SameWord(k, FirstWord(fresh[f])) )

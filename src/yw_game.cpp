@@ -8,6 +8,7 @@
 #include "env.h"
 #include "includes.h"
 #include "yw_internal.h"
+#include "pad_script.h"
 #include "yw.h"
 #include "yw_net.h"
 #include "windp.h"
@@ -4304,12 +4305,16 @@ int ypaworld_func64__sub4(NC_STACK_ypaworld *yw, base_64arg *arg)
         {
             yw->_gamePaused = true;
             yw->_gamePausedTimeStamp = arg->TimeStamp;
+            if ( PadScript::Active() )
+                fprintf(stderr, "pad script: game paused\n");
         }
         return 0;
     }
 
     if ( arg->field_8->KbdLastHit != Input::KC_NONE )
     {
+        if ( PadScript::Active() )
+            fprintf(stderr, "pad script: game continues\n");
         yw->_gamePaused = false;
         arg->TimeStamp = yw->_gamePausedTimeStamp;
     }

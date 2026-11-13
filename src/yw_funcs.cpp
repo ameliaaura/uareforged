@@ -6,6 +6,7 @@
 #include "yw.h"
 #include "gfxsettings.h"
 #include "yw_internal.h"
+#include "pad_page.h"
 #include "lstvw.h"
 #include "font.h"
 #include "button.h"
@@ -2723,6 +2724,7 @@ void ypaworld_func158__sub3(NC_STACK_ypaworld *yw, UserData *usr)
     case ENVMODE_INPUT:
         usr->button_input_button->Draw();
         yw_draw_input_list(yw, usr);
+        PadPage::Draw(yw);
         break;
 
     case ENVMODE_SETTINGS:

@@ -12,6 +12,7 @@
 #include "system/gfx.h"
 #include "system/inpt.h"
 #include "winp.h"
+#include "pad_page.h"
 #include "wintimer.h"
 
 #include "ade.h"
@@ -802,7 +803,12 @@ int ProcessMenuFrame()
         {
             showInputWait--;
             if ( showInputWait == 0 )
+            {
                 userdata.ShowInputSettings();
+                // UA_SHOW_INPUT=buttons: and the CONTROLLER BUTTONS page on top
+                if ( strstr(si, "buttons") )
+                    PadPage::Open(ypaworld, false);
+            }
         }
         else
             showInputWait = 0;

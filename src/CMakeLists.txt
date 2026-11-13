@@ -64,6 +64,9 @@ set(SOURCES
 	nucleas.cpp
 	obj3d.cpp
 	particle.cpp
+	pad_page.cpp
+	pad_remap.cpp
+	pad_script.cpp
 	profile_patch.cpp
 	tex_cleanup.cpp
 	usage_stats.cpp

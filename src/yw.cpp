@@ -11,6 +11,8 @@
 #include "reforge_marks.h"
 
 #include "yw_internal.h"
+#include "pad_page.h"
+#include "pad_script.h"
 #include "reforge.h"
 #include "loaders.h"
 
@@ -426,6 +428,8 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
                 _menuHoldActive = true;
                 _menuHoldTimeStamp = arg->TimeStamp - arg->DTime;
                 ypa_log_out("in-mission menu: mission held\n");
+                if ( PadScript::Active() )
+                    fprintf(stderr, "pad script: in-mission menu: mission held\n");
             }
             arg->TimeStamp = _menuHoldTimeStamp;
         }
@@ -434,6 +438,8 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             _menuHoldActive = false;
             arg->TimeStamp = _menuHoldTimeStamp + arg->DTime;
             ypa_log_out("in-mission menu: mission goes on\n");
+            if ( PadScript::Active() )
+                fprintf(stderr, "pad script: in-mission menu: mission goes on\n");
         }
 
         if ( _screenShotSeq )
@@ -473,6 +479,7 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             fprintf(stderr, "input: level %d joystick %s, tank stick layout %s, invert aim tanks %s, aircraft %s\n", _levelInfo.LevelID,
                     (_preferences & World::PREF_JOYDISABLE) ? "off" : "on", (_preferences & World::PREF_ALTJOYSTICK) ? "AIM" : "DRIVE",
                     (_preferences & World::PREF_INVERTAIM_TANK) ? "on" : "off", (_preferences & World::PREF_INVERTAIM_AIR) ? "on" : "off");
+            PadScript::MissionStarted(); // dev aid UA_PAD_SCRIPT (inert unless set)
         }
 
         ypaworld_func64__sub6(this);
@@ -481,7 +488,36 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
 
         if ( !_doNotRender )
         {
+            // the CONTROLLER BUTTONS page (over the in-mission menu) takes all input
+            if ( PadPage::IsOpen() )
+                PadPage::Handle(this, arg->field_8);
+
             ypaworld_func64__sub1(arg->field_8); //Precompute input (add mouse turn)
+
+            // dev aid UA_PAD_SCRIPT: what the mission got from the controller (the
+            // fire / machine gun / missile cam / brake buttons, throttle, keys, hotkeys)
+            if ( PadScript::Active() )
+            {
+                TInputState *in = arg->field_8;
+                static const char *const names[4] = { "fire", "missile cam", "machine gun", "brake" };
+                static bool was[4] = {};
+                static int wasThr = 0;
+                for (int i = 0; i < 4; i++)
+                {
+                    const bool on = in->Buttons.Is(i);
+                    if ( on != was[i] )
+                        fprintf(stderr, "pad script: game sees %s %s\n", names[i], on ? "down" : "up");
+                    was[i] = on;
+                }
+                const int thr = in->Sliders[14] > 0.5 ? 1 : (in->Sliders[14] < -0.5 ? -1 : 0); // forward = -300 axis = +1 slider
+                if ( thr != wasThr )
+                    fprintf(stderr, "pad script: game sees throttle %s\n", thr > 0 ? "forward" : (thr < 0 ? "back" : "released"));
+                wasThr = thr;
+                if ( in->KbdLastHit == Input::KC_ESCAPE || in->KbdLastHit == Input::KC_PAUSE )
+                    fprintf(stderr, "pad script: game sees key %s\n", in->KbdLastHit == Input::KC_ESCAPE ? "Esc" : "Pause");
+                if ( in->HotKeyID >= 0 )
+                    fprintf(stderr, "pad script: game sees hotkey %d\n", in->HotKeyID);
+            }
 
             TClickBoxInf *winp = &arg->field_8->ClickInf;
 
@@ -3301,9 +3337,11 @@ bool NC_STACK_ypaworld::CreateInputControls()
                                             btn_64arg.tileset_up = 18;
                                             btn_64arg.button_type = NC_STACK_button::TYPE_BUTTON;
                                             btn_64arg.field_3A = 30;
-                                            btn_64arg.xpos = menuWidth / 6;
+                                            // Delete / Reset to defaults / CONTROLLER BUTTONS: three
+                                            // columns like the OK / Help / Cancel row (port addition)
+                                            btn_64arg.xpos = 0;
                                             btn_64arg.ypos = 5 * vertMenuSpace + 13 * _fontH;
-                                            btn_64arg.width = (menuWidth / 3 - buttonsSpace);
+                                            btn_64arg.width = button1LineWidth;
                                             btn_64arg.caption = Locale::Text::Dialogs(Locale::DLG_I_DELETE);
                                             btn_64arg.downCode = 1251;
                                             btn_64arg.flags = NC_STACK_button::FLAG_BORDER | NC_STACK_button::FLAG_CENTER | NC_STACK_button::FLAG_TEXT;
@@ -3317,7 +3355,7 @@ bool NC_STACK_ypaworld::CreateInputControls()
 
                                             if ( _GameShell->button_input_button->Add(&btn_64arg) )
                                             {
-                                                btn_64arg.xpos = buttonsSpace + menuWidth / 2;
+                                                btn_64arg.xpos = bottomSecondBtnPosX;
                                                 btn_64arg.caption = Locale::Text::Common(Locale::CMN_RESETDEF);
                                                 btn_64arg.caption2.clear();
                                                 btn_64arg.pressedCode = 0;
@@ -3418,6 +3456,29 @@ bool NC_STACK_ypaworld::CreateInputControls()
                 }
             }
         }
+    }
+    if ( v70 )
+    {
+        // Port addition: the CONTROLLER BUTTONS page (src/pad_page.h)
+        NC_STACK_button::button_64_arg a;
+        a.tileset_down = 19;
+        a.tileset_up = 18;
+        a.field_3A = 30;
+        a.button_type = NC_STACK_button::TYPE_BUTTON;
+        a.xpos = bottomThirdBtnPosX;
+        a.ypos = 5 * vertMenuSpace + 13 * _fontH;
+        a.width = button1LineWidth;
+        a.caption = Locale::Text::Advanced(Locale::ADV_PADBUTTONS);
+        a.caption2.clear();
+        a.flags = NC_STACK_button::FLAG_BORDER | NC_STACK_button::FLAG_CENTER | NC_STACK_button::FLAG_TEXT;
+        a.downCode = 1251;
+        a.upCode = 1074;
+        a.pressedCode = 0;
+        a.button_id = 1069;
+        a.txt_r = _iniColors[68].r;
+        a.txt_g = _iniColors[68].g;
+        a.txt_b = _iniColors[68].b;
+        v70 = _GameShell->button_input_button->Add(&a) ? 1 : 0;
     }
     if ( !v70 )
     {

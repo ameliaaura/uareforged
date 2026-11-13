@@ -9,6 +9,8 @@
 #include "log.h"
 #include "gui/widget.h"
 #include "usage_stats.h"
+#include "pad_remap.h"
+#include "pad_script.h"
 #ifdef UA_VR_ENABLED
 #include <cmath>
 #include "vr/vr.h"
@@ -54,6 +56,14 @@ bool                 NC_STACK_winp::_joyDebug = false;
 bool                 NC_STACK_winp::_joyStartHeld = false;
 bool                 NC_STACK_winp::_joyPauseHeld = false;
 bool                 NC_STACK_winp::_padThrottle = false;
+
+// Pad button remapping (src/pad_remap.h): the actions the last poll gave, and what the CONTROLLER BUTTONS page has not read yet.
+static PadRemap::Output s_padOut;
+static uint32_t s_padEdges = 0;      // down edges since the page last read them (bit = button, 23/24 = left stick up/down)
+static uint32_t s_padHeldMask = 0;   // buttons held now (same bits)
+static bool     s_padPage = false;   // the page is open: no button does its action
+static uint32_t s_padSuppress = 0;   // buttons held when the page closed: no action until released
+static std::queue<int> s_padHotkeys; // hotkey ids pressed on the pad, not yet handed to the game
 
 std::array<int, 32>  NC_STACK_winp::_joyAxisMap;
 std::array<bool, 32> NC_STACK_winp::_joyAxisMapInv;
@@ -268,6 +278,7 @@ void NC_STACK_winp::JoyOpenDevice(int deviceIndex)
     {
         const char *nm = SDL_GameControllerName(_gameCtrl);
         sdlInputLog("\nSelected game controller: %s (instance %d)\n", nm ? nm : "?", (int)_joyInstanceId);
+        sdlInputLog("\tPad map (default buttons; CONTROLLER BUTTONS changes them, %s):\n", PadRemap::Active().IsDefault() ? "all default now" : "some changed");
         sdlInputLog("\tPad map: LStick=steer/move  RStick=aim  RT=fire  LT=machine gun\n"
                     "\t         R1/L1=throttle fwd/rev  Cross=brake  Triangle=missile cam\n"
                     "\t         DPad=gun aim (hat)  Circle/Square/L3/R3=JoyB4..7  Options=Esc\n");
@@ -315,6 +326,11 @@ void NC_STACK_winp::JoyCloseDevice()
         _joyPauseHeld = false;
     }
     _padThrottle = false;
+    s_padOut = PadRemap::Output();
+    s_padEdges = 0;
+    s_padHeldMask = 0;
+    while ( !s_padHotkeys.empty() )
+        s_padHotkeys.pop();
 
     _joyXYpos = Common::Point();
     _joyZRZpos = Common::Point();
@@ -963,26 +979,80 @@ int NC_STACK_winp::GameCtrlAxisVal(SDL_GameControllerAxis axis)
 // Map a modern pad (DualSense etc.) onto the engine's virtual joystick:
 //   left stick   -> JOYX/JOYY        (steer + pitch / drive)
 //   right stick X-> JOYRUDDER        (extra steer authority, also merged into steering)
-//   right stick  -> JOYHATX/JOYHATY  (POV hat: tank gun elevation), D-pad as fallback
-// R1/level 1 -> JOYTHROTTLE (momentary throttle fwd/rev, like keyboard accel keys)
+//   right stick  -> JOYHATX/JOYHATY  (POV hat: tank gun elevation), "Aim" buttons as fallback
+// Buttons go through the player's bindings (src/pad_remap.h, CONTROLLER BUTTONS page).
+// Defaults = the 0.8.2 mapping:
+//   R1/L1        -> JOYTHROTTLE      (momentary throttle fwd/rev, like keyboard accel keys)
 //   RT/LT        -> JOYB0/JOYB1      (fire weapon / fire machine gun)
 //   Triangle     -> JOYB2            (missile cam)   Cross -> JOYB3 (brake)
 //   Circle/Square/L3/R3 -> JOYB4..7  (free, bindable in the in-game input menu)
-//   Options      -> Esc              (synthesized keyboard key: menus/quit)
+//   D-pad        -> hat              (gun aim while the right stick is idle)
+//   Options      -> Esc              (synthesized keyboard key: menus/quit; always, whatever
+//                                     else it is bound to: the player cannot lock themselves out)
 //   Share/Create (DualSense), View/Back (Xbox), touchpad click -> Pause key
 //                                    (single player: pause, press again to continue)
+// Other actions (the 1998 hotkeys, map waypoints) have no default button.
+// While the CONTROLLER BUTTONS page is open no button does its action; the page reads
+// the presses (TakePadPresses).
 void NC_STACK_winp::CheckGameController(uint32_t *btnState)
 {
     _joyXYpos.x = GameCtrlAxisVal(SDL_CONTROLLER_AXIS_LEFTX);
     _joyXYpos.y = GameCtrlAxisVal(SDL_CONTROLLER_AXIS_LEFTY);
 
+    bool pressed[PadRemap::BTN_COUNT];
+    for (int b = 0; b < PadRemap::BTN_LEFTTRIGGER; b++)
+    {
+#if !SDL_VERSION_ATLEAST(2, 0, 14)
+        if ( b > SDL_CONTROLLER_BUTTON_DPAD_RIGHT )
+        {
+            pressed[b] = false;
+            continue;
+        }
+#endif
+        pressed[b] = SDL_GameControllerGetButton(_gameCtrl, (SDL_GameControllerButton)b) != 0;
+    }
+    pressed[PadRemap::BTN_LEFTTRIGGER] = SDL_GameControllerGetAxis(_gameCtrl, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8192;
+    pressed[PadRemap::BTN_RIGHTTRIGGER] = SDL_GameControllerGetAxis(_gameCtrl, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 8192;
+
+    // presses for the page: buttons, and the left stick pushed up / down (menu moves)
+    uint32_t held = 0;
+    for (int b = 0; b < PadRemap::BTN_COUNT; b++)
+        if ( pressed[b] )
+            held |= 1u << b;
+    if ( _joyXYpos.y < -200 )
+        held |= 1u << PAD_STICK_UP;
+    else if ( _joyXYpos.y > 200 )
+        held |= 1u << PAD_STICK_DOWN;
+    const uint32_t downNow = held & ~s_padHeldMask;
+    s_padEdges |= downNow;
+    s_padHeldMask = held;
+
+    PadRemap::Output out;
+    s_padSuppress &= held;
+    if ( !s_padPage )
+    {
+        bool live[PadRemap::BTN_COUNT];
+        for (int b = 0; b < PadRemap::BTN_COUNT; b++)
+            live[b] = pressed[b] && !(s_padSuppress & (1u << b));
+        out = PadRemap::Evaluate(PadRemap::Active(), live);
+    }
+
+    if ( _joyDebug || PadScript::Active() )
+    {
+        // what the bindings made of the buttons (the edges only)
+        for (int b = 0; b < PadRemap::BTN_COUNT; b++)
+        {
+            if ( downNow & (1u << b) )
+            {
+                const int a = PadRemap::Active().ActionOn(b);
+                sdlInputLog("pad: %s down -> %s%s\n", PadRemap::ButtonName(b), s_padPage ? "(page open) " : "",
+                            a >= 0 ? PadRemap::GetAction(a).key : (b == PadRemap::BTN_START ? "menu (Start)" : "nothing"));
+            }
+        }
+    }
+
     // GetSlider() negates the throttle axis, so "ahead" is -300 here.
-    int thr = 0;
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) )
-        thr -= 300;
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) )
-        thr += 300;
-    _joyZRZpos.x = thr;
+    _joyZRZpos.x = out.throttle;
 
     _joyZRZpos.y = GameCtrlAxisVal(SDL_CONTROLLER_AXIS_RIGHTX);
 
@@ -992,64 +1062,107 @@ void NC_STACK_winp::CheckGameController(uint32_t *btnState)
 
     if ( hx == 0 && hy == 0 )
     {
-        if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_DPAD_UP) )
-            hy = 300;
-        else if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) )
-            hy = -300;
-
-        if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) )
-            hx = 300;
-        else if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_DPAD_LEFT) )
-            hx = -300;
+        hx = out.hatX;
+        hy = out.hatY;
     }
 
     _joyPov.x = hx;
     _joyPov.y = hy;
 
-    if ( SDL_GameControllerGetAxis(_gameCtrl, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 8192 )
-        *btnState |= 1 << 0; // fire weapon
-    if ( SDL_GameControllerGetAxis(_gameCtrl, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8192 )
-        *btnState |= 1 << 1; // fire machine gun
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_Y) )
-        *btnState |= 1 << 2; // missile cam
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_A) )
-        *btnState |= 1 << 3; // brake
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_B) )
-        *btnState |= 1 << 4;
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_X) )
-        *btnState |= 1 << 5;
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_LEFTSTICK) )
-        *btnState |= 1 << 6;
-    if ( SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_RIGHTSTICK) )
-        *btnState |= 1 << 7;
+    *btnState |= out.joyBits;
 
-    bool start = SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_START) != 0;
-    if ( start != _joyStartHeld )
+    if ( out.esc != _joyStartHeld )
     {
-        if ( start )
+        if ( out.esc )
             KeyDown(Input::KC_ESCAPE);
         else
             KeyUp(Input::KC_ESCAPE);
 
-        _joyStartHeld = start;
+        _joyStartHeld = out.esc;
     }
 
-    // Pause: the Back button (DualSense Share/Create, Xbox View) on every SDL pad, and
-    // the DualSense / DualShock 4 touchpad click as a second choice (macOS may keep
-    // the Share button for its own screenshot shortcut).
-    bool pause = SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_BACK) != 0;
-#if SDL_VERSION_ATLEAST(2, 0, 14)
-    pause = pause || SDL_GameControllerGetButton(_gameCtrl, SDL_CONTROLLER_BUTTON_TOUCHPAD) != 0;
-#endif
-    if ( pause != _joyPauseHeld )
+    if ( out.pause != _joyPauseHeld )
     {
-        if ( pause )
+        if ( out.pause )
             KeyDown(Input::KC_PAUSE);
         else
             KeyUp(Input::KC_PAUSE);
 
-        _joyPauseHeld = pause;
+        _joyPauseHeld = out.pause;
     }
+
+    // hotkeys: once per press, handed to the game as if their key had been hit
+    const uint64_t newHot = out.hotkeys & ~s_padOut.hotkeys;
+    for (int id = 0; id < 64; id++)
+        if ( newHot & ((uint64_t)1 << id) )
+            s_padHotkeys.push(id);
+
+    s_padOut = out;
+}
+
+uint32_t NC_STACK_winp::TakePadPresses()
+{
+    const uint32_t e = s_padEdges;
+    s_padEdges = 0;
+    return e;
+}
+
+uint32_t NC_STACK_winp::PadHeld()
+{
+    return (_gameCtrl && _joyEnable) ? s_padHeldMask : 0;
+}
+
+void NC_STACK_winp::SetPadPage(bool open)
+{
+    if ( s_padPage && !open )
+        s_padSuppress = s_padHeldMask & ((1u << PadRemap::BTN_COUNT) - 1);
+    s_padPage = open;
+    s_padEdges = 0;
+    while ( !s_padHotkeys.empty() )
+        s_padHotkeys.pop();
+}
+
+int NC_STACK_winp::TakePadHotkey()
+{
+    if ( s_padHotkeys.empty() )
+        return -1;
+    const int id = s_padHotkeys.front();
+    s_padHotkeys.pop();
+    return id;
+}
+
+uint32_t NC_STACK_winp::PadInputButtons()
+{
+    return _gameCtrl ? s_padOut.inpButtons : 0;
+}
+
+int NC_STACK_winp::PadStyle()
+{
+    if ( !_gameCtrl )
+        return PadRemap::STYLE_GENERIC;
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+    switch ( SDL_GameControllerGetType(_gameCtrl) )
+    {
+    case SDL_CONTROLLER_TYPE_XBOX360:
+    case SDL_CONTROLLER_TYPE_XBOXONE:
+        return PadRemap::STYLE_XBOX;
+    case SDL_CONTROLLER_TYPE_PS3:
+    case SDL_CONTROLLER_TYPE_PS4:
+        return PadRemap::STYLE_PS4;
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    case SDL_CONTROLLER_TYPE_PS5:
+        return PadRemap::STYLE_PS5;
+#endif
+    default:
+        break;
+    }
+#endif
+    return PadRemap::STYLE_GENERIC;
+}
+
+bool NC_STACK_winp::PadConnected()
+{
+    return _gameCtrl != NULL && _joyEnable;
 }
 
 #ifdef UA_VR_ENABLED
@@ -1321,6 +1434,8 @@ void NC_STACK_winp::CheckVRControllers(uint32_t *btnState)
 
 void NC_STACK_winp::CheckJoy()
 {
+    PadScript::Tick(); // dev aid UA_PAD_SCRIPT (inert unless set)
+
     bool vrPad = false;
 #ifdef UA_VR_ENABLED
     VR::ControllerState vc[2];
@@ -1642,6 +1757,8 @@ void NC_STACK_winp::InitFirst()
     sdlInputLog("SDL %d.%d.%d, %d joystick(s) at startup%s\n",
                 sdlVer.major, sdlVer.minor, sdlVer.patch, SDL_NumJoysticks(),
                 _joyDebug ? " (UA_JOY_DEBUG on)" : "");
+
+    PadScript::Init(); // dev aid UA_PAD_SCRIPT: a virtual game controller (inert unless set)
 
     JoyPickAndOpen();
 

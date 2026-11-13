@@ -59,6 +59,16 @@ public:
     // the last poll read a game controller (throttle = momentary R1/L1 buttons)
     static bool PadThrottleButtons() { return _padThrottle; };
 
+    // Pad button remapping (src/pad_remap.h) and the CONTROLLER BUTTONS page.
+    enum { PAD_STICK_UP = 23, PAD_STICK_DOWN = 24 }; // extra bits of TakePadPresses / PadHeld
+    static uint32_t TakePadPresses();   // down edges since the last call (bit = PadRemap button)
+    static uint32_t PadHeld();          // buttons held now
+    static void SetPadPage(bool open);  // page open: no button does its action
+    static int TakePadHotkey();         // next hotkey id pressed on the pad, -1 = none
+    static uint32_t PadInputButtons();  // input buttons held through the pad (bit = index)
+    static int PadStyle();              // PadRemap::Style of the open controller
+    static bool PadConnected();
+
     static void QueryKeyboard(TInputState *arg);
     static void QueryPointer(TClickBoxInf *arg);
     static bool HasFocus() { return true; };

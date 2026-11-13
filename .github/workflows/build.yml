@@ -33,6 +33,8 @@ jobs:
         run: |
           c++ -std=c++14 -Wall -Isrc tests/controller_settings_test.cpp src/profile_patch.cpp -o "$RUNNER_TEMP/controller_settings_test"
           (cd "$RUNNER_TEMP" && ./controller_settings_test)
+          c++ -std=c++14 -Wall -Isrc tests/pad_remap_test.cpp src/pad_remap.cpp src/profile_patch.cpp -o "$RUNNER_TEMP/pad_remap_test"
+          (cd "$RUNNER_TEMP" && ./pad_remap_test)
           c++ -std=c++14 -Wall -Isrc tests/tex_cleanup_test.cpp src/tex_cleanup.cpp -o "$RUNNER_TEMP/tex_cleanup_test"
           (cd "$RUNNER_TEMP" && ./tex_cleanup_test)
           c++ -std=c++17 -Wall tests/gl_texture_init_test.cpp -o "$RUNNER_TEMP/gl_texture_init_test"

@@ -21,6 +21,8 @@
 #include "windp.h"
 #include "world/analyzer.h"
 #include "input_aim.h"
+#include "pad_page.h"
+#include "pad_script.h"
 
 
 extern uint32_t bact_id;
@@ -338,7 +340,8 @@ static void VRPauseHeaderLine(NC_STACK_ypaworld *yw, CmdStream *cur, const std::
 
 // Desktop in-mission menu (VR off; the VR pause panel above replaces it in a headset).
 //   main:       the 1998 rows (ids 8..12: exit, save, load, restart, continue) + 13 CONTROLLER SETTINGS
-//   controller: the Input page's controller settings (ids 8..14), applied live; when the
+//   controller: the Input page's controller settings (ids 8..15, with CONTROLLER BUTTONS =
+//               the button page, src/pad_page.h), applied live; when the
 //               menu closes they are written into the profile's controller lines only
 //               (yw_PatchInputProfile; a full save would also write the live mission).
 // In single player the open menu holds the mission (yw_MenuHoldsMission).
@@ -347,7 +350,7 @@ void ypaworld_func64__sub7__sub2__sub9(NC_STACK_ypaworld *yw); // close it
 static int s_dskPage = 0;       // 0 main, 1 controller settings
 static int s_dskRows = 0;       // rows the window is laid out for (0 = not yet)
 static bool s_dskDirty = false; // a setting changed: patch the profile on close
-enum DskRow { DSK_LAYOUT, DSK_INVTANK, DSK_INVAIR, DSK_JOY, DSK_FF, DSK_HUM, DSK_BACK, DSK_COUNT };
+enum DskRow { DSK_LAYOUT, DSK_INVTANK, DSK_INVAIR, DSK_JOY, DSK_FF, DSK_HUM, DSK_BUTTONS, DSK_BACK, DSK_COUNT };
 static const int kDskMainRows = 6;
 static const int kDskMaxRows = DSK_COUNT;
 
@@ -390,6 +393,7 @@ static void DskSetPage(NC_STACK_ypaworld *yw, int page)
 // changed settings into the profile
 static void DskClosed(NC_STACK_ypaworld *yw)
 {
+    PadPage::Close(yw); // saves its own changes
     DskSetPage(yw, 0);
     if ( s_dskDirty && yw->_GameShell && !yw->_GameShell->UserName.empty() )
     {
@@ -428,6 +432,7 @@ static std::string DskLabel(NC_STACK_ypaworld *yw, int id)
     case DSK_JOY:     return DskOnOff("Joystick / controller", !(p & World::PREF_JOYDISABLE));
     case DSK_FF:      return DskOnOff("Force feedback", !(p & World::PREF_FFDISABLE));
     case DSK_HUM:     return DskOnOff(Locale::Text::Advanced(Locale::ADV_ENGINERUMBLE), p & World::PREF_ENGINERUMBLE);
+    case DSK_BUTTONS: return Locale::Text::Advanced(Locale::ADV_PADBUTTONS);
     case DSK_BACK:    return Locale::Text::Advanced(Locale::ADV_BACK);
     default:          return " ";
     }
@@ -456,6 +461,9 @@ static void DskSettingClick(NC_STACK_ypaworld *yw, int id)
         p ^= World::PREF_ENGINERUMBLE;
         Input::Engine.SetEngineRumble( (p & World::PREF_ENGINERUMBLE) != 0 );
         break;
+    case DSK_BUTTONS:
+        PadPage::Open(yw, true);
+        return;
     case DSK_BACK:
         DskSetPage(yw, 0);
         return;
@@ -471,11 +479,12 @@ static void DskSettingClick(NC_STACK_ypaworld *yw, int id)
 // opens the in-mission menu at the n-th mission frame, optionally on the controller
 // page, toggles the listed controller rows (0 layout, 1 invert tanks, 2 invert aircraft,
 // 3 joystick, 4 force feedback, 5 engine vibration) as clicks would, and closes it at
-// frame m (which patches the profile like a real close). Inert unless set.
+// frame m (which patches the profile like a real close). ",buttons" also opens the
+// CONTROLLER BUTTONS page (as its row would). Inert unless set.
 static void DskDevAid(NC_STACK_ypaworld *yw)
 {
     static int openAt = -2, closeAt = -1, frames = 0;
-    static bool page = false;
+    static bool page = false, buttons = false;
     static std::string toggles;
     if ( openAt == -2 )
     {
@@ -484,6 +493,7 @@ static void DskDevAid(NC_STACK_ypaworld *yw)
         {
             openAt = atoi(v);
             page = strstr(v, "controller") != NULL;
+            buttons = strstr(v, "buttons") != NULL;
             if ( const char *t = strstr(v, "toggle=") )
                 toggles = std::string(t + 7, strcspn(t + 7, ","));
             if ( const char *c = strstr(v, "close=") )
@@ -497,11 +507,13 @@ static void DskDevAid(NC_STACK_ypaworld *yw)
     {
         if ( exit_menu.IsClosed() )
             ypaworld_func64__sub7__sub2__sub8(yw);
-        if ( page || !toggles.empty() )
+        if ( page || buttons || !toggles.empty() )
             DskSetPage(yw, 1);
         for (size_t i = 0; i < toggles.size(); i++)
-            if ( toggles[i] >= '0' && toggles[i] < '0' + DSK_BACK )
+            if ( toggles[i] >= '0' && toggles[i] < '0' + DSK_BUTTONS )
                 DskSettingClick(yw, 8 + (toggles[i] - '0'));
+        if ( buttons )
+            DskSettingClick(yw, 8 + DSK_BUTTONS);
         fprintf(stderr, "in-mission menu: dev aid UA_MENU_AT opened it at frame %d (page %s)\n", frames, s_dskPage ? "controller" : "main");
     }
     if ( frames == closeAt && exit_menu.IsOpen() )
@@ -3693,6 +3705,7 @@ void sb_0x4d7c08__sub0(NC_STACK_ypaworld *yw)
                 }
             }
         }
+        PadPage::Draw(yw); // CONTROLLER BUTTONS page over the in-mission menu
         UA_VR_HUD_LAP(HUD_WINDOWS);
 
         if ( yw->_userUnit->_status != BACT_STATUS_DEAD )
@@ -12279,6 +12292,7 @@ void NC_STACK_ypaworld::ypaworld_func64__sub1(TInputState *inpt)
 
 void NC_STACK_ypaworld::GUI_Close()
 {
+    PadPage::Close(this);
     if ( _guiLoaded )
     {
         ypaworld_func140(&lstvw2);

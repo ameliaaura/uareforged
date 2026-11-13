@@ -4,7 +4,18 @@ What changed for players in each release. The format follows [Keep a Changelog](
 versions follow [Semantic Versioning](https://semver.org/) loosely (0.x: anything may still change).
 Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
-## [Unreleased]
+## [0.8.3] - Desktop - not yet released
+
+### Added
+- **Desktop: change what every game controller button does.** *Options > Input* has a new **CONTROLLER
+  BUTTONS** button, and so does the in-mission menu's *CONTROLLER SETTINGS* page. Pick an action, press the pad
+  button you want for it. Any button works, triggers, D-pad, stick clicks, Share / View, the touchpad and paddles
+  included. Besides firing, driving, braking, the missile camera, pause and the menu, a pad can now also do the
+  keyboard hotkeys: map, squadron manager, orders, next unit, jump to the host station, aggressiveness and more.
+  A button another action already uses swaps with it. Works with the controller itself (D-pad, A to choose, B to
+  go back) as well as the mouse and keys; *Reset to defaults* is on the page. Saved in your profile, applies at
+  once. Start / Options always opens the in-mission menu, so you cannot lock yourself out. Nothing changes until
+  you change something: the defaults are the old buttons. VR keeps its own controls.
 
 ### Fixed
 - **Desktop: menus and loading screens no longer come out garbled after changing the screen resolution**
