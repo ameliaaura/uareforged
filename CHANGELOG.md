@@ -4,6 +4,8 @@ What changed for players in each release. The format follows [Keep a Changelog](
 versions follow [Semantic Versioning](https://semver.org/) loosely (0.x: anything may still change).
 Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
+## [Unreleased]
+
 ## [0.8.3] - Desktop - not yet released
 
 ### Added
@@ -23,7 +25,7 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
   pieces of old pictures and noise behind the text. The hi-res text layer now starts out clean whenever
   the resolution or the window size changes.
 
-## [0.8.2] - Desktop / [0.9.2] - Quest - not yet released
+## [0.8.2] - Desktop / [0.9.2] - Quest - 2026-11-11
 
 ### Fixed
 - **City walls: the 1998 artists' hidden joke graffiti no longer shows on the original textures** (it was already
@@ -109,7 +111,8 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.3
 [0.9.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.2
 [0.8.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.2
 [0.9.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.1
