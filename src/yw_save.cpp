@@ -24,6 +24,7 @@
 #include "yw.h"
 #include "yparobo.h"
 #include "profile_patch.h"
+#include "pad_remap.h"
 
 
 #ifdef UA_VR_ENABLED
@@ -407,6 +408,9 @@ std::vector<std::string> yw_InputProfileLines(NC_STACK_ypaworld *yw)
     l.push_back(std::string("invertaim_air = ") + ((p & World::PREF_INVERTAIM_AIR) ? "yes" : "no"));
     l.push_back(std::string("forcefeedback = ") + ((p & World::PREF_FFDISABLE) ? "no" : "yes"));
     l.push_back(std::string("enginerumble = ") + ((p & World::PREF_ENGINERUMBLE) ? "yes" : "no"));
+    // game controller buttons: one line per binding that differs from the default
+    for (const std::string &b : PadRemap::ProfileLines(PadRemap::Active()))
+        l.push_back(b);
     return l;
 }
 
@@ -435,7 +439,8 @@ bool yw_PatchInputProfileFile(const std::string &path, NC_STACK_ypaworld *yw)
             return false;
     }
     const std::string before = text;
-    if ( !ProfilePatch::PatchInputSection(text, yw_InputProfileLines(yw)) )
+    // padbtn_ lines back at their default are removed (absent = default)
+    if ( !ProfilePatch::PatchInputSection(text, yw_InputProfileLines(yw), PadRemap::kKeyPrefix) )
         return false;
     if ( text == before )
         return true;
@@ -577,6 +582,10 @@ int yw_write_input(FSMgr::FileHandle *fil, UserData *usr)
     for (const std::string &l : yw_VRProfileLines())
         fil->printf("    %s\n", l.c_str());
 #endif
+
+    // game controller buttons that differ from the default (src/pad_remap.h)
+    for (const std::string &l : PadRemap::ProfileLines(PadRemap::Active()))
+        fil->printf("    %s\n", l.c_str());
 
     for (size_t i = 1; i < usr->InputConfig.size(); i++)
     {

@@ -764,6 +764,14 @@ enum ADV
     ADV_INVERTAIM_AIR = 118,
     ADV_CTRLSETTINGS = 119,
     ADV_PAUSEPAD = 120,
+    // Port additions: the CONTROLLER BUTTONS page (game controller button remapping).
+    // 2521..2525 are "<>" in every shipped .lng we have (base game English, French,
+    // German, Russian, Japanese, LANGUAGE), so they come from the built-in defaults.
+    ADV_PADBUTTONS = 121,
+    ADV_PADPRESS = 122,
+    ADV_PADRESET = 123,
+    ADV_PADHINT = 124,
+    ADV_PADNOPAD = 125,
     ADV_MAX
 };
 

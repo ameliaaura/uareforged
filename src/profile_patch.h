@@ -15,7 +15,11 @@ namespace ProfilePatch
 // an unchanged line stays byte-identical, a missing key is added before the section's
 // "end". Every other byte is kept. Returns false (text untouched) when the profile has
 // no complete input section.
-bool PatchInputSection(std::string &text, const std::vector<std::string> &fresh);
+// dropPrefix (optional): lines of the section whose first word starts with it
+// (case-insensitive) and is not one of the fresh keys are removed (keys whose absence
+// means "default", e.g. "padbtn_"); every other line is kept as it was.
+bool PatchInputSection(std::string &text, const std::vector<std::string> &fresh,
+                       const std::string &dropPrefix = std::string());
 
 // Replace the file at `path` with `data` through a uniquely named sibling temp file
 // (write, flush, sync, close, rename over). On any failure the old file stays as it

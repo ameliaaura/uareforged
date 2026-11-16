@@ -6,7 +6,26 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
-## [0.8.2] - Desktop / [0.9.2] - Quest - not yet released
+## [0.8.3] - Desktop - not yet released
+
+### Added
+- **Desktop: change what every game controller button does.** *Options > Input* has a new **CONTROLLER
+  BUTTONS** button, and so does the in-mission menu's *CONTROLLER SETTINGS* page. Pick an action, press the pad
+  button you want for it. Any button works, triggers, D-pad, stick clicks, Share / View, the touchpad and paddles
+  included. Besides firing, driving, braking, the missile camera, pause and the menu, a pad can now also do the
+  keyboard hotkeys: map, squadron manager, orders, next unit, jump to the host station, aggressiveness and more.
+  A button another action already uses swaps with it. Works with the controller itself (D-pad, A to choose, B to
+  go back) as well as the mouse and keys; *Reset to defaults* is on the page. Saved in your profile, applies at
+  once. Start / Options always opens the in-mission menu, so you cannot lock yourself out. Nothing changes until
+  you change something: the defaults are the old buttons. VR keeps its own controls.
+
+### Fixed
+- **Desktop: menus and loading screens no longer come out garbled after changing the screen resolution**
+  (seen on Windows). The screen after the change, often the campaign map with its tip, showed smeared
+  pieces of old pictures and noise behind the text. The hi-res text layer now starts out clean whenever
+  the resolution or the window size changes.
+
+## [0.8.2] - Desktop / [0.9.2] - Quest - 2026-11-11
 
 ### Fixed
 - **City walls: the 1998 artists' hidden joke graffiti no longer shows on the original textures** (it was already
@@ -92,7 +111,8 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.3
 [0.9.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.2
 [0.8.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.2
 [0.9.1]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.1

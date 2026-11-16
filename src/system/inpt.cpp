@@ -282,6 +282,10 @@ void INPEngine::QueryInput(TInputState *state)
             _keyboard.KeyboardQuery(state);
         
         state->HotKeyID = CheckHotKey(state->KbdLastHit);
+
+        // a hotkey pressed on the game controller (its bound action, src/pad_remap.h)
+        if ( state->HotKeyID < 0 )
+            state->HotKeyID = NC_STACK_winp::TakePadHotkey();
         
         if ( _wimp.PointerQuery )
             _wimp.PointerQuery(&state->ClickInf);
@@ -296,6 +300,12 @@ void INPEngine::QueryInput(TInputState *state)
             if (btn)
                 state->Buttons.Set(i);
         }
+
+        // input buttons held through the game controller (map waypoints)
+        if ( uint32_t padBtns = NC_STACK_winp::PadInputButtons() )
+            for (int i = 0; i < 32; i++)
+                if ( padBtns & (1u << i) )
+                    state->Buttons.Set(i);
 
         for (size_t i = 0; i < _sliders.size(); i++)
         {

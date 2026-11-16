@@ -10,6 +10,8 @@ static int s_vrCockpitOnEntry = -1; // cockpit setting, restored by Cancel
 #include "includes.h"
 #include "yw.h"
 #include "yw_internal.h"
+#include "pad_page.h"
+#include "pad_remap.h"
 #include "reforge.h"
 #include "font.h"
 #include "button.h"
@@ -2063,7 +2065,12 @@ int NC_STACK_ypaworld::InputConfigLoadDefault()
 
 void UserData::InputConfigRestoreDefault()
 {
-    if ( p_YW->InputConfigLoadDefault() )
+    // input.def's new_input resets the controller buttons too; the keys page's
+    // "Reset to defaults" is about keys (the CONTROLLER BUTTONS page has its own)
+    const PadRemap::Bindings padKeep = PadRemap::Active();
+    const bool loaded = p_YW->InputConfigLoadDefault();
+    PadRemap::Active() = padKeep;
+    if ( loaded )
     {
         for(TInputConf &konf : InputConfig)
         {
@@ -2662,6 +2669,15 @@ void UserData::GameShellUiHandleInput()
 {
     int v3 = 0;
 
+    // the CONTROLLER BUTTONS page takes all input while it is open (src/pad_page.h)
+    if ( PadPage::IsOpen() )
+    {
+        if ( EnvMode == ENVMODE_INPUT )
+            PadPage::Handle(p_YW, Input);
+        else
+            PadPage::Close(p_YW);
+    }
+
     if ( Input->ClickInf.flag & TClickBoxInf::FLAG_BTN_DOWN )
         SFXEngine::SFXe.startSound(&samples1_info, 3);
 
@@ -3254,6 +3270,10 @@ void UserData::GameShellUiHandleInput()
         else if (r.code == 1053)
         {
             InputConfigRestoreDefault();
+        }
+        else if (r.code == 1074)
+        {
+            PadPage::Open(p_YW, false);
         }
         else if (r.code == 1054)
         {

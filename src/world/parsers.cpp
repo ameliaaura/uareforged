@@ -14,6 +14,7 @@ extern int yw_vrProfileCfgVer; // yw_save.cpp (profile version)
 #include "../system/inivals.h"
 #include "../system/movie.h"
 #include "../bitmap.h"
+#include "../pad_remap.h"
 
 namespace World
 {
@@ -182,6 +183,9 @@ bool InputParser::IsScope(ScriptParser::Parser &parser, const std::string &word,
         // Same for the vertical aim inverts: off (push up = aim up) unless the
         // profile being loaded says otherwise.
         _o._preferences &= ~(World::PREF_INVERTAIM_TANK | World::PREF_INVERTAIM_AIR);
+
+        // game controller buttons: the defaults unless the profile says otherwise
+        PadRemap::Active().Reset();
 #ifdef UA_VR_ENABLED
         // the keys never leak from the previously loaded profile:
         // PANELS FIXED, no moved layout, QUICK STATION follows the mode, unless the
@@ -251,6 +255,18 @@ int InputParser::Handle(ScriptParser::Parser &parser, const std::string &p1, con
         return ScriptParser::RESULT_SCOPE_END;
 
     _o._GameShell->savedDataFlags |= World::SDF_INPUT;
+
+    // padbtn_<action> = <button>: game controller button bindings (src/pad_remap.h);
+    // unknown actions or button names are logged and skipped, never a parse error
+    {
+        std::string padWarn;
+        if ( PadRemap::ParseLine(PadRemap::Active(), p1, p2, &padWarn) )
+        {
+            if ( !padWarn.empty() )
+                ypa_log_out("WARNING: %s (ignored)\n", padWarn.c_str());
+            return ScriptParser::RESULT_OK;
+        }
+    }
 
     if ( !StriCmp(p1, "qualmode") )
     {

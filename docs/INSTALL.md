@@ -143,6 +143,20 @@ the game.
   nose goes up; on = the other way round (flight-sim style). The tank setting also covers station guns and
   the host station's view. Keyboard and mouse keep their own keys.
 
+**CONTROLLER BUTTONS** (a button on *Options > Input* and a row on the in-mission **CONTROLLER SETTINGS** page)
+changes what each button does. The table above is the default.
+- Pick an action, then press the pad button for it within 5 seconds (Esc cancels). Every button counts: triggers,
+  D-pad, stick clicks, Share / View, Guide, touchpad, paddles.
+- Besides the actions above, the keyboard hotkeys can go on a button too: map, squadron manager, give orders,
+  create, add to squad, next unit, jump to the host station, aggressiveness, HUD and so on.
+- A button another action already has swaps with it; the page says which. **Reset to defaults** puts the table
+  above back. Backspace clears a row.
+- Use it with the controller (D-pad or left stick to move, A to choose, B to go back), or with the mouse and keys.
+- Start / Options always opens the in-mission menu, even after you give it another job, so you cannot lock
+  yourself out.
+- Changes apply at once and are saved in your profile (`padbtn_…` lines in `user.txt`; only the changed ones).
+  The sticks stay as they are (see the layout and invert settings above). VR has its own controls.
+
 In single player the in-mission menu holds the mission while it is open. Settings changed there are saved
 to your profile straight away, without saving the mission.
 
