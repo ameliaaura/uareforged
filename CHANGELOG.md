@@ -6,7 +6,26 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
-## [0.8.3] - Desktop - not yet released
+## [0.8.4] - Desktop - not yet released
+
+### Fixed
+- **Desktop: no more crash when a night mission loads with ATMOSPHERE on** (Medium and up). The game could close
+  at the start of a night map, most often on the second mission of a session (seen on Windows). Freed model
+  resources were left in a list that the night window lights read at the sky load.
+- **Desktop: no more crash when buildings are destroyed** (seen on Windows, e.g. level 2). A building's explosion
+  could get itself back as its own debris and then read past the end of its effect list.
+- **Desktop: no more crash from a particle effect on some units** (seen on Windows on level 20 against the
+  Mykonians). Some 1998 smoke and fire emitters name a point their model does not have; they now emit from the
+  unit's centre.
+- **Windows: no more crash with ATMOSPHERE High or Ultra on maps with weather** (dust, rain, snow) when GLOW is
+  on, seen with NVIDIA graphics (for example level 75).
+- **Windows laptops with two graphics chips now run the game on the fast one** (NVIDIA Optimus, AMD switchable
+  graphics), not on the built-in chip.
+- **Mac and Windows: the first start now runs the short graphics benchmark and picks a preset** for your computer
+  (with the Reforge pack installed). It never ran before, so new players started with the expensive defaults. A
+  preset you already chose is kept.
+
+## [0.8.3] - Desktop - 2026-11-16
 
 ### Added
 - **Desktop: change what every game controller button does.** *Options > Input* has a new **CONTROLLER
@@ -111,7 +130,8 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.4
 [0.8.3]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.3
 [0.9.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.2
 [0.8.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.2
