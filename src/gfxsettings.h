@@ -19,9 +19,10 @@
 //   4. the active preset's table entry                (Original/Low/Medium/High/Ultra/VR)
 //   5. dflt
 // Steps 3-4 only apply while a preset is in force: a saved SAVE/gfx.txt, or
-// UA_GFX_PRESET / UA_GFX_DEFAULT in the environment. With none of them (every
-// test harness and old launcher) gfxLevel() returns the legacy/env value or
-// dflt, i.e. the engine behaves exactly as before this module existed.
+// UA_GFX_PRESET / UA_GFX_DEFAULT in the environment, or (desktop, Reforge pack
+// installed, not a harness) the first launch's benchmark at High. With none of
+// them (every test harness and old launcher) gfxLevel() returns the legacy/env
+// value or dflt, i.e. the engine behaves exactly as before this module existed.
 //
 // When to read it: the levels only change in the options screen (shell), and
 // the engine reloads the set when a model/renderer level changed, so reading

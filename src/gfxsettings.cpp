@@ -327,6 +327,13 @@ bool Automated()
     return false;
 }
 
+// The Reforge pack's models are there (the launchers set UA_HDMODELS_DIR only when the pack is installed).
+bool PackPresent()
+{
+    const char *d = Env("UA_HDMODELS_DIR");
+    return d ? IsDir(d) : IsDir("hd-models");
+}
+
 } // namespace
 
 void Init()
@@ -347,11 +354,20 @@ void Init()
     }
     else if (!loaded)
     {
-        gPreset = ParsePreset(Env("UA_GFX_DEFAULT"));
+        const char *dflt = Env("UA_GFX_DEFAULT");
+        const char *b = Env("UA_GFX_BENCH");
+#if !defined(__ANDROID__)
+        // Desktop: the Mac and Windows launchers set no UA_GFX_DEFAULT, so a first launch never measured and ran
+        // at the engine's built-in levels. With the Reforge pack (nothing to choose without it) and no saved
+        // file, measure at High and save the pick. Harness runs keep the old behaviour unless UA_GFX_BENCH=1;
+        // UA_GFX_BENCH=0 turns it off. The Quest app sets its own default and no bench.
+        if (!dflt && PackPresent() && (b ? b[0] != '0' : !Automated()))
+            dflt = kPresetKeys[PRESET_HIGH];
+#endif
+        gPreset = ParsePreset(dflt);
         for (int f = 0; f < kNumFeatures; ++f)
             gOverride[f] = -1;
-        // First launch of a settings-aware launcher: measure and suggest.
-        const char *b = Env("UA_GFX_BENCH");
+        // First launch (no saved file) with a default preset: measure and suggest.
         bool want = gPreset != PRESET_NONE && !Automated();
         if (b)
             want = b[0] != '0';
@@ -628,9 +644,10 @@ bool TakeSetReload()
 
 // ---------------------------------------------------------------------------
 // First-launch benchmark.
-// Runs once, when a settings-aware launcher (UA_GFX_DEFAULT=<preset>) starts
-// with no SAVE/gfx.txt and no harness env: autostarts level 75 (L7575, the busy
-// Mykonian reference scene) at the launcher's default preset, flies the fixed
+// Runs once, when the engine starts with no SAVE/gfx.txt and no harness env and
+// either a launcher default (UA_GFX_DEFAULT=<preset>) or, on the desktop, the
+// Reforge pack installed (default High): autostarts level 75 (L7575, the busy
+// Mykonian reference scene) at that default preset, flies the fixed
 // "tour" camera path with sound muted and the frame cap off, measures frames
 // 3..BenchSeconds() s after the first 3D frame, ends the level, then picks the
 // highest preset PREDICTED to hold 60 fps (p90 frame <= 16.7 ms and mean <= 15 ms;

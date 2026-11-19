@@ -34,8 +34,11 @@ The campaign map always shows the 1998 picture (the pack carries no campaign-map
 
 *Options > Graphics* offers **Original** (the 1998 renderer, unchanged), Low, Medium, High
 and Ultra, with a first-launch benchmark that picks one. The choice is saved in
-`SAVE/gfx.txt`. `UA_GFX_DEFAULT=<preset>` sets the default, `UA_GFX_BENCH=0` skips the
-benchmark.
+`SAVE/gfx.txt`. On Mac and Windows the benchmark runs once, on the first start with the
+Reforge pack installed and no `SAVE/gfx.txt` yet: about 20 seconds of level 75 flown by a
+fixed camera, sound off, measured at High; then the game opens with the preset that keeps
+60 fps. A saved choice is never replaced. `UA_GFX_DEFAULT=<preset>` sets the default,
+`UA_GFX_BENCH=0` skips the benchmark.
 
 ## Model pack layout
 
