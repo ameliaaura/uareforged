@@ -560,7 +560,23 @@ size_t NC_STACK_particle::Emit(area_arg_65 *arg, InstanceOpts * uopts)
     {
         vec3d v44 = arg->OwnerTForm->CalcSclRot.Transform( _magnifyStart + _magnifyDelta * opts->Age );
 
-        vec3d v45 = arg->OwnerTForm->TForm * ( arg->sklt->POO[_pointID] );
+        // Emitter point: a vertex of the owner's skeleton. Some 1998 emitters name a point the skeleton they
+        // end up on does not have (the 1998 engine read past the array); emit from the owner's origin then
+        // instead of reading out of range (the particle crash, 0.8.3).
+        const UAskeleton::Data *sk = arg->sklt;
+        const bool havePoint = sk && _pointID >= 0 && (size_t)_pointID < sk->POO.size();
+        if ( !havePoint )
+        {
+            static int told = 0;
+            if ( told < 8 )
+            {
+                told++;
+                printf("particle: emitter point %d not in its skeleton (%d points): emitting from the origin\n",
+                       (int)_pointID, sk ? (int)sk->POO.size() : -1);
+            }
+        }
+        const vec3d emitAt = havePoint ? vec3d(sk->POO[_pointID]) : vec3d(0.0, 0.0, 0.0);
+        vec3d v45 = arg->OwnerTForm->TForm * emitAt;
 
         float timeDelta = 0.0;
         float delta = _genPause * 0.001;
