@@ -857,7 +857,7 @@ void GFXEngine::AtmosRefresh()
                 Glext::GLGenBuffers(1, &_wxVbo);
                 Glext::GLBindBuffer(GL_ARRAY_BUFFER, _wxVbo);
                 Glext::GLBufferData(GL_ARRAY_BUFFER, v.size() * sizeof(float), v.data(), GL_STATIC_DRAW);
-                Glext::GLBindBuffer(GL_ARRAY_BUFFER, 0);
+                Glext::GLBindBuffer(GL_ARRAY_BUFFER, _lastStates.DataBuf); // the state cache's buffer (see AtmosDrawWeather)
                 _wxTime = 0.0;
             }
         }
@@ -1052,7 +1052,10 @@ void GFXEngine::AtmosDrawWeather(float dtSec)
 #endif
 
     Glext::GLBindVertexArray(prevVao);
-    Glext::GLBindBuffer(GL_ARRAY_BUFFER, 0);
+    // Back to the buffer the state cache thinks is bound: with 0 here, the next draw of the same mesh skipped the
+    // bind and set its attribute offsets as client-memory pointers; NVIDIA's Windows driver then read address
+    // 0x4 / 0xc in its worker thread (crash at ATMOSPHERE High on weather maps with GLOW on, e.g. level 75).
+    Glext::GLBindBuffer(GL_ARRAY_BUFFER, _lastStates.DataBuf);
     Glext::GLUseProgram(_lastStates.Prog.ID);
     // restore the cached state machine's view of blend / z write
     if (_lastStates.Zwrite) glDepthMask(GL_TRUE);
