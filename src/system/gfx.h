@@ -79,6 +79,10 @@ void GroundSetCurrentSet(int setId);
 void GroundTagBitmap(ResBitmap *bitm, const std::string &rsrcName);
 // Reforge ATMOSPHERE: facade atlas file names (night windows); n = lower case, no path (atmos_gl.cpp).
 bool AtmosFacadeAtlasName(const std::string &n);
+// Live facade atlases (atmos_gl.cpp): tagged at texture prepare (GroundTagBitmap), forgotten when the bitmap is
+// freed (bitmap.cpp); the night window masks are built from this set only.
+void AtmosFacadeAtlasTagged(const ResBitmap *bm);
+void AtmosFacadeAtlasFreed(const ResBitmap *bm);
 // obj3d.cpp: every disk map in the shared map cache with the file it was uploaded from (<stem>.dds when the
 // compressed sidecar was used, else the map's own path; atmos night windows enumerate the HD trims at level load).
 void Obj3DForEachCachedMap(void (*fn)(ResBitmap *b, const std::string &path, void *ctx), void *ctx);

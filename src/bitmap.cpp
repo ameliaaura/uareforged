@@ -753,6 +753,9 @@ size_t NC_STACK_bitmap::rsrc_func65(rsrc *res)
 
     if ( intern )
     {
+        if ( intern->facadeAtlas )
+            AtmosFacadeAtlasFreed(intern); // night window masks (atmos_gl.cpp) drop it first
+
         if ( intern->hwTex )
             GFX::Engine.FreeTexture(intern);
 
