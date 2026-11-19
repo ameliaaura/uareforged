@@ -6552,23 +6552,30 @@ void NC_STACK_ypabact::StartDestFXByType(uint8_t type)
 {
     if ( _world->ypaworld_func145(this) )
     {
+        // Walk copies: StartDestFX makes new units, and the dead-unit cache can hand back this very unit (it
+        // is still in that cache while a just-recycled explosion runs SetState), whose _destroyFX /
+        // _extDestroyFX are then overwritten with another prototype's lists mid-loop (out of range: the
+        // building-explosion crash, 0.8.3).
+        const std::vector<World::DestFX> destroyFX = _destroyFX;
+        const std::vector<World::DestFX> extDestroyFX = _extDestroyFX;
+
         size_t a4 = _world->getYW_destroyFX();
 
-        if (a4 > _destroyFX.size())
-            a4 = _destroyFX.size();
+        if (a4 > destroyFX.size())
+            a4 = destroyFX.size();
 
         for (size_t i = 0; i < a4; i++)
         {
-            if ( _destroyFX[i].ModelID )
+            if ( destroyFX[i].ModelID )
             {
-                const World::DestFX &fx = _destroyFX[i];
+                const World::DestFX &fx = destroyFX[i];
 
                 if ( fx.Type == type )
                     StartDestFX(fx);
             }
         }
         
-        for (const World::DestFX &x : _extDestroyFX)
+        for (const World::DestFX &x : extDestroyFX)
         {
             if (x.ModelID != 0 && x.Type == type)
                 StartDestFX(x);
