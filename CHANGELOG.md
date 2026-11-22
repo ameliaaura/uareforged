@@ -6,6 +6,23 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
+## [0.8.5] - Desktop - not yet released
+
+### Changed
+- **Desktop: the game speed no longer depends on the frame rate.** The game used to run faster the higher the
+  frame rate (about 8 % at 144 fps, 17 % at 240 fps, twice as fast at 1000 fps), which is why it was held at
+  60 fps. It now runs at exactly its old 60 fps speed at any frame rate, from 20 fps to 1000. Aircraft no longer
+  bank harder, guns no longer recharge slower and tanks still dodge at high frame rates.
+- **Desktop: 120 Hz and 144 Hz screens now get their full frame rate.** The frame cap follows the screen's
+  refresh rate (with vsync) instead of 60.
+- **Desktop: faster.** The Mac and Windows engines are now built with the compiler's optimiser, as the Quest
+  app always was.
+
+### Fixed
+- **No more crash when holding the mouse on Yes or No in the in-mission confirm box** and dragging off it
+  (seen on Windows).
+- **No more crash drawing the map's lines** (seen on Windows after a long session).
+
 ## [0.8.4] - Desktop - 2026-11-22
 
 ### Fixed
@@ -133,7 +150,8 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.5
 [0.8.4]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.4
 [0.8.3]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.3
 [0.9.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.2
