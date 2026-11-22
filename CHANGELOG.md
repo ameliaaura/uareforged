@@ -6,7 +6,7 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
-## [0.8.4] - Desktop - not yet released
+## [0.8.4] - Desktop - 2026-11-22
 
 ### Fixed
 - **Desktop: no more crash when a night mission loads with ATMOSPHERE on** (Medium and up). The game could close
@@ -23,7 +23,10 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
   graphics), not on the built-in chip.
 - **Mac and Windows: the first start now runs the short graphics benchmark and picks a preset** for your computer
   (with the Reforge pack installed). It never ran before, so new players started with the expensive defaults. A
-  preset you already chose is kept.
+  preset you already chose is kept. If you have played before but never saved anything under *Options >
+  Graphics*, you get this one-time benchmark of about 20 seconds on your first 0.8.4 start. Press Esc to skip it:
+  nothing is saved then, it offers itself once more on the next start and then stops asking. If it ever fails to
+  finish, the next start skips it and uses Medium.
 
 ## [0.8.3] - Desktop - 2026-11-16
 

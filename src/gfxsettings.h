@@ -31,6 +31,8 @@
 //
 // Files: SAVE/gfx.txt (UA_GFX_FILE=<path> overrides; tests must point it at a
 // temporary file). Format: "preset = high", "SHADOWS = 1" (overrides), "bench = ...".
+// SAVE/gfx.bench (same name, .bench): first-launch benchmark attempts (see gfxsettings.cpp);
+// removed by Save().
 
 #include <stdint.h>
 #include <string>
@@ -119,7 +121,7 @@ int BenchLevelId();                  // >0: autostart this level for the bench
 int BenchSeconds();
 bool BenchRunning();                 // a bench level is up (camera path, uncapped)
 void BenchFrame(double ms);          // per gameplay frame while running
-void BenchLevelEnded();              // level done: decide + save
+void BenchLevelEnded();              // level done (or app closing): decide + save, or record a left-early attempt
 }
 
 #endif

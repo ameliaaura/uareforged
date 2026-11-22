@@ -1620,6 +1620,8 @@ int main(int argc, char *argv[])
     
     // quitting: a mission in progress keeps its perf summary for the next start; unsent events too
     StatsLevelEnd(StatsResult(TLevelInfo::STATE_ABORTED), true);
+    if ( GfxSettings::BenchRunning() )
+        GfxSettings::BenchLevelEnded(); // closed during the benchmark: counts as left early
     UsageStats::Shutdown();
 
     ypaworld->DeleteNewGuiElements();
