@@ -19,9 +19,10 @@
 //   4. the active preset's table entry                (Original/Low/Medium/High/Ultra/VR)
 //   5. dflt
 // Steps 3-4 only apply while a preset is in force: a saved SAVE/gfx.txt, or
-// UA_GFX_PRESET / UA_GFX_DEFAULT in the environment. With none of them (every
-// test harness and old launcher) gfxLevel() returns the legacy/env value or
-// dflt, i.e. the engine behaves exactly as before this module existed.
+// UA_GFX_PRESET / UA_GFX_DEFAULT in the environment, or (desktop, Reforge pack
+// installed, not a harness) the first launch's benchmark at High. With none of
+// them (every test harness and old launcher) gfxLevel() returns the legacy/env
+// value or dflt, i.e. the engine behaves exactly as before this module existed.
 //
 // When to read it: the levels only change in the options screen (shell), and
 // the engine reloads the set when a model/renderer level changed, so reading
@@ -30,6 +31,8 @@
 //
 // Files: SAVE/gfx.txt (UA_GFX_FILE=<path> overrides; tests must point it at a
 // temporary file). Format: "preset = high", "SHADOWS = 1" (overrides), "bench = ...".
+// SAVE/gfx.bench (same name, .bench): first-launch benchmark attempts (see gfxsettings.cpp);
+// removed by Save().
 
 #include <stdint.h>
 #include <string>
@@ -118,7 +121,7 @@ int BenchLevelId();                  // >0: autostart this level for the bench
 int BenchSeconds();
 bool BenchRunning();                 // a bench level is up (camera path, uncapped)
 void BenchFrame(double ms);          // per gameplay frame while running
-void BenchLevelEnded();              // level done: decide + save
+void BenchLevelEnded();              // level done (or app closing): decide + save, or record a left-early attempt
 }
 
 #endif

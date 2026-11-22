@@ -50,7 +50,7 @@ it. Unknown keys: `400`. Missing required keys: `400`.
 
 | Field | Type | Rule |
 |---|---|---|
-| `preset` | string | `original`, `low`, `medium`, `high` or `ultra` (the Graphics preset). VR: New Look = `high`, Original look = `original`. Desktop with no preset chosen yet: `high` when the Reforge pack is installed, else `original`. |
+| `preset` | string | `original`, `low`, `medium`, `high` or `ultra` (the Graphics preset). VR: New Look = `high`, Original look = `original`. Desktop with no preset chosen yet: `high` when the Reforge pack is installed (the first start's benchmark runs at High), else `original`. |
 | `level` | integer | `0`–`9999` (the game's level number) |
 | `input` | string | `keyboard_mouse`, `controller`, `mixed` or `vr_controllers`: what was actually pressed during that mission or session. Desktop: key presses, mouse clicks and wheel turns are counted against controller button presses and stick pushes; both kinds with the smaller one at least a tenth of the larger = `mixed`, else the larger one. Quest: always `vr_controllers`. Absent when nothing was pressed. |
 

@@ -117,6 +117,46 @@ int gBenchState = 0;                     // 0 none, 1 armed, 2 running, 3 done
 std::vector<float> gBenchMs;
 uint32_t gBenchT0 = 0;
 int gBenchFrames = 0;
+int gBenchTry = 0;                       // this run's attempt number (marker file)
+
+// Benchmark marker, next to gfx.txt (SAVE/gfx.bench): "pending <n>" while attempt n runs, "aborted <n>" when
+// the player left it before it measured enough, "skipped" after a run that never finished (crash / hang).
+// A pending marker at startup = the last attempt died: no more benchmarks, a safe preset instead. Removed
+// when a preset is saved (by the benchmark or Options > Graphics).
+std::string MarkerPath()
+{
+    std::string m = gFile;
+    size_t dot = m.rfind('.'), slash = m.find_last_of("/\\");
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+        m.erase(dot);
+    return m + ".bench";
+}
+
+bool ReadMarker(std::string *state, int *n)
+{
+    FILE *fp = fopen(MarkerPath().c_str(), "r");
+    if (!fp)
+        return false;
+    char st[32] = "";
+    int k = 0;
+    int got = fscanf(fp, "%31s %d", st, &k);
+    fclose(fp);
+    *state = got >= 1 ? st : "pending"; // unreadable = treat as a run that died
+    *n = got >= 2 ? k : 1;
+    return true;
+}
+
+void WriteMarker(const char *state, int n)
+{
+    FILE *fp = fopen(MarkerPath().c_str(), "w");
+    if (!fp)
+        return;
+    if (n > 0)
+        fprintf(fp, "%s %d\n", state, n);
+    else
+        fprintf(fp, "%s\n", state);
+    fclose(fp);
+}
 
 const char *Env(const char *k)
 {
@@ -327,6 +367,13 @@ bool Automated()
     return false;
 }
 
+// The Reforge pack's models are there (the launchers set UA_HDMODELS_DIR only when the pack is installed).
+bool PackPresent()
+{
+    const char *d = Env("UA_HDMODELS_DIR");
+    return d ? IsDir(d) : IsDir("hd-models");
+}
+
 } // namespace
 
 void Init()
@@ -347,11 +394,20 @@ void Init()
     }
     else if (!loaded)
     {
-        gPreset = ParsePreset(Env("UA_GFX_DEFAULT"));
+        const char *dflt = Env("UA_GFX_DEFAULT");
+        const char *b = Env("UA_GFX_BENCH");
+#if !defined(__ANDROID__)
+        // Desktop: the Mac and Windows launchers set no UA_GFX_DEFAULT, so a first launch never measured and ran
+        // at the engine's built-in levels. With the Reforge pack (nothing to choose without it) and no saved
+        // file, measure at High and save the pick. Harness runs keep the old behaviour unless UA_GFX_BENCH=1;
+        // UA_GFX_BENCH=0 turns it off. The Quest app sets its own default and no bench.
+        if (!dflt && PackPresent() && (b ? b[0] != '0' : !Automated()))
+            dflt = kPresetKeys[PRESET_HIGH];
+#endif
+        gPreset = ParsePreset(dflt);
         for (int f = 0; f < kNumFeatures; ++f)
             gOverride[f] = -1;
-        // First launch of a settings-aware launcher: measure and suggest.
-        const char *b = Env("UA_GFX_BENCH");
+        // First launch (no saved file) with a default preset: measure and suggest.
         bool want = gPreset != PRESET_NONE && !Automated();
         if (b)
             want = b[0] != '0';
@@ -359,6 +415,38 @@ void Init()
         {
             gBenchLevel = Env("UA_GFX_BENCH_LEVEL") ? atoi(Env("UA_GFX_BENCH_LEVEL")) : 75;
             gBenchState = gBenchLevel > 0 ? 1 : 0;
+        }
+        if (gBenchState == 1)
+        {
+            std::string st;
+            int n = 0;
+            if (ReadMarker(&st, &n))
+            {
+                if (st == "pending" || st == "skipped")
+                {
+                    // The last benchmark never finished (crash, hang or killed): never again; a safe preset
+                    // until the player picks one in Options > Graphics.
+                    gBenchState = 0;
+                    gPreset = PRESET_MEDIUM;
+                    if (st == "pending")
+                        WriteMarker("skipped", 0);
+                    printf("gfx: benchmark skipped, the last one did not finish (%s); using medium\n",
+                           MarkerPath().c_str());
+                }
+                else if (st == "aborted" && n >= 2)
+                {
+                    // Left early twice: stop asking, keep the default.
+                    gBenchState = 0;
+                    printf("gfx: benchmark skipped, left early %d times; keeping %s\n", n,
+                           kPresetKeys[gPreset == PRESET_NONE ? PRESET_HIGH : gPreset]);
+                }
+                else
+                    gBenchTry = n + 1;
+            }
+            else
+                gBenchTry = 1;
+            if (gBenchState == 1)
+                WriteMarker("pending", gBenchTry);
         }
     }
 
@@ -550,6 +638,7 @@ bool Save()
         fprintf(fp, "bench = %s\n", gBenchLine.c_str());
     fclose(fp);
     printf("gfx: saved %s (preset %s)\n", gFile.c_str(), kPresetKeys[gPreset]);
+    remove(MarkerPath().c_str()); // a saved preset: no benchmark bookkeeping left
     return true;
 }
 
@@ -628,9 +717,10 @@ bool TakeSetReload()
 
 // ---------------------------------------------------------------------------
 // First-launch benchmark.
-// Runs once, when a settings-aware launcher (UA_GFX_DEFAULT=<preset>) starts
-// with no SAVE/gfx.txt and no harness env: autostarts level 75 (L7575, the busy
-// Mykonian reference scene) at the launcher's default preset, flies the fixed
+// Runs once, when the engine starts with no SAVE/gfx.txt and no harness env and
+// either a launcher default (UA_GFX_DEFAULT=<preset>) or, on the desktop, the
+// Reforge pack installed (default High): autostarts level 75 (L7575, the busy
+// Mykonian reference scene) at that default preset, flies the fixed
 // "tour" camera path with sound muted and the frame cap off, measures frames
 // 3..BenchSeconds() s after the first 3D frame, ends the level, then picks the
 // highest preset PREDICTED to hold 60 fps (p90 frame <= 16.7 ms and mean <= 15 ms;
@@ -697,13 +787,21 @@ void BenchFrame(double ms)
 
 void BenchLevelEnded()
 {
-    if (gBenchState != 2)
+    if (gBenchState != 1 && gBenchState != 2)
         return;
     gBenchState = 3;
+    if (gBenchMs.size() < 30)
+    {
+        // Left early (Esc, quit) before it measured enough: save nothing, play at the default, and let the
+        // benchmark run once more on the next start (the marker stops it after that).
+        WriteMarker("aborted", gBenchTry);
+        printf("gfx: bench left early after %d frames (attempt %d), nothing saved\n", (int)gBenchMs.size(),
+               gBenchTry);
+        return;
+    }
     int measured = gPreset == PRESET_NONE ? PRESET_HIGH : gPreset;
     int pick = PRESET_ORIGINAL;
     double mean = 0, p50 = 0, p90 = 0;
-    if (gBenchMs.size() >= 30)
     {
         std::vector<float> v = gBenchMs;
         std::sort(v.begin(), v.end());

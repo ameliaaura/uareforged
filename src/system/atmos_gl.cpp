@@ -28,7 +28,7 @@
 #include <SDL2/SDL_timer.h>
 
 #include "gfx.h"
-#include "../rsrc.h"
+#include <set>
 #include "atmos.h"
 #include "atmos_winmask.h"
 #include "perf.h"
@@ -44,6 +44,24 @@ bool AtmosFacadeAtlasName(const std::string &n)
 {
     return n == "city1.ilbm" || n == "hype.ilbm" || n == "macht.ilbm" || n == "fcity1.ilbm" || n == "fhype.ilbm" ||
            n == "fmacht.ilbm" || n == "berud.ilbm" || n == "fberud.ilbm";
+}
+
+namespace
+{
+// Facade atlases alive now: added when GroundTagBitmap tags one (texture prepare), removed when its bitmap is
+// freed. PrebuildWindowMasks walks this set and never the generic resource lists (they can hold entries of
+// other kinds, and before 0.8.4 they kept freed ones: the sky-load crash). Never destroyed (no exit-order issue).
+std::set<const ResBitmap *> &FacadeAtlases()
+{
+    static std::set<const ResBitmap *> *s = new std::set<const ResBitmap *>;
+    return *s;
+}
+} // namespace
+
+void AtmosFacadeAtlasTagged(const ResBitmap *bm)
+{
+    if (bm)
+        FacadeAtlases().insert(bm);
 }
 
 namespace GFX
@@ -545,40 +563,45 @@ void FreeWindowMasks()
     gWinMaskBytes = 0;
 }
 
-// Normalised resource name (lower case, cut at the first NUL / trailing blanks, file part only), as GroundTagBitmap.
-std::string BaseName(const std::string &raw)
-{
-    std::string n(raw.c_str());
-    for (char &c : n)
-        c = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-    while (!n.empty() && (n.back() == ' ' || n.back() == '\r' || n.back() == '\n' || n.back() == '\t'))
-        n.pop_back();
-    size_t slash = n.find_last_of("/\\:");
-    return slash == std::string::npos ? n : n.substr(slash + 1);
-}
-
 // Level load (AtmosRefresh, night maps at ATMOS 2+ only): the window mask of every loaded facade atlas, so the
 // draw path never reads back, allocates or uploads. The set is loaded (textures prepared) before the sky.
 int PrebuildWindowMasks()
 {
     int n = 0;
-    RSRCList *lists[2] = {NC_STACK_rsrc::getRsrc_sharedList(), NC_STACK_rsrc::getRsrc_privateList()};
-    for (RSRCList *l : lists)
-        for (rsrc *r : *l)
-        {
-            if (!r || !r->data || !AtmosFacadeAtlasName(BaseName(r->name)))
-                continue;
-            const ResBitmap *bm = (const ResBitmap *)r->data; // *.ilbm resources are bitmaps (bitmap.cpp rsrc data)
-            if (!bm->facadeAtlas || !bm->hwTex || !bm->hwTexMips || gWinMasks.count(bm))
-                continue;
-            const int64_t before = gWinMaskBytes;
-            const GLuint m = BuildWindowMask(bm);
-            if (gWinMaskBytes != before)
-                Perf::TexAlloc(false, gWinMaskBytes - before);
-            gWinMasks[bm] = m;
-            n += m ? 1 : 0;
-        }
+    const std::set<const ResBitmap *> atlases = FacadeAtlases(); // a copy: nothing below may change the walk
+    for (const ResBitmap *bm : atlases)
+    {
+        if (!bm->facadeAtlas || !bm->hwTex || !bm->hwTexMips || gWinMasks.count(bm))
+            continue;
+        const int64_t before = gWinMaskBytes;
+        const GLuint m = BuildWindowMask(bm);
+        if (gWinMaskBytes != before)
+            Perf::TexAlloc(false, gWinMaskBytes - before);
+        gWinMasks[bm] = m;
+        n += m ? 1 : 0;
+    }
     return n;
+}
+
+// A facade atlas bitmap is being freed: its window mask goes with it, so no later bitmap at the same address
+// can pick it up.
+void ForgetWindowMask(const ResBitmap *bm)
+{
+    auto it = gWinMasks.find(bm);
+    if (it == gWinMasks.end())
+        return;
+    if (it->second)
+    {
+        auto sz = gWinMaskSize.find(it->second);
+        if (sz != gWinMaskSize.end())
+        {
+            Perf::TexAlloc(false, -sz->second);
+            gWinMaskBytes -= sz->second;
+            gWinMaskSize.erase(sz);
+        }
+        glDeleteTextures(1, &it->second);
+    }
+    gWinMasks.erase(it);
 }
 
 // Level load (AtmosRefresh, night maps at ATMOS 2+ only): the window mask of every loaded HD trim albedo.
@@ -834,7 +857,7 @@ void GFXEngine::AtmosRefresh()
                 Glext::GLGenBuffers(1, &_wxVbo);
                 Glext::GLBindBuffer(GL_ARRAY_BUFFER, _wxVbo);
                 Glext::GLBufferData(GL_ARRAY_BUFFER, v.size() * sizeof(float), v.data(), GL_STATIC_DRAW);
-                Glext::GLBindBuffer(GL_ARRAY_BUFFER, 0);
+                Glext::GLBindBuffer(GL_ARRAY_BUFFER, _lastStates.DataBuf); // the state cache's buffer (see AtmosDrawWeather)
                 _wxTime = 0.0;
             }
         }
@@ -1029,7 +1052,10 @@ void GFXEngine::AtmosDrawWeather(float dtSec)
 #endif
 
     Glext::GLBindVertexArray(prevVao);
-    Glext::GLBindBuffer(GL_ARRAY_BUFFER, 0);
+    // Back to the buffer the state cache thinks is bound: with 0 here, the next draw of the same mesh skipped the
+    // bind and set its attribute offsets as client-memory pointers; NVIDIA's Windows driver then read address
+    // 0x4 / 0xc in its worker thread (crash at ATMOSPHERE High on weather maps with GLOW on, e.g. level 75).
+    Glext::GLBindBuffer(GL_ARRAY_BUFFER, _lastStates.DataBuf);
     Glext::GLUseProgram(_lastStates.Prog.ID);
     // restore the cached state machine's view of blend / z write
     if (_lastStates.Zwrite) glDepthMask(GL_TRUE);
@@ -1037,4 +1063,12 @@ void GFXEngine::AtmosDrawWeather(float dtSec)
     else glBlendFunc(_lastStates.SrcBlend, _lastStates.DstBlend);
 }
 
+}
+
+void AtmosFacadeAtlasFreed(const ResBitmap *bm)
+{
+    if (!bm)
+        return;
+    FacadeAtlases().erase(bm);
+    GFX::ForgetWindowMask(bm);
 }

@@ -103,7 +103,10 @@ void GroundTagBitmap(ResBitmap *bitm, const std::string &rsrcName)
     // ATMOSPHERE (night windows): the sets' building facade atlases (atmos_gl.cpp list). A bool tag; nothing reads
     // it at ATMOS 0/1 (AtmosRefresh builds their window masks at ATMOS 2+ night levels).
     if (AtmosFacadeAtlasName(n))
+    {
         bitm->facadeAtlas = true;
+        AtmosFacadeAtlasTagged(bitm);
+    }
 }
 
 namespace GFX

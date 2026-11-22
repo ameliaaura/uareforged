@@ -83,7 +83,10 @@ rsrc * NC_STACK_rsrc::rsrc_func64(IDVList &stak)
     if ( resname.empty() )
         return NULL;
 
-    rsrc *res = new rsrc(resname, shared);
+    // The node's flag must name the list it is put in: TRYSHARED 2 (the HD model loaders) goes to the private
+    // list, and with the flag set from the raw value (2 -> true) rsrc_func65 removed it from the public list
+    // instead, freed it and left a dangling pointer in the private list (the sky-load crash, 0.8.3).
+    rsrc *res = new rsrc(resname, shared == 1);
 
     if ( res )
     {

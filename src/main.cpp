@@ -57,6 +57,16 @@
 #include "version.h"
 
 
+#ifdef _WIN32
+// Laptops with two GPUs: ask the NVIDIA (Optimus) and AMD (PowerXpress) drivers for the fast one. The drivers
+// look these two exports up in the game's own .exe; without them the game runs on the integrated GPU.
+extern "C"
+{
+__declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+#endif
+
 int dword_513638 = 0;
 int dword_51362C = 0;
 int dword_513630 = 0;
@@ -1610,6 +1620,8 @@ int main(int argc, char *argv[])
     
     // quitting: a mission in progress keeps its perf summary for the next start; unsent events too
     StatsLevelEnd(StatsResult(TLevelInfo::STATE_ABORTED), true);
+    if ( GfxSettings::BenchRunning() )
+        GfxSettings::BenchLevelEnded(); // closed during the benchmark: counts as left early
     UsageStats::Shutdown();
 
     ypaworld->DeleteNewGuiElements();
