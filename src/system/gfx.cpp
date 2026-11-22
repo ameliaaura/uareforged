@@ -3546,8 +3546,14 @@ void GFXEngine::fpsLimitter(int value)
         int disp = 0;
         if ( SDL_Window *w = SDL_GL_GetCurrentWindow() )
             disp = std::max(0, SDL_GetWindowDisplayIndex(w));
-        value = (SDL_GetCurrentDisplayMode(disp, &dm) == 0 && dm.refresh_rate > 0) ? dm.refresh_rate : 60;
-        fmt::printf("gfx: frame cap %d fps (display refresh)\n", value);
+        const int refresh = (SDL_GetCurrentDisplayMode(disp, &dm) == 0 && dm.refresh_rate > 0) ? dm.refresh_rate : 60;
+        // With vsync the swap paces the frames; the cap sits one above the refresh rate as a
+        // backstop. Displays report whole Hz (Windows says 59 for 59.94 Hz, 143 for 143.98):
+        // a cap exactly at that number would fall just below the real refresh and drop a
+        // frame about once a second.
+        const bool vsync = SDL_GL_GetSwapInterval() != 0;
+        value = vsync ? refresh + 1 : refresh;
+        fmt::printf("gfx: frame cap %d fps (display refresh %d Hz%s)\n", value, refresh, vsync ? ", vsync paces" : "");
     }
     if ( value > (int)GameClock::kMaxFps )
         value = GameClock::kMaxFps;
