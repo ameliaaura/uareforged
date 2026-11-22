@@ -13,6 +13,7 @@
 #include "windp.h"
 #include "fmtlib/printf.h"
 #include "system/inivals.h"
+#include "winp.h"
 
 #define C_2PI_127       0.04947390005653217698   // (2PI / 127)
 #define C_127_2PI       20.21267777267070764265  // (127 / 2PI)
@@ -3773,7 +3774,20 @@ void yw_NetHandleProblems(NC_STACK_ypaworld *yw)
     {
     case 1:
         usr->ResetInputPeriod = true;
+#ifdef __ANDROID__
         usr->netProblemCountDown--;
+#else
+        {
+            // The game is held (ResetInputPeriod), so the countdown counted frames: 200 / 500
+            // frames, 3.3 / 8.3 s at 60 fps but 1.4 / 3.5 s at 144. Count 60 fps frames of real
+            // time instead (frame_rate.h).
+            static float acc = 0.0f;
+            acc += NC_STACK_winp::FrameMeasured();
+            const int n = (int)(acc / FrameRate::kRefMeasured);
+            acc -= n * FrameRate::kRefMeasured;
+            usr->netProblemCountDown -= n;
+        }
+#endif
 
         if ( usr->netProblemCountDown <= 0 )
         {

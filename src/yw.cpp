@@ -649,7 +649,10 @@ size_t NC_STACK_ypaworld::Process(base_64arg *arg)
             _profileVals[PFID_UPDATETIME] = profiler_end(v37);
 #ifdef UA_TEST_HOOKS
             if ( !hold )
+            {
                 ypaworld_SpeedProbe(this);
+                ypaworld_SaveLoadProbe(this);
+            }
 #endif
 
             sub_445230(this);

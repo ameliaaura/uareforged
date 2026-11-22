@@ -9,6 +9,8 @@
 #include "log.h"
 #include "yw.h"
 #include "yparobo.h"
+#include "frame_rate.h"
+#include "test_probes.h"
 
 #include "yw_net.h"
 #include "fmtlib/printf.h"
@@ -1201,7 +1203,7 @@ void NC_STACK_yparobo::AI_doMove(update_msg *arg)
                 else
                 {
                     if ( fabs(_target_dir.y) < 0.7 )
-                        _fly_dir_length *= 0.35;
+                        _fly_dir_length *= FrameRate::Damp(0.35, arg->frameTime); // 0.35 per 60 fps frame
                 }
 
                 if ( v14 && _roboWFlags & 2 )
@@ -1213,10 +1215,16 @@ void NC_STACK_yparobo::AI_doMove(update_msg *arg)
         else
         {
             _airconst *= 3.0;
-            _fly_dir_length *= 0.8;
+#ifdef UA_TEST_HOOKS
+            TestProbe::Damp("host", this, _fly_dir_length, _position);
+#endif
+            _fly_dir_length *= FrameRate::Damp(0.8, arg->frameTime); // host station drift: 0.8 per 60 fps frame
 
             if ( fabs(_fly_dir.x * _fly_dir_length) < 0.1 && fabs(_fly_dir.z * _fly_dir_length) < 0.1 )
             {
+#ifdef UA_TEST_HOOKS
+                TestProbe::DampStop("host", this, _position);
+#endif
                 _fly_dir.z = 0;
                 _fly_dir.x = 0;
 
@@ -4271,7 +4279,8 @@ void NC_STACK_yparobo::AI_checkWorld(update_msg *arg)
     {
         int v89 = (_wrldSectors.y + _wrldSectors.x) / 20 + 1;
 
-        for (int i = v89; i > 0; i--)
+        // v89 cells per 60 fps frame (frame_rate.h): the scan takes the same real time at any frame rate
+        for (int i = FrameRate::Steps(_roboScanAcc[0], v89, arg->frameTime); i > 0; i--)
         {
             if ( _wrldSectors.x * _wrldSectors.y == _roboConqCellIndex )
             {
@@ -4327,23 +4336,28 @@ void NC_STACK_yparobo::AI_checkWorld(update_msg *arg)
 
     if ( _roboEpDefense && v6 )
     {
-        Common::Point cellId;
-        int v91;
-
-        int v17 = yparobo_func70__sub6__sub5(&v91, &cellId);
-        if ( v17 > _roboEnemyValue )
+        // one sixteenth of the enemy units per 60 fps frame (sub5 steps _roboEnemyDiv), so the
+        // whole sweep takes the same real time at any frame rate (frame_rate.h)
+        for (int n = FrameRate::Steps(_roboEnemyDivAcc, 1, arg->frameTime); n > 0; n--)
         {
-            arg128.flags = 2;
-            arg128.tgType = BACT_TGT_TYPE_UNIT;
-            arg128.prim_comm_id = v91;
-            yparobo_func128(&arg128);
+            Common::Point cellId;
+            int v91;
 
-            if ( !arg128.comm_bacto )
+            int v17 = yparobo_func70__sub6__sub5(&v91, &cellId);
+            if ( v17 > _roboEnemyValue )
             {
-                _roboEnemyValue = v17;
-                _roboEnemyCommandID = v91;
-                _roboEnemyTime = arg->gTime;
-                _roboEnemyCellID = cellId.y * _wrldSectors.x + cellId.x;
+                arg128.flags = 2;
+                arg128.tgType = BACT_TGT_TYPE_UNIT;
+                arg128.prim_comm_id = v91;
+                yparobo_func128(&arg128);
+
+                if ( !arg128.comm_bacto )
+                {
+                    _roboEnemyValue = v17;
+                    _roboEnemyCommandID = v91;
+                    _roboEnemyTime = arg->gTime;
+                    _roboEnemyCellID = cellId.y * _wrldSectors.x + cellId.x;
+                }
             }
         }
         _roboState |= ROBOSTATE_READYDEFENSE;
@@ -4408,7 +4422,8 @@ void NC_STACK_yparobo::AI_checkWorld(update_msg *arg)
     {
         int v25 = (_wrldSectors.x + _wrldSectors.y) / 10 + 1;
 
-        for (int i = v25; i > 0; i--)
+        // v25 cells per 60 fps frame (frame_rate.h): the scan takes the same real time at any frame rate
+        for (int i = FrameRate::Steps(_roboScanAcc[1], v25, arg->frameTime); i > 0; i--)
         {
             if ( _wrldSectors.x * _wrldSectors.y == _roboPositionCellIndex )
             {
@@ -4464,7 +4479,8 @@ void NC_STACK_yparobo::AI_checkWorld(update_msg *arg)
     if ( _roboEpPower && (v85.field_8 > v93 || v85.field_4 < 0.0001) && v6 )
     {
         int v99 = (_wrldSectors.x + _wrldSectors.y) / 20 + 1;
-        for (int i = v99; i > 0; i--)
+        // v99 cells per 60 fps frame (frame_rate.h): the scan takes the same real time at any frame rate
+        for (int i = FrameRate::Steps(_roboScanAcc[2], v99, arg->frameTime); i > 0; i--)
         {
             if ( _wrldSectors.x * _wrldSectors.y == _roboPowerCellIndex )
             {
@@ -4508,7 +4524,8 @@ void NC_STACK_yparobo::AI_checkWorld(update_msg *arg)
     {
         int v48 = (_wrldSectors.y + _wrldSectors.x) / 20 + 1;
 
-        for(int i = v48; i > 0; i--)
+        // v48 cells per 60 fps frame (frame_rate.h): the scan takes the same real time at any frame rate
+        for (int i = FrameRate::Steps(_roboScanAcc[3], v48, arg->frameTime); i > 0; i--)
         {
             if ( _wrldSectors.x * _wrldSectors.y == _roboRadarCellIndex )
             {
@@ -4560,7 +4577,8 @@ void NC_STACK_yparobo::AI_checkWorld(update_msg *arg)
     {
         int v60 = (_wrldSectors.y + _wrldSectors.x) / 20 + 1;
 
-        for(int i = v60; i > 0; i--)
+        // v60 cells per 60 fps frame (frame_rate.h): the scan takes the same real time at any frame rate
+        for (int i = FrameRate::Steps(_roboScanAcc[4], v60, arg->frameTime); i > 0; i--)
         {
             if ( _wrldSectors.x * _wrldSectors.y == _roboSafetyCellIndex )
             {
@@ -4606,7 +4624,8 @@ void NC_STACK_yparobo::AI_checkWorld(update_msg *arg)
     {
         int v90 = (_wrldSectors.y + _wrldSectors.x) / 20 + 1;
 
-        for (int i = v90; i > 0; i-- )
+        // v90 cells per 60 fps frame (frame_rate.h): the scan takes the same real time at any frame rate
+        for (int i = FrameRate::Steps(_roboScanAcc[5], v90, arg->frameTime); i > 0; i--)
         {
             if ( _wrldSectors.x * _wrldSectors.y == _roboExploreCellIndex )
             {
@@ -5333,9 +5352,9 @@ void NC_STACK_yparobo::Renew()
     _roboTimeScale = System::IniConf::GameTimeLine.Get<int>();
 }
 
-void NC_STACK_yparobo::HandBrake(update_msg *)
+void NC_STACK_yparobo::HandBrake(update_msg *arg)
 {
-    _fly_dir_length *= 0.8;
+    _fly_dir_length *= FrameRate::Damp(0.8, arg->frameTime); // 0.8 per 60 fps frame while held
     _thraction = 0;
     _roboFlotage = _mass * 9.80665;
 }

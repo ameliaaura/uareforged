@@ -11,10 +11,11 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 ### Changed
 - **Desktop: the game speed no longer depends on the frame rate.** The game used to run faster the higher the
   frame rate (about 8 % at 144 fps, 17 % at 240 fps, twice as fast at 1000 fps), which is why it was held at
-  60 fps. It now runs at exactly its old 60 fps speed at any frame rate, from 20 fps to 1000. Aircraft no longer
-  bank harder, guns no longer recharge slower and tanks still dodge at high frame rates.
+  60 fps. It now runs at exactly its old 60 fps speed at any frame rate, from 20 fps to 1000. Aircraft bank as
+  they did at 60 fps, guns no longer recharge slower and tanks still dodge at high frame rates; steering (keys,
+  sticks, mouse), brakes, drifting host stations and the AI's map scans also behave as at 60 fps.
 - **Desktop: 120 Hz and 144 Hz screens now get their full frame rate.** The frame cap follows the screen's
-  refresh rate (with vsync) instead of 60.
+  refresh rate (with vsync) instead of 60, exactly (144 Hz = 144 fps), and follows the window to another screen.
 - **Desktop: faster.** The Mac and Windows engines are now built with the compiler's optimiser, as the Quest
   app always was.
 
@@ -22,6 +23,8 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 - **No more crash when holding the mouse on Yes or No in the in-mission confirm box** and dragging off it
   (seen on Windows).
 - **No more crash drawing the map's lines** (seen on Windows after a long session).
+- **The main menu's buttons no longer lose their labels** after the first-start graphics benchmark (or any level
+  started straight from the title screen) until the game is restarted.
 
 ## [0.8.4] - Desktop - 2026-11-22
 

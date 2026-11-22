@@ -679,6 +679,7 @@ public:
 
     TF::TForm3D _tForm;
     int _clock;           // local time
+    int32_t _crashTouchClock = -100000; // CrashOrLand: _clock of the last ground touch that cost energy
     int _AI_time1;
     int _AI_time2;
 //    int field_921;

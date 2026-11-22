@@ -53,6 +53,7 @@
 #include "aituning.h"
 #include "gfxsettings.h"
 #include "game_clock.h"
+#include "test_probes.h"
 #include "usage_stats.h"
 #include <atomic>
 #include "version.h"
@@ -1117,6 +1118,7 @@ int ProcessNextFrame()
         // Desktop: the same game speed at every frame rate (game_clock.h).
 #ifdef UA_TEST_HOOKS
         g_testFrameMeasured = input_states.Period;
+        TestProbe::Frame(input_states.Period);
 #endif
         input_states.Period = GameClock::FrameTicks(input_states.Period);
 #endif

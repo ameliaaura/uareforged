@@ -72,8 +72,15 @@ The game speed no longer depends on the frame rate: the world advances 1084 game
 frame rate, which is exactly the old speed at the 60 fps cap (the engine used to add one tick per frame, so it ran
 about 8 % faster at 144 fps and 2x at 1000 fps). The frame cap therefore follows the screen: `gfx.maxfps = 60`
 (the value in the game package's `NUCLEUS.INI`) or `-1` caps at the display's refresh rate, with vsync; any
-other value is used as given; `0` is uncapped. The engine never runs above 1000 fps. The Quest app keeps its own
+other value is used as given; `0` is uncapped. The cap is paced on the performance counter (144 Hz = 144 fps) and
+follows the window to another display. The engine never runs above 1000 fps. The Quest app keeps its own
 display-clock timing.
+
+Code from 1998 that did something once per frame does it per 60 fps frame of time instead (`src/frame_rate.h`):
+steering keys, sticks, hats and the mouse ramp up and let go in the same real time; brakes and drift (UFOs, host
+stations, the hand brake) stop in the same distance; AI host stations scan the map at the same pace; ground
+scraping costs the same energy per second; aircraft bank for their turn rate. `tests/frame_rate_test.cpp` checks
+each at 20 to 1000 fps against the 1998 code at 60 fps.
 
 ## Useful variables
 
@@ -85,5 +92,5 @@ display-clock timing.
 | `UA_WINDOW_SIZE=WxH` | window size |
 | `UA_MAXFPS` | frame cap for this run (0 = uncapped, at most 1000) |
 | `UA_GAME_CLOCK=1998` | the old game clock: one extra game tick per frame, so the game runs faster the higher the frame rate (comparison only) |
-| `UA_UBO_RING=0/1/2` | Windows/Linux uniform-buffer ring off / mapped / persistent (default 2 where available; macOS default 0) |
+| `UA_UBO_RING=0/1/2` | Windows/Linux uniform-buffer ring off / mapped / persistent (default 2 with ARB/EXT_buffer_storage, otherwise off; macOS default 0) |
 | `UA_AUTOSTART_LEVEL=<n>` | jump straight into level n (testing) |

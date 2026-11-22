@@ -7,6 +7,8 @@
 #include <string.h>
 #include "yw.h"
 #include "ypaflyer.h"
+#include "frame_rate.h"
+#include "test_probes.h"
 #include "log.h"
 #include <math.h>
 
@@ -142,7 +144,11 @@ void NC_STACK_ypaflyer::sb_0x4b255c(float a2, vec3d v, int a4)
             {
                 float v57 = clp_acos( tmp.dot( v.XZ() ) / tmp.length() / v.XZ().length() );
 
-                if ( v57 < 0.001 )
+                // v57 is the heading turned THIS frame, so v57 / a2 below is the turn rate and the
+                // bank target does not depend on the frame rate. The 1998 dead zone was 0.001 per
+                // frame (at 60 fps 0.055 rad/s): at high frame rates a steady turn's per-frame
+                // angle fell below it and the aircraft levelled out. Compare the rate instead.
+                if ( v57 < 0.001 * FrameRate::FrameScale(a2) )
                     v57 = 0.0;
 
                 if ( tmp.cross( v.XZ() ) < 0.0 )
@@ -152,19 +158,17 @@ void NC_STACK_ypaflyer::sb_0x4b255c(float a2, vec3d v, int a4)
 
                 if ( _fly_dir_length >= 0.1 )
                 {
-                    // Bank angle for the heading error: the 1998 code divided by THIS frame's
-                    // time, so the higher the frame rate the steeper aircraft banked (upstream:
-                    // "more than 60 fps breaks helicopter rotations"). Divide by the frame time
-                    // of the 60 fps cap instead (1084 / 60 ticks): the same bank at 60 fps as
-                    // always, and at every other frame rate.
-                    const float a2ref = (1084.0f / 60.0f) / 1000.0f;
                     if (isnormal(a2)) // Not NULL, NAN, INF
-                        v58 = fabs(_fly_dir_length) * _airconst / _force * (v57 * 1.45 / (a2ref * _maxrot));
+                        v58 = fabs(_fly_dir_length) * _airconst / _force * (v57 * 1.45 / (a2 * _maxrot));
                     else
                         v58 = 0.0;
                 }
 
 
+#ifdef UA_TEST_HOOKS
+                if ( !a4 )
+                    TestProbe::Turn(v57, a2, v58, v56);
+#endif
                 float v44 = 1.0;
                 if ( !a4 )
                 {
@@ -549,6 +553,14 @@ void NC_STACK_ypaflyer::AI_layer3(update_msg *arg)
             }
         }
 
+#ifdef UA_TEST_HOOKS
+        if ( TestProbe::TurnForced() && (_flyerType & 2) )
+        {   // TEST ONLY: turn at the full rate, level, all the time
+            const vec3d z = _rotation.AxisZ();
+            _target_dir = vec3d(z.z, 0.0, -z.x);
+            _target_dir.normalise();
+        }
+#endif
         ypaflyer_func70__sub0(a2a);
 
         move_msg arg74;

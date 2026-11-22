@@ -41,6 +41,8 @@ jobs:
           "$RUNNER_TEMP/gl_texture_init_test" src
           c++ -std=c++14 -Wall -Isrc tests/game_clock_test.cpp src/game_clock.cpp -o "$RUNNER_TEMP/game_clock_test"
           "$RUNNER_TEMP/game_clock_test"
+          c++ -std=c++14 -Wall -Isrc tests/frame_rate_test.cpp src/game_clock.cpp -o "$RUNNER_TEMP/frame_rate_test"
+          "$RUNNER_TEMP/frame_rate_test" -v
           c++ -std=c++14 -Wall -DUA_TEST_HOOKS -Isrc tests/usage_stats_test.cpp src/usage_stats.cpp src/usage_stats_platform.cpp \
               src/usage_stats_crash.cpp src/usage_stats_net_apple.mm -framework Foundation -o "$RUNNER_TEMP/usage_stats_test"
           (cd "$RUNNER_TEMP" && ./usage_stats_test)

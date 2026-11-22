@@ -118,6 +118,7 @@ set(SOURCES
 	reforge_marks.cpp
 	gfxsettings.cpp
 	game_clock.cpp
+	test_probes.cpp
 	yw_func2.cpp
 	yw_game.cpp
 	yw_game_ui.cpp

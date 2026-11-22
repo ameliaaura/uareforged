@@ -295,6 +295,9 @@ void INPEngine::QueryInput(TInputState *state)
     }
 #endif
 
+    // the steering sliders scale their per-frame steps by this frame's time (frame_rate.h)
+    NC_STACK_winp::SetFrameMeasured(state->Period);
+
     if ( !_wimp.HasFocus || _wimp.HasFocus() )
     {
         if ( _keyboard.KeyboardQuery )

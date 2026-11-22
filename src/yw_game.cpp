@@ -4101,6 +4101,71 @@ void ypaworld_SpeedProbe(NC_STACK_ypaworld *yw)
         dist = 0.0;
     }
 }
+
+// TEST ONLY: UA_TEST_SAVELOAD=<save s>,<load s> saves the mission (as the in-game menu's Save)
+// after <save s> real seconds of play and loads it again (menu's Load) at <load s>, logging a
+// digest of the world at the save, just before the load and on the first frame after it
+// ("saveprobe:"): game time, host station energy / position / heading, units and energy per owner.
+static std::string SaveLoadDigest(NC_STACK_ypaworld *yw)
+{
+    int units[8] = {0};
+    double energy[8] = {0};
+    for ( NC_STACK_ypabact *robo : yw->_unitsList )
+    {
+        auto add = [&](NC_STACK_ypabact *u) {
+            if ( u->_status == BACT_STATUS_DEAD || u->_owner >= 8 )
+                return;
+            units[u->_owner]++;
+            energy[u->_owner] += u->_energy;
+        };
+        add(robo);
+        for ( NC_STACK_ypabact *c : robo->_kidList )
+        {
+            add(c);
+            for ( NC_STACK_ypabact *k : c->_kidList )
+                add(k);
+        }
+    }
+    std::string s = fmt::sprintf("level=%d gt=%u", yw->_levelInfo.LevelID, yw->_timeStamp);
+    if ( NC_STACK_ypabact *r = yw->_userRobo )
+        s += fmt::sprintf(" host=%d pos=%.1f,%.1f,%.1f dir=%.3f,%.3f", r->_energy, r->_position.x, r->_position.y,
+                          r->_position.z, r->_rotation.AxisZ().x, r->_rotation.AxisZ().z);
+    for ( int o = 0; o < 8; o++ )
+        if ( units[o] )
+            s += fmt::sprintf(" o%d=%d/%.0f", o, units[o], energy[o]);
+    return s;
+}
+
+void ypaworld_SaveLoadProbe(NC_STACK_ypaworld *yw)
+{
+    static int phase = -1;
+    static double saveAt = 0, loadAt = 0, t = 0;
+    if ( phase < 0 )
+    {
+        const char *e = getenv("UA_TEST_SAVELOAD");
+        phase = (e && sscanf(e, "%lf,%lf", &saveAt, &loadAt) == 2 && loadAt > saveAt) ? 0 : 9;
+    }
+    if ( phase >= 3 )
+        return;
+    t += g_testFrameMeasured / 1024.0;
+    if ( phase == 0 && t >= saveAt && yw->_levelInfo.State == TLevelInfo::STATE_PLAYING )
+    {
+        fmt::printf("saveprobe: saved %s\n", SaveLoadDigest(yw).c_str());
+        yw->_levelInfo.State = TLevelInfo::STATE_SAVE;
+        phase = 1;
+    }
+    else if ( phase == 1 && t >= loadAt && yw->_levelInfo.State == TLevelInfo::STATE_PLAYING )
+    {
+        fmt::printf("saveprobe: before-load %s\n", SaveLoadDigest(yw).c_str());
+        yw->_levelInfo.State = TLevelInfo::STATE_LOAD;
+        phase = 2;
+    }
+    else if ( phase == 2 )
+    {
+        fmt::printf("saveprobe: loaded %s\n", SaveLoadDigest(yw).c_str());
+        phase = 3;
+    }
+}
 #endif
 
 
