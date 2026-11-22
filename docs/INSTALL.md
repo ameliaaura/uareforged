@@ -11,6 +11,7 @@ Downloads and checksums: **[uareforged.pages.dev/downloads](https://uareforged.p
 
 - [macOS](#macos)
 - [Windows](#windows)
+- [Linux (new)](#linux-new)
 - [Meta Quest 3](#meta-quest-3)
 - [The Reforge pack](#the-reforge-pack)
 - [Graphics presets](#graphics-presets)
@@ -57,6 +58,26 @@ current driver.
    Untick **Include the Reforge pack** to keep the 1998 look for now.
 3. **Play.** Every start shows a small launcher: pick the campaign and click **Play**. Pick a preset in
    *Options > Graphics*.
+
+## Linux (new)
+
+New in 0.8.5. **Needs** a 64-bit PC (x86_64) with a desktop Linux that has glibc 2.35 or newer (Ubuntu 22.04+,
+Linux Mint 21+, Debian 12+, Fedora 36+, SteamOS 3.5+, or similar), and a graphics driver with OpenGL 4.1 (Mesa
+for AMD / Intel, or NVIDIA's driver). X11 and Wayland desktops both work (the game uses X11, through XWayland on
+Wayland; `SDL_VIDEODRIVER=wayland` uses Wayland directly). ARM computers are not supported.
+
+1. **Download** `UA-Reforged-<version>-Linux-x86_64.AppImage`, make it executable (file properties, or
+   `chmod +x UA-Reforged-*.AppImage`) and start it. No FUSE on your system? Use the `-Linux-x86_64.tar.gz`
+   instead: unpack it anywhere and start `./ua-reforged` in the folder.
+2. **Set up everything.** The first start shows one dialog: choose **Set up everything** (the game, 445 MB, and
+   the Reforge pack, 1.6 GB, in one progress window), or **I already have the game** to choose your folder (needs
+   zenity or kdialog for the folder picker; otherwise start once with `--game-dir <folder>`). Untick
+   **Include the Reforge pack** to keep the 1998 look for now. The dialogs work with mouse, keyboard or a game
+   controller (d-pad, A, B), so a TV setup needs no keyboard after the download.
+3. **Play.** Every start shows a small launcher with a **Play** button per campaign.
+
+`--add-to-menu` adds UA Reforged to your desktop's application menu. On Steam / SteamOS: *Add a Non-Steam Game*
+and pick the AppImage. The Linux edition has no *Install on my Quest* (use the Mac or Windows app).
 
 ## Meta Quest 3
 
@@ -188,6 +209,7 @@ pack, the new models and textures. A short benchmark on first launch picks one f
 |---|---|---|
 | macOS | `~/Library/Application Support/UA Reforged/` | `…/game/` |
 | Windows | `%LOCALAPPDATA%\UA Reforged\` | `…\game\` |
+| Linux | `~/.local/share/UA Reforged/` (`$XDG_DATA_HOME`) | `…/game/` |
 | Quest | `Android/data/io.github.ameliaaura.uareforged.vr/files/` | inside the app's folder |
 
 The app only **reads** your game folder; it never changes it. To choose a different game folder, delete
@@ -199,6 +221,8 @@ The app only **reads** your game folder; it never changes it. To choose a differ
   `~/Library/Application Support/UA Reforged/`.
 - **Windows:** *Settings > Apps > UA Reforged > Uninstall* (or *Uninstall UA Reforged* in the Start menu). It
   asks whether to delete UA Reforged's data folder (`%LOCALAPPDATA%\UA Reforged`) as well. Your own game folder is never touched.
+- **Linux:** delete the AppImage (or the tar.gz folder). To remove the downloaded game, pack and saves too,
+  delete `~/.local/share/UA Reforged/`; `--add-to-menu` also wrote `~/.local/share/applications/ua-reforged.desktop`.
 - **Quest:** *App Library > Unknown Sources > UA Reforged VR > … > Uninstall*. This also removes the downloaded
   game and pack from the headset.
 
@@ -213,5 +237,6 @@ The app only **reads** your game folder; it never changes it. To choose a differ
 - **Logs** (attach them to a [bug report](https://github.com/ameliaaura/uareforged/issues/new/choose)):
   - macOS: `~/Library/Application Support/UA Reforged/launcher.log` and `…/game/ENV/ypa_log.txt`
   - Windows: `%LOCALAPPDATA%\UA Reforged\launcher.log`, `engine.log` and `game\ENV\ypa_log.txt`
+  - Linux: `~/.local/share/UA Reforged/launcher.log` (the engine's output too) and `…/game/ENV/ypa_log.txt`
   - Quest: `adb logcat -d -s UAVR`
 - **Questions:** [Discussions > Q&A](https://github.com/ameliaaura/uareforged/discussions/categories/q-a).

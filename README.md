@@ -49,6 +49,9 @@ Choose its folder instead. We never host or ship Microsoft's game files.
 | **3** | Click **Set up everything** (the game + the Reforge pack in one step), then **Play** | Click **Set up everything** (the game + the Reforge pack in one step), then **Play** | In the headset: *Unknown Sources > UA Reforged VR*, then **Get the game** and the pack |
 | ▶ | [Step by step](docs/INSTALL.md#macos) | [Step by step](docs/INSTALL.md#windows) | [Step by step](docs/INSTALL.md#meta-quest-3) |
 
+**Linux (new in 0.8.5, x86_64):** an AppImage (or a tar.gz folder) with the same one-step setup, for Ubuntu 22.04+,
+Mint, Debian 12+, Fedora, SteamOS and similar. [Step by step](docs/INSTALL.md#linux-new).
+
 Full steps, troubleshooting and uninstalling: **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ## Features
@@ -133,8 +136,9 @@ desktop app's *Install on my Quest* does the hard part for you.
 
 <details><summary><b>Linux? Intel Macs? Quest 2?</b></summary>
 
-Not supported in this release. The engine has upstream Linux build rules but they are untested with the Reforged
-changes. Help testing is welcome: post in [Discussions](https://github.com/ameliaaura/uareforged/discussions).
+Linux (x86_64) is new in 0.8.5: see [Linux (new)](docs/INSTALL.md#linux-new). It is tested on fewer machines than
+the Mac and Windows apps, so reports are welcome. Intel Macs and the Quest 2 are not supported. Help testing is
+welcome: post in [Discussions](https://github.com/ameliaaura/uareforged/discussions).
 </details>
 
 <details><summary><b>Can I play online?</b></summary>

@@ -9,6 +9,10 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 ## [0.8.5] - Desktop - not yet released
 
 ### Added
+- **Linux edition (new, x86_64)**: an AppImage and a tar.gz folder for desktop Linux with glibc 2.35 or newer
+  (Ubuntu 22.04+, Mint 21+, Debian 12+, Fedora 36+, SteamOS 3.5+). The same one-step setup as on Mac and Windows
+  (the game from the Metropolis Dawn community, the checked Reforge pack download), the first-start benchmark,
+  the usage stats question and *Report a bug*. Its dialogs work with a game controller. No *Install on my Quest*.
 - **Desktop: a short notice when a new version is out, with one-click Update now.** At start-up the app checks the
   small links file it already reads from the UA Reforged site; when a newer version is listed there, one dialog says
   so before the game starts: Update now, Later, Don't remind me for this version, and What's new. Update now
