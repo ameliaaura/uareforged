@@ -86,6 +86,9 @@ static int setup(const char *title, const char *fontPath, int w, int h)
 {
     SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
     SDL_SetHint(SDL_HINT_APP_NAME, "UA Reforged");
+    /* the launcher ends the progress window with SIGTERM: let it end the program (SDL would turn it into a quit
+       event, which the progress window takes as Cancel) */
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     if ( SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0 && SDL_Init(SDL_INIT_VIDEO) != 0 )
     {
         fprintf(stderr, "ua-dialog: %s\n", SDL_GetError());
@@ -99,8 +102,10 @@ static int setup(const char *title, const char *fontPath, int w, int h)
     if ( !font || !bold ) { fprintf(stderr, "ua-dialog: font: %s\n", TTF_GetError()); return 0; }
     win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w * S, h * S, SDL_WINDOW_HIDDEN);
     if ( !win ) { fprintf(stderr, "ua-dialog: %s\n", SDL_GetError()); return 0; }
-    ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_PRESENTVSYNC);
-    if ( !ren ) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    /* a dialog needs no GPU: the software renderer avoids driver trouble before the game has even started
+       (seen: an accelerated renderer on Mesa d3d12 under Xvfb never showed the window) */
+    ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    if ( !ren ) ren = SDL_CreateRenderer(win, -1, 0);
     if ( !ren ) { fprintf(stderr, "ua-dialog: %s\n", SDL_GetError()); return 0; }
     for ( int i = 0; i < SDL_NumJoysticks(); i++ )
         if ( SDL_IsGameController(i) ) SDL_GameControllerOpen(i);
@@ -152,7 +157,7 @@ static int ask(int argc, char **argv)
     SDL_RaiseWindow(win);
 
     int nf = nb + (check[0] ? 1 : 0); /* focus order: buttons, then the box */
-    int focus = def, result = -1, done = 0;
+    int focus = def, result = -1, done = 0, mx0 = -1, my0 = 0, moved = 0;
     SDL_Rect br[MAXB], cr = {P * S, checkY, (W - 2 * P) * S, 26 * S};
     while ( !done )
     {
@@ -212,6 +217,11 @@ static int ask(int argc, char **argv)
                 break;
             case SDL_CONTROLLERDEVICEADDED: SDL_GameControllerOpen(e.cdevice.which); break;
             case SDL_MOUSEMOTION:
+                /* hover moves the focus only once the pointer really moves: a pointer that happens to sit where
+                   the window opens must not take the focus off the default button (Enter would pick another) */
+                if ( mx0 < 0 ) { mx0 = e.motion.x; my0 = e.motion.y; break; }
+                if ( !moved && abs(e.motion.x - mx0) + abs(e.motion.y - my0) < 4 * S ) break;
+                moved = 1;
                 for ( int i = 0; i < nb; i++ ) { SDL_Point pt = {e.motion.x, e.motion.y}; if ( SDL_PointInRect(&pt, &br[i]) ) focus = i; }
                 break;
             case SDL_MOUSEBUTTONUP:
@@ -240,13 +250,22 @@ static int progress(int argc, char **argv)
     char status[1024], cancel[1024];
     snprintf(status, sizeof(status), "%s/status", dir);
     snprintf(cancel, sizeof(cancel), "%s/cancel", dir);
-    int pct = 0, focus = 1, cancelled = 0;
+    int pct = 0, focus = 1, cancelled = 0, seen = 0;
+    Uint32 gone = 0;
     char line[1024] = "", msg[512] = "Checking the download link...", step[512] = "";
     for ( ;; )
     {
         FILE *f = fopen(status, "r");
+        /* the launcher removes the status file when the step is over: go too (also if it could not stop us) */
+        if ( !f && seen )
+        {
+            if ( !gone ) gone = SDL_GetTicks();
+            else if ( SDL_GetTicks() - gone > 3000 ) break;
+        }
         if ( f )
         {
+            seen = 1;
+            gone = 0;
             if ( fgets(line, sizeof(line), f) )
             {
                 line[strcspn(line, "\r\n")] = 0;
