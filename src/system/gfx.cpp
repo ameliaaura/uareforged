@@ -2924,6 +2924,9 @@ void GFXEngine::EndFrame()
         Perf::Scope perfSwap(Perf::SWAP);
         System::Flip();
     }
+    // Desktop: fence + rotate the UBO ring once per presented frame (VR does it in VR::Present).
+    if (!_vrMode)
+        VRFrameBoundary();
 
     LogFrameTime();
 }
@@ -7252,14 +7255,30 @@ bool HasGLExtension(const char *name)
 void GFXEngine::UboRingSetup()
 {
     _uboRingMode = 0;
-    if (!_vbo || !_vrMode)
+    if (!_vbo)
         return;
+    // Desktop too (perf): without the ring every draw re-specifies the uniform buffer
+    // twice (orphan + upload, CommitUBOParameters), ~1,000-4,000 times a frame. On the
+    // Quest that path cost ~8 ms per eye (P4 perf notes); Windows / NVIDIA players saw
+    // 17-31 fps on every preset. Apple's GL handles it cheaply, so macOS keeps the old
+    // path unless asked. UA_UBO_RING=0 off / 1 map unsynchronized / 2 persistent (A/B).
     int want = 2;
-    if (const char *v = getenv("UA_VR_UBO_RING"))
-        want = atoi(v);
+    if (_vrMode)
+    {
+        if (const char *v = getenv("UA_VR_UBO_RING"))
+            want = atoi(v);
+    }
+    else
+    {
+#ifdef __APPLE__
+        want = 0;
+#endif
+        if (const char *v = getenv("UA_UBO_RING"))
+            want = atoi(v);
+    }
     if (want <= 0)
     {
-        printf("gfx: VR UBO ring off (UA_VR_UBO_RING=0): per-draw glBufferData\n");
+        printf("gfx: %s UBO ring off: per-draw glBufferData\n", _vrMode ? "VR" : "desktop");
         return;
     }
     g_ring.BindBufferRange = (PfnBindBufferRange)UA_GL_GetProcAddress("glBindBufferRange");
@@ -7270,7 +7289,7 @@ void GFXEngine::UboRingSetup()
     if (!g_ring.BindBufferRange || !g_ring.FenceSync || !g_ring.ClientWaitSync || !g_ring.DeleteSync ||
         !g_ring.UnmapBuffer || !Glext::GLMapBufferRange)
     {
-        printf("gfx: VR UBO ring unavailable (entry points missing)\n");
+        printf("gfx: UBO ring unavailable (entry points missing)\n");
         return;
     }
     if (want >= 2)
@@ -7317,7 +7336,7 @@ void GFXEngine::UboRingSetup()
         _uboRing = 0;
     }
     Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _vboParams);
-    printf("gfx: VR UBO ring mode %d (%s), stride %d, %d x %d KB\n", _uboRingMode,
+    printf("gfx: %s UBO ring mode %d (%s), stride %d, %d x %d KB\n", _vrMode ? "VR" : "desktop", _uboRingMode,
            _uboRingMode == 2 ? "persistent map" : (_uboRingMode == 1 ? "map unsynchronized" : "off"),
            _uboRingStride, kUboRingSegs, kUboRingSegSize >> 10);
 }
