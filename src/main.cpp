@@ -587,15 +587,14 @@ int ProcessGameplayFrame()
             // only enabled in STATE_MENU (GameShellUiHandleInput), so the main
             // menu showed no options at all. The normal path (Single-Player ->
             // map) never returns to the title with a level state.
-            // It is also the flat "captions gone after a level" bug (same cause), but
-            // the flat game is kept exactly as released: VR builds only for now.
-#ifdef UA_VR_ENABLED
+            // It is also the flat "captions gone after a level" bug (same cause), which
+            // the desktop first-start graphics benchmark hits on every new install (level
+            // 75 runs straight from the title), so it applies to every build.
             if ( userdata.EnvMode == ENVMODE_TITLE )
             {
                 ypaworld->_levelInfo.State = TLevelInfo::STATE_MENU;
                 printf("UA: back to the title after a level: state -> MENU (title buttons enabled)\n");
             }
-#endif
 
             if (!v0)
                 return 0;
