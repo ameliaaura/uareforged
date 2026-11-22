@@ -2,9 +2,24 @@
 #define COMMONLINE_H_INCLUDED
 
 #include "common.h"
+#include <cstdint>
+#include <type_traits>
 
 namespace Common
 {
+
+// a * b / c for the clipper: 64-bit for integer lines (map lines far off screen overflowed
+// int32 there), plain maths for float lines.
+template <typename T>
+inline typename std::enable_if<std::is_integral<T>::value, T>::type ClipMulDiv(T a, T b, T c)
+{
+    return (T)(((int64_t)a * (int64_t)b) / (int64_t)c);
+}
+template <typename T>
+inline typename std::enable_if<!std::is_integral<T>::value, T>::type ClipMulDiv(T a, T b, T c)
+{
+    return a * b / c;
+}
 
 template <typename T> struct TLine;
 
@@ -113,22 +128,22 @@ struct TLine
             if ( flag & CLIP_TOP )
             {
                 vY = clip.top;
-                vX = dx * (clip.top - y1) / dy + x1;
+                vX = ClipMulDiv<T>(dx, clip.top - y1, dy) + x1;
             }
             else if ( flag & CLIP_BOTTOM )
             {
                 vY = clip.bottom;
-                vX = dx * (clip.bottom - y1) / dy + x1;
+                vX = ClipMulDiv<T>(dx, clip.bottom - y1, dy) + x1;
             }
             else if ( flag & CLIP_LEFT )
             {
                 vX = clip.left;
-                vY = dy * (clip.left - x1) / (x2 - x1) + y1;
+                vY = ClipMulDiv<T>(dy, clip.left - x1, x2 - x1) + y1;
             }
             else if ( flag & CLIP_RIGHT )
             {
                 vX = clip.right;
-                vY = dy * (clip.right - x1) / (x2 - x1) + y1;
+                vY = ClipMulDiv<T>(dy, clip.right - x1, x2 - x1) + y1;
             }
 
             if ( flag == flag1 )

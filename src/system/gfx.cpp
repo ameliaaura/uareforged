@@ -4664,130 +4664,70 @@ SDL_Surface *GFXEngine::Screen()
 
 
 // Draw line Bresenham's algorithm
+// Every pixel is bounds-checked against the surface it is written to (the walk tracks x/y
+// instead of only a pointer). Field crash F (0.8.3, Windows 7, after 101 min on level 33):
+// an access violation inside this loop from the robo map's lines; with both end points
+// checked the 1998 walk cannot leave the surface by itself, so the bad line came in through
+// state the walk cannot see. A pixel outside the surface is now skipped instead of written.
 void GFXEngine::DrawLine(SDL_Surface *surface, const Common::Line &line, uint8_t cr, uint8_t cg, uint8_t cb )
 {
+    if ( !surface || !surface->pixels || !surface->format )
+        return;
+
     if ((line.Width() == 0 && line.Height() == 0) || 
          !Common::Rect(surface->w, surface->h).IsIn(line.P1()) ||
          !Common::Rect(surface->w, surface->h).IsIn(line.P2()) )
         return;
-    
-    int rilWidth = surface->pitch / surface->format->BytesPerPixel;
 
-    int xCount = line.Width();
-    int yCount = line.Height();
+    const int bpp = surface->format->BytesPerPixel;
+    if ( bpp != 1 && bpp != 2 && bpp != 4 )
+        return;
 
-    uint32_t color = SDL_MapRGBA(surface->format, cr, cg, cb, 255);
+    const int xCount = line.Width();
+    const int yCount = line.Height();
+    const uint32_t color = SDL_MapRGBA(surface->format, cr, cg, cb, 255);
 
-    int stepAdd, stepOdd;
-    int steps, subSteps;
+    const int sx = (line.x2 <= line.x1) ? -1 : 1;
+    const int sy = (line.y2 <= line.y1) ? -1 : 1;
+    const bool yMajor = xCount <= yCount;
+    const int steps = yMajor ? yCount : xCount;
+    const int subSteps = yMajor ? xCount : yCount;
 
-    if ( xCount <= yCount )
-    {
-        if ( line.y2 <= line.y1 )
-            stepAdd = -rilWidth;
-        else
-            stepAdd = rilWidth;
-
-        if ( line.x2 <= line.x1 )
-            stepOdd = -1;
-        else
-            stepOdd = 1;
-
-        steps = yCount;
-        subSteps = xCount;
-    }
-    else
-    {
-        if ( line.x2 <= line.x1 )
-            stepAdd = -1;
-        else
-            stepAdd = 1;
-
-        if ( line.y2 <= line.y1 )
-            stepOdd = -rilWidth;
-        else
-            stepOdd = rilWidth;
-        
-        steps = xCount;
-        subSteps = yCount;
-    }
-
-    int incr1 = 2 * subSteps;
+    const int incr1 = 2 * subSteps;
+    const int incr2 = 2 * (subSteps - steps);
     int t = 2 * subSteps - steps;
-    int incr2 = 2 * (subSteps - steps);
-    
+
     SDL_LockSurface(surface);
-    
-    void *surfPos = (void *) ((uint8_t *) surface->pixels 
-                    + line.y1 * surface->pitch 
-                    + line.x1 * surface->format->BytesPerPixel );
 
-    switch(surface->format->BytesPerPixel)
+    uint8_t *pixels = (uint8_t *)surface->pixels;
+    const int pitch = surface->pitch;
+    const int w = surface->w, h = surface->h;
+    int x = line.x1, y = line.y1;
+
+    for (int i = 0; i <= steps; i++)
     {
-        case 1:
+        if ( x >= 0 && y >= 0 && x < w && y < h )
         {
-            uint8_t *surf = (uint8_t *)surfPos;
-
-            for (int i = 0; i <= steps; i++) // Verify i bound
+            uint8_t *p = pixels + (size_t)y * pitch + (size_t)x * bpp;
+            switch ( bpp )
             {
-                *surf = color;
-                if ( t > 0 )
-                {
-                    t += incr2;
-                    surf += stepOdd;
-                }
-                else
-                    t += incr1;
-
-                surf += stepAdd;
+                case 1: *p = (uint8_t)color; break;
+                case 2: *(uint16_t *)p = (uint16_t)color; break;
+                default: *(uint32_t *)p = color; break;
             }
         }
-        break;
-        
-        case 2:
+
+        if ( t > 0 )
         {
-            uint16_t *surf = (uint16_t *)surfPos;
-
-            for (int i = 0; i <= steps; i++) // Verify i bound
-            {
-                *surf = color;
-                if ( t > 0 )
-                {
-                    t += incr2;
-                    surf += stepOdd;
-                }
-                else
-                    t += incr1;
-
-                surf += stepAdd;
-            }
+            t += incr2;
+            if ( yMajor ) x += sx; else y += sy;
         }
-        break;
-        
-        case 4:
-        {
-            uint32_t *surf = (uint32_t *)surfPos;
+        else
+            t += incr1;
 
-            for (int i = 0; i <= steps; i++) // Verify i bound
-            {
-                *surf = color;
-                if ( t > 0 )
-                {
-                    t += incr2;
-                    surf += stepOdd;
-                }
-                else
-                    t += incr1;
-
-                surf += stepAdd;
-            }
-        }
-        break;
-        
-        default:
-        break;
+        if ( yMajor ) y += sy; else x += sx;
     }
-    
+
     SDL_UnlockSurface(surface);
 }
 
