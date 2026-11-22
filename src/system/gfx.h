@@ -611,6 +611,9 @@ public:
     static int can_destblend;
     static int can_stippling;
     static uint32_t FpsMaxTicks;
+    static uint32_t FpsMaxHz;          // desktop: the cap in frames per second (0 = uncapped)
+    static bool FpsCapFollowsDisplay;  // desktop: the cap is the display's refresh rate
+    void DisplayChanged();             // desktop: the window moved to another display
 
 protected:
     static SDL_PixelFormat *_pixfmt;

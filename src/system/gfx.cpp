@@ -51,6 +51,8 @@ int GFXEngine::can_srcblend;
 int GFXEngine::can_destblend;
 int GFXEngine::can_stippling;
 uint32_t GFXEngine::FpsMaxTicks = 1000/60;
+uint32_t GFXEngine::FpsMaxHz = 60;
+bool GFXEngine::FpsCapFollowsDisplay = false;
 
 SDL_PixelFormat *GFXEngine::_pixfmt = NULL;
 GLint GFXEngine::_glPixfmt, GFXEngine::_glPixtype;
@@ -3530,6 +3532,7 @@ void GFXEngine::fpsLimitter(int value)
     // never above GameClock::kMaxFps. UA_MAXFPS (tests) is taken as given, within that limit.
     if ( value == 60 && !getenv("UA_MAXFPS") )
         value = -1;
+    FpsCapFollowsDisplay = value < 0;
     if ( value < 0 )
     {
         SDL_DisplayMode dm;
@@ -3548,6 +3551,18 @@ void GFXEngine::fpsLimitter(int value)
         FpsMaxTicks = 0;
     else
         FpsMaxTicks = 1000/value;
+    // The desktop main loop paces frames on the performance counter at exactly this rate
+    // (FpsMaxTicks, whole ms, made 144 Hz 166 fps and 120 Hz 125 fps).
+    FpsMaxHz = FpsMaxTicks ? (uint32_t)value : 0;
+}
+
+void GFXEngine::DisplayChanged()
+{
+#ifndef __ANDROID__
+    // The window moved to another display: a cap that follows the refresh rate follows it there.
+    if ( FpsCapFollowsDisplay && !_vrMode && !GfxSettings::BenchRunning() )
+        fpsLimitter(-1);
+#endif
 }
 
 

@@ -1545,7 +1545,9 @@ int main(int argc, char *argv[])
     // anonymous usage stats (opt-in): the answer, the crash handler, "launch"
     StatsStart();
 
+#ifdef __ANDROID__
     uint32_t ticks = 0;
+#endif
     
     Gui::Root::Instance.SetHwCompose(true);
     ypaworld->LoadGuiFonts();
@@ -1608,6 +1610,43 @@ int main(int argc, char *argv[])
                 SDL_Delay(0);
 #endif
         }
+#ifndef __ANDROID__
+        else
+        {
+            // Desktop frame cap on the performance counter (sub-millisecond): exactly FpsMaxHz
+            // frames per second (the whole-ms FpsMaxTicks gave 166 fps for 144 Hz, 125 for 120).
+            // Deadlines advance by one period, so short and long frames average out; more than a
+            // frame behind (a hitch, a load) starts afresh instead of running fast to catch up.
+            if ( !ProcessNextFrame() )
+                break;
+
+            if ( System::ProcessEvents() )
+                break;
+
+            static uint64_t nextFrame = 0;
+            const uint64_t freq = SDL_GetPerformanceFrequency();
+            const uint64_t hz = GFX::Engine.FpsMaxHz ? GFX::Engine.FpsMaxHz : 60;
+            const uint64_t period = freq / hz;
+            uint64_t now = SDL_GetPerformanceCounter();
+            nextFrame += period;
+            if ( now >= nextFrame + period || nextFrame > now + 2 * period )
+                nextFrame = now;              // behind by a frame or more (or a stale deadline)
+            else
+            {
+                // sleep in whole ms while more than 2 ms remain, then yield to the deadline
+                const uint64_t spin = freq / 500;
+                while ( now < nextFrame )
+                {
+                    const uint64_t left = nextFrame - now;
+                    if ( left > spin )
+                        SDL_Delay((uint32_t)((left - spin) * 1000 / freq));
+                    else
+                        SDL_Delay(0);
+                    now = SDL_GetPerformanceCounter();
+                }
+            }
+        }
+#else
         else
         {
             uint32_t curTick = SDL_GetTicks();
@@ -1634,6 +1673,7 @@ int main(int argc, char *argv[])
             else
                 SDL_Delay(1);
         }
+#endif
 
 //        fps++;
 //        if (SDL_GetTicks() > fpstick)
