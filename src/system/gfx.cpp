@@ -2927,8 +2927,15 @@ void GFXEngine::EndFrame()
         System::Flip();
     }
     // Desktop: fence + rotate the UBO ring once per presented frame (VR does it in VR::Present).
+    // The first draw of the next frame must write its constants into the NEW segment: if the
+    // states did not change, the binding would still point into the segment just fenced, and the
+    // GPU could still be reading it when the CPU rewrites that segment kUboRingSegs frames later.
     if (!_vrMode)
+    {
         VRFrameBoundary();
+        if (_uboRingMode > 0)
+            _vboStatesChanged = true;
+    }
 
     LogFrameTime();
 }
@@ -7276,8 +7283,12 @@ void GFXEngine::UboRingSetup()
     // twice (orphan + upload, CommitUBOParameters), ~1,000-4,000 times a frame. On the
     // Quest that path cost ~8 ms per eye (P4 perf notes); Windows / NVIDIA players saw
     // 17-31 fps on every preset. Apple's GL handles it cheaply, so macOS keeps the old
-    // path unless asked. UA_UBO_RING=0 off / 1 map unsynchronized / 2 persistent (A/B).
+    // path unless asked. Linux (not a shipped build) runs it as Windows does: same drivers.
+    // Desktop default: the persistent map only (ARB/EXT_buffer_storage); without it the old
+    // path, not the unsynchronized map (driver-dependent). UA_UBO_RING=0 off / 1 map
+    // unsynchronized / 2 persistent (A/B).
     int want = 2;
+    bool explicitWant = _vrMode;
     if (_vrMode)
     {
         if (const char *v = getenv("UA_VR_UBO_RING"))
@@ -7289,7 +7300,10 @@ void GFXEngine::UboRingSetup()
         want = 0;
 #endif
         if (const char *v = getenv("UA_UBO_RING"))
+        {
             want = atoi(v);
+            explicitWant = true;
+        }
     }
     if (want <= 0)
     {
@@ -7339,6 +7353,15 @@ void GFXEngine::UboRingSetup()
             Glext::GLGenBuffers(1, &_uboRing);
             Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _uboRing);
         }
+    }
+    if (_uboRingMode != 2 && !explicitWant)
+    {
+        // desktop default without buffer storage: the old per-draw path
+        Glext::GLDeleteBuffers(1, &_uboRing);
+        _uboRing = 0;
+        Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _vboParams);
+        printf("gfx: desktop UBO ring off (no buffer storage): per-draw glBufferData\n");
+        return;
     }
     if (_uboRingMode != 2)
     {
