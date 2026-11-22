@@ -56,6 +56,18 @@ extern int buttonsSpace;
 extern int dword_5A50B6;
 extern int dword_5A50B6_h;
 
+// Briefing model turntable: degrees for this frame. "frameTime / 5" per frame was 3 degrees
+// per 18-tick frame at the 60 fps cap but nothing above ~200 fps; the same 1 degree per
+// 6 ticks, with the remainder carried, turns at the 60 fps speed at any frame rate.
+static int BriefTurnDegrees(int frameTime)
+{
+    static int rest = 0;
+    rest += frameTime;
+    const int deg = rest / 6;
+    rest -= deg * 6;
+    return deg;
+}
+
 void sb_0x4eb94c__sub0(NC_STACK_ypaworld *yw, bool clockwise, int a3, vec3d *pos, baseRender_msg *arg)
 {
     //brf_obj *brobj = &yw->brief.brf_objs + obj_id; // Only one object
@@ -70,13 +82,13 @@ void sb_0x4eb94c__sub0(NC_STACK_ypaworld *yw, bool clockwise, int a3, vec3d *pos
 
     if (clockwise)
     {
-        yw->_briefScreen.ViewingObjectAngle += (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle += BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle >= 360 )
             yw->_briefScreen.ViewingObjectAngle -= 360;
     }
     else
     {
-        yw->_briefScreen.ViewingObjectAngle -= (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle -= BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle < 0 )
             yw->_briefScreen.ViewingObjectAngle += 360;
     }
@@ -97,13 +109,13 @@ void sb_0x4eb94c__sub1(NC_STACK_ypaworld *yw, bool clockwise, int rot, vec3d *po
 
     if (clockwise)
     {
-        yw->_briefScreen.ViewingObjectAngle += (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle += BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle >= 360 )
             yw->_briefScreen.ViewingObjectAngle -= 360;
     }
     else
     {
-        yw->_briefScreen.ViewingObjectAngle -= (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle -= BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle < 0 )
             yw->_briefScreen.ViewingObjectAngle += 360;
     }

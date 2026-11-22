@@ -1,3 +1,6 @@
+#include <unordered_map>
+#include <map>
+#include <algorithm>
 #ifdef UA_VR_ENABLED
 #include "vr/vr.h"
 #include "vr/vr_radio.h"
@@ -3990,6 +3993,115 @@ void ypaworld_EmitAiStats(NC_STACK_ypaworld *yw, uint32_t timeStamp)
     }
     fflush(stderr);
 }
+
+
+
+#ifdef UA_TEST_HOOKS
+// TEST ONLY (UA_TEST_HOOKS builds, never shipped): UA_SPEED_PROBE=1 logs, once per second of REAL
+// time (the frames' measured times, 1/1024 s; with UA_SIM_FPS the simulated ones), how far the
+// game got: game ticks, frames, the summed path length of every living unit (unit travel per
+// real second), live missiles, the host stations' energy and the units per owner.
+extern uint32_t g_testFrameMeasured;
+void ypaworld_SpeedProbe(NC_STACK_ypaworld *yw)
+{
+    static int on = -1;
+    if ( on < 0 ) { const char *e = getenv("UA_SPEED_PROBE"); on = (e && e[0] == '1') ? 1 : 0; }
+    if ( !on )
+        return;
+    static int level = -1;
+    static uint64_t meas = 0, frames = 0, nextSec = 1;
+    static uint32_t gt0 = 0;
+    static double dist = 0.0;
+    static std::unordered_map<const void *, vec3d> last;
+    if ( level != yw->_levelInfo.LevelID || yw->_timeStamp < gt0 )
+    {
+        level = yw->_levelInfo.LevelID; meas = 0; frames = 0; nextSec = 1; gt0 = yw->_timeStamp; dist = 0.0;
+        last.clear();
+        return;
+    }
+    meas += g_testFrameMeasured;
+    frames++;
+    int missiles = 0, alive = 0;
+    std::unordered_map<const void *, vec3d> now;
+    auto visit = [&](NC_STACK_ypabact *u) {
+        if ( u->_status == BACT_STATUS_DEAD || u->_status == BACT_STATUS_BEAM )
+            return;
+        alive++;
+        missiles += (int)u->_missiles_list.size();
+        auto it = last.find(u);
+        if ( it != last.end() )
+        {
+            double d = (u->_position - it->second).length();
+            if ( d < 2000.0 ) // not a teleport / reuse
+                dist += d;
+        }
+        now[u] = u->_position;
+    };
+    for ( NC_STACK_ypabact *robo : yw->_unitsList )
+    {
+        visit(robo);
+        for ( NC_STACK_ypabact *c : robo->_kidList )
+        {
+            visit(c);
+            for ( NC_STACK_ypabact *k : c->_kidList )
+                visit(k);
+        }
+    }
+    last.swap(now);
+    if ( meas >= nextSec * 1024 )
+    {
+        nextSec++;
+        // per vehicle type: how far each unit got in this real second (sampled once per second)
+        static std::unordered_map<const void *, std::pair<vec3d, int>> secPos;
+        static std::map<int, std::vector<float>> perType;
+        std::unordered_map<const void *, std::pair<vec3d, int>> secNow;
+        for ( auto &kv : last )
+        {
+            const NC_STACK_ypabact *u = (const NC_STACK_ypabact *)kv.first;
+            auto it = secPos.find(kv.first);
+            if ( it != secPos.end() && it->second.second == (int)u->_vehicleID && u->_bact_type != BACT_TYPES_ROBO )
+            {
+                float d = (kv.second - it->second.first).length();
+                if ( d > 1.0f && d < 3000.0f )
+                    perType[u->_vehicleID].push_back(d);
+            }
+            secNow[kv.first] = std::make_pair(kv.second, (int)u->_vehicleID);
+        }
+        secPos.swap(secNow);
+        if ( (nextSec - 1) % 30 == 0 )
+        {
+            std::string line;
+            for ( auto &pt : perType )
+            {
+                if ( pt.second.size() < 20 )
+                    continue;
+                std::vector<float> v = pt.second;
+                std::sort(v.begin(), v.end());
+                line += fmt::sprintf(" v%d:n=%d,p50=%.0f,p90=%.0f", pt.first, (int)v.size(), v[v.size() / 2], v[v.size() * 9 / 10]);
+            }
+            fprintf(stderr, "speedtypes: L%d w=%.0f%s\n", level, meas / 1024.0, line.c_str());
+        }
+        int ue = 0, ul = 0, um = 0, others = 0;
+        for ( NC_STACK_ypabact *robo : yw->_unitsList )
+        {
+            if ( robo->_bact_type != BACT_TYPES_ROBO || robo->_status == BACT_STATUS_DEAD )
+                continue;
+            if ( robo == yw->_userRobo )
+            {
+                NC_STACK_yparobo *r = (NC_STACK_yparobo *)robo;
+                ue = r->_energy; ul = r->_roboEnergyLife; um = r->_roboEnergyMove;
+            }
+            else
+                others += robo->_energy;
+        }
+        fprintf(stderr, "speedprobe: L%d w=%.3f frames=%llu gt=%u dist=%.1f alive=%d missiles=%d hostE=%d life=%d move=%d otherRoboE=%d u1=%d u2=%d u3=%d u4=%d u5=%d u6=%d\n",
+                level, meas / 1024.0, (unsigned long long)frames, yw->_timeStamp - gt0, dist, alive, missiles, ue, ul, um, others,
+                yw->_countUnitsPerOwner[1], yw->_countUnitsPerOwner[2], yw->_countUnitsPerOwner[3],
+                yw->_countUnitsPerOwner[4], yw->_countUnitsPerOwner[5], yw->_countUnitsPerOwner[6]);
+        dist = 0.0;
+    }
+}
+#endif
 
 
 void NC_STACK_ypaworld::RecalcSectorsPowerForPS(const TPowerStationInfo &ps)

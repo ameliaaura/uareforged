@@ -24,6 +24,7 @@
 #include <condition_variable>
 #include <atomic>
 #include "gfx.h"
+#include "../game_clock.h"
 #include "gfx_glow.h"
 #include "atmos.h"
 #include "../utils.h"
@@ -3519,6 +3520,25 @@ void GFXEngine::BenchUncap(bool on)
 
 void GFXEngine::fpsLimitter(int value)
 {
+#ifndef __ANDROID__
+    // Desktop: the game speed no longer depends on the frame rate (game_clock.h), so the
+    // frame cap follows the screen. gfx.maxfps = 60 (the old default, in the game package's
+    // NUCLEUS.INI) or -1 = the display's refresh rate (vsync paces it); other values are kept;
+    // never above GameClock::kMaxFps. UA_MAXFPS (tests) is taken as given, within that limit.
+    if ( value == 60 && !getenv("UA_MAXFPS") )
+        value = -1;
+    if ( value < 0 )
+    {
+        SDL_DisplayMode dm;
+        int disp = 0;
+        if ( SDL_Window *w = SDL_GL_GetCurrentWindow() )
+            disp = std::max(0, SDL_GetWindowDisplayIndex(w));
+        value = (SDL_GetCurrentDisplayMode(disp, &dm) == 0 && dm.refresh_rate > 0) ? dm.refresh_rate : 60;
+        fmt::printf("gfx: frame cap %d fps (display refresh)\n", value);
+    }
+    if ( value > (int)GameClock::kMaxFps )
+        value = GameClock::kMaxFps;
+#endif
     if (value > 1000)
         FpsMaxTicks = 0;
     else if (value <= 0)

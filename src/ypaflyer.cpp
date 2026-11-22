@@ -152,8 +152,14 @@ void NC_STACK_ypaflyer::sb_0x4b255c(float a2, vec3d v, int a4)
 
                 if ( _fly_dir_length >= 0.1 )
                 {
+                    // Bank angle for the heading error: the 1998 code divided by THIS frame's
+                    // time, so the higher the frame rate the steeper aircraft banked (upstream:
+                    // "more than 60 fps breaks helicopter rotations"). Divide by the frame time
+                    // of the 60 fps cap instead (1084 / 60 ticks): the same bank at 60 fps as
+                    // always, and at every other frame rate.
+                    const float a2ref = (1084.0f / 60.0f) / 1000.0f;
                     if (isnormal(a2)) // Not NULL, NAN, INF
-                        v58 = fabs(_fly_dir_length) * _airconst / _force * (v57 * 1.45 / (a2 * _maxrot));
+                        v58 = fabs(_fly_dir_length) * _airconst / _force * (v57 * 1.45 / (a2ref * _maxrot));
                     else
                         v58 = 0.0;
                 }

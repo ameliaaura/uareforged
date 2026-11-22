@@ -66,6 +66,15 @@ The engine runs the 1998 enemy commander unless an `ai-tuning.txt` sits in the g
 folder. `docs/ai-tuning.example.txt` documents every key; with no file present the
 behaviour is the original one.
 
+## Frame rate and game speed (desktop, since 0.8.5)
+
+The game speed no longer depends on the frame rate: the world advances 1084 game ticks per real second at any
+frame rate, which is exactly the old speed at the 60 fps cap (the engine used to add one tick per frame, so it ran
+about 8 % faster at 144 fps and 2x at 1000 fps). The frame cap therefore follows the screen: `gfx.maxfps = 60`
+(the value in the game package's `NUCLEUS.INI`) or `-1` caps at the display's refresh rate, with vsync; any
+other value is used as given; `0` is uncapped. The engine never runs above 1000 fps. The Quest app keeps its own
+display-clock timing.
+
 ## Useful variables
 
 | Variable | Effect |
@@ -74,5 +83,7 @@ behaviour is the original one.
 | `UA_SKY_DIR` | remastered sky folder |
 | `UA_GFX_DEFAULT`, `UA_GFX_BENCH` | default preset, first-launch benchmark on/off |
 | `UA_WINDOW_SIZE=WxH` | window size |
-| `UA_MAXFPS` | frame cap |
+| `UA_MAXFPS` | frame cap for this run (0 = uncapped, at most 1000) |
+| `UA_GAME_CLOCK=1998` | the old game clock: one extra game tick per frame, so the game runs faster the higher the frame rate (comparison only) |
+| `UA_UBO_RING=0/1/2` | Windows/Linux uniform-buffer ring off / mapped / persistent (default 2 where available; macOS default 0) |
 | `UA_AUTOSTART_LEVEL=<n>` | jump straight into level n (testing) |

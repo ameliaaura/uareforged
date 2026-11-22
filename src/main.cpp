@@ -52,6 +52,7 @@
 #include "obj3d.h"
 #include "aituning.h"
 #include "gfxsettings.h"
+#include "game_clock.h"
 #include "usage_stats.h"
 #include <atomic>
 #include "version.h"
@@ -1085,6 +1086,10 @@ int ProcessMenuFrame()
 }
 
 
+#ifdef UA_TEST_HOOKS
+uint32_t g_testFrameMeasured = 0; // TEST ONLY: the speed probe's real-time base
+#endif
+
 int ProcessNextFrame()
 {
 #ifdef UA_VR_ENABLED
@@ -1100,11 +1105,23 @@ int ProcessNextFrame()
 #endif
     if ( userdata.ResetInputPeriod )
     {
-        input_states.Period = 1;
+        input_states.Period = 2; // (= 1 + the old per-frame tick)
         userdata.ResetInputPeriod = false;
+        GameClock::Reset();
     }
-
-    input_states.Period++;
+    else
+    {
+#ifdef __ANDROID__
+        // Quest: unchanged (VR::TickMs below sets the tick from the display clock).
+        input_states.Period++;
+#else
+        // Desktop: the same game speed at every frame rate (game_clock.h).
+#ifdef UA_TEST_HOOKS
+        g_testFrameMeasured = input_states.Period;
+#endif
+        input_states.Period = GameClock::FrameTicks(input_states.Period);
+#endif
+    }
 
 #ifdef UA_VR_ENABLED
     {
@@ -1575,11 +1592,21 @@ int main(int argc, char *argv[])
 
         if (GFX::Engine.FpsMaxTicks == 0)
         {
+#ifndef __ANDROID__
+            const uint64_t frameStart = SDL_GetPerformanceCounter();
+#endif
             if ( !ProcessNextFrame() )
                 break;
 
             if ( System::ProcessEvents() )
                 break;
+#ifndef __ANDROID__
+            // Uncapped still means at most kMaxFps (1000): every frame must be worth at least one
+            // game tick or the game clock would run fast (game_clock.h).
+            const uint64_t minFrame = SDL_GetPerformanceFrequency() / GameClock::kMaxFps;
+            while ( SDL_GetPerformanceCounter() - frameStart < minFrame )
+                SDL_Delay(0);
+#endif
         }
         else
         {

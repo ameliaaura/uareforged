@@ -96,6 +96,7 @@ public:
     uint8_t _gunType;
     int _gunFireTime;
     int _gunFireCount;
+    int _energyStepTime = 0; // game time not yet turned into recharge (EnergyInteract)
     uint8_t _gunFlags;
     int _gunDownTime;
 };

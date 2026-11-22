@@ -117,6 +117,7 @@ set(SOURCES
 	reforge_trails.cpp
 	reforge_marks.cpp
 	gfxsettings.cpp
+	game_clock.cpp
 	yw_func2.cpp
 	yw_game.cpp
 	yw_game_ui.cpp
