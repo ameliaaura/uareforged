@@ -4715,7 +4715,11 @@ void GFXEngine::DrawLine(SDL_Surface *surface, const Common::Line &line, uint8_t
     const int sx = (line.x2 <= line.x1) ? -1 : 1;
     const int sy = (line.y2 <= line.y1) ? -1 : 1;
     const bool yMajor = xCount <= yCount;
+    // A line inside the surface has at most w + h steps; anything longer is garbage
+    // coordinates (and could spin for 2^31 steps): skip it.
     const int steps = yMajor ? yCount : xCount;
+    if ( steps < 0 || steps > surface->w + surface->h )
+        return;
     const int subSteps = yMajor ? xCount : yCount;
 
     const int incr1 = 2 * subSteps;
