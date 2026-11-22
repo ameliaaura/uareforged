@@ -29,7 +29,7 @@ void ypaworld_func158__sub4__sub1__sub4__sub3(NC_STACK_ypaworld *yw, TInputState
     brf->MapBlitStart.right = brf->MapBlitStart.left;
     brf->MapBlitStart.bottom = brf->MapBlitStart.top;
 
-    float v17, v16;
+    float v17 = 1.0, v16 = 1.0;
 
     if ( yw->_mapSize.x == yw->_mapSize.y )
     {

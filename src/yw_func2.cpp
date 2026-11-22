@@ -5359,12 +5359,12 @@ void UserData::GameShellUiHandleInput()
 
         for (size_t i = 0; i < World::CVMaxNetPlayers; i++)
         {
-            int v370;
+            int v370 = 0;
             TDPPlayerData pData;
             bool v304 = p_YW->_netDriver->GetPlayerData(i, &pData);
 
             std::string name = " ";
-            int btID;
+            int btID = 0;
 
             switch ( i )
             {

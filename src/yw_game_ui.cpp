@@ -1158,7 +1158,7 @@ void sb_0x4f8f64__sub2__sub0(CmdStream *cur, float a1, float a2, char a3, int a4
 
 void sb_0x4f8f64__sub2(NC_STACK_ypaworld *yw, CmdStream *cur)
 {
-    int a4, v4;
+    int a4 = 4, v4 = 16; // (switch default: the zoom-0 values)
 
     switch ( robo_map.field_1EE )
     {
@@ -5421,7 +5421,7 @@ void sub_4E1D6C(NC_STACK_ypaworld *yw, CmdStream *cur, int x, int y, uint8_t ico
 
 void ypaworld_func64__sub7__sub7__sub0__sub0(NC_STACK_ypaworld *yw, CmdStream *cur, int x, int y, int a3, int a4, int a5, int a6, float a7)
 {
-    int icon;
+    int icon = 83;
 
     if ( a3 == -1 )
         icon = 82;
@@ -5502,7 +5502,7 @@ void ypaworld_func64__sub7__sub7__sub0__sub0(NC_STACK_ypaworld *yw, CmdStream *c
 
 void ypaworld_func64__sub7__sub7__sub0__sub1(NC_STACK_ypaworld *yw, CmdStream *cur, int x, int y, char a4, int a5, int a6, int a7)
 {
-    int v16;
+    int v16 = 67;
     if ( a4 & 1 )
     {
         if ( a5 == -1 )
@@ -5546,7 +5546,7 @@ void ypaworld_func64__sub7__sub7__sub0__sub1(NC_STACK_ypaworld *yw, CmdStream *c
 
 void ypaworld_func64__sub7__sub7__sub0__sub2(NC_STACK_ypaworld *yw, CmdStream *cur, int a3, int a2, char a4, int a5, int a6, int a7)
 {
-    int v18;
+    int v18 = 71;
     if ( a4 & 4 )
     {
         if ( a5 == -1 )
@@ -5590,7 +5590,7 @@ void ypaworld_func64__sub7__sub7__sub0__sub2(NC_STACK_ypaworld *yw, CmdStream *c
 
 void ypaworld_func64__sub7__sub7__sub0__sub3(NC_STACK_ypaworld *yw, CmdStream *cur, int x, int y, char a4, int a5, int a6, int a7)
 {
-    int v18;
+    int v18 = 79;
     if ( a4 & 8 )
     {
         if ( a5 == -1 )
