@@ -350,6 +350,8 @@ void StatsStart()
     const char *app = "desktop", *platform = "mac";
 #elif defined(_WIN32)
     const char *app = "desktop", *platform = "windows";
+#elif defined(__linux__)
+    const char *app = "desktop", *platform = "linux";
 #else
     return; // other platforms never send
 #endif

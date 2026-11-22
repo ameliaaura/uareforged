@@ -147,10 +147,14 @@ static void TestBodies()
     b = BuildBody(kId, c, Rec({{"event", "level_start"}, {"version", "0.8.0"}, {"preset", "low"}, {"level", "1"}}));
     CHECK(b.find("\"version\":\"0.8.0\"") != std::string::npos);
 
+    // the Linux edition (desktop)
+    b = BuildBody(kId, Common{"desktop", "linux", "0.8.4"}, Rec({{"event", "level_start"}, {"preset", "high"}, {"level", "1"}}));
+    CHECK(b.find("\"platform\":\"linux\"") != std::string::npos);
+
     // every rule refuses
     CHECK(BuildBody("nope", c, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, Common{"phone", "mac", "1"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
-    CHECK(BuildBody(kId, Common{"desktop", "linux", "1"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
+    CHECK(BuildBody(kId, Common{"desktop", "freebsd", "1"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, Common{"desktop", "mac", "0.8.1 beta"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, c, Rec({{"event", "level_start"}, {"preset", "vr"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, c, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "10000"}})).empty());

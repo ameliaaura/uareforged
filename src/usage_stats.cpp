@@ -449,7 +449,7 @@ std::string BuildBody(const std::string &install, const Common &c, const Record 
         return "";
     if ( c.app != "desktop" && c.app != "vr" )
         return "";
-    if ( c.platform != "mac" && c.platform != "windows" && c.platform != "quest" )
+    if ( c.platform != "mac" && c.platform != "windows" && c.platform != "linux" && c.platform != "quest" )
         return "";
     const std::string version = r.Has("version") ? r.Get("version") : c.version;
     if ( !Charset(version, ".+-", 1, 32) )

@@ -73,7 +73,7 @@ struct Record
 struct Common
 {
     std::string app;      // desktop | vr
-    std::string platform; // mac | windows | quest
+    std::string platform; // mac | windows | linux | quest
     std::string version;
 };
 

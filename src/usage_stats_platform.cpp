@@ -1,7 +1,8 @@
 // Anonymous usage stats: platform parts (files with UTF-8 paths, secure random bytes, the OS name, the
 // settings folder, and the Windows sender over WinHTTP). macOS sends with NSURLSession
-// (usage_stats_net_apple.mm); the Quest app registers its own sender (java.net.HttpURLConnection).
-// Only system libraries: WinHTTP + BCrypt on Windows, Foundation on macOS, libc on Android.
+// (usage_stats_net_apple.mm); the Quest app registers its own sender (java.net.HttpURLConnection); Linux hands
+// the request to curl (the copy the launcher names in UA_CURL, else the system's), on the stats worker thread.
+// Only system libraries: WinHTTP + BCrypt on Windows, Foundation on macOS, libc on Android and Linux.
 #include "usage_stats.h"
 
 #include <cstdio>
@@ -29,7 +30,16 @@
 #include <sys/system_properties.h>
 #endif
 #if defined(__linux__) && !defined(__ANDROID__)
+#include <cerrno>
+#include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
+#include <spawn.h>
 #include <sys/random.h>
+#include <sys/wait.h>
+#include <time.h>
+extern char **environ;
 #endif
 
 namespace UsageStats
@@ -216,6 +226,28 @@ std::string OsName()
         return "Quest OS " + v.substr(0, dot);
     }
     return "Quest OS (Android " + Prop("ro.build.version.release") + ")";
+#elif defined(__linux__)
+    // the distribution's name + version from os-release, e.g. "Ubuntu 24.04", "Fedora Linux 41", "SteamOS 3.7"
+    std::string text, name, ver;
+    if ( !FileRead("/etc/os-release", &text, 8192) )
+        FileRead("/usr/lib/os-release", &text, 8192);
+    size_t pos = 0;
+    while ( pos < text.size() )
+    {
+        size_t end = text.find('\n', pos);
+        if ( end == std::string::npos ) end = text.size();
+        std::string line = text.substr(pos, end - pos);
+        pos = end + 1;
+        std::string *dst = NULL;
+        if ( line.compare(0, 5, "NAME=") == 0 ) { dst = &name; line.erase(0, 5); }
+        else if ( line.compare(0, 11, "VERSION_ID=") == 0 ) { dst = &ver; line.erase(0, 11); }
+        if ( !dst ) continue;
+        if ( line.size() >= 2 && (line[0] == '"' || line[0] == '\'') && line[line.size() - 1] == line[0] )
+            line = line.substr(1, line.size() - 2);
+        *dst = line;
+    }
+    if ( name.empty() ) return "Linux";
+    return ver.empty() ? name : name + " " + ver;
 #else
     return "unknown";
 #endif
@@ -229,6 +261,15 @@ std::string DefaultSettingsDir()
 #elif defined(_WIN32)
     std::string la = EnvVar("LOCALAPPDATA");
     return la.empty() ? std::string() : la + "\\UA Reforged";
+#elif defined(__linux__) && !defined(__ANDROID__)
+    std::string data = EnvVar("XDG_DATA_HOME");
+    if ( data.empty() || data[0] != '/' )
+    {
+        std::string home = EnvVar("HOME");
+        if ( home.empty() ) return std::string();
+        data = home + "/.local/share";
+    }
+    return data + "/UA Reforged";
 #else
     return std::string(); // Quest: the app passes its private storage (UA_SETTINGS_DIR)
 #endif
@@ -277,6 +318,79 @@ int DefaultSend(const std::string &url, const std::string &body, int timeoutMs)
     if ( c ) WinHttpCloseHandle(c);
     if ( s ) WinHttpCloseHandle(s);
     return status;
+}
+#elif defined(__linux__) && !defined(__ANDROID__)
+// curl in a child process: the body goes in on stdin, the HTTP status comes back on stdout. No cookies, no
+// config files (-q), fixed User-Agent, no redirects, http(s) only. Returns the status, -1 (no curl / failed) or
+// -2 (timed out: the child is killed).
+int DefaultSend(const std::string &url, const std::string &body, int timeoutMs)
+{
+    std::string curl = EnvVar("UA_CURL");
+    if ( curl.empty() ) curl = "curl";
+    const std::string secs = std::to_string(timeoutMs / 1000 > 0 ? timeoutMs / 1000 : 1);
+    const char *argv[] = {curl.c_str(), "-q", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", secs.c_str(),
+                          "--proto", "=https,http", "-X", "POST", "-H", "Content-Type: application/json",
+                          "-H", "Accept-Language: en", "-A", "UA-Reforged", "--data-binary", "@-", url.c_str(), NULL};
+    int in[2], out[2];
+    if ( pipe2(in, O_CLOEXEC) != 0 ) return -1;
+    if ( pipe2(out, O_CLOEXEC) != 0 ) { close(in[0]); close(in[1]); return -1; }
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, in[0], 0);
+    posix_spawn_file_actions_adddup2(&fa, out[1], 1);
+    posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
+    pid_t pid = -1;
+    int rc = posix_spawnp(&pid, curl.c_str(), &fa, NULL, (char *const *)argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    close(in[0]);
+    close(out[1]);
+    if ( rc != 0 ) { close(in[1]); close(out[0]); return -1; }
+    // a closed pipe must not kill the game (SIGPIPE): MSG_NOSIGNAL does not exist for pipes, so block it here
+    sigset_t pipeSet, oldSet;
+    sigemptyset(&pipeSet);
+    sigaddset(&pipeSet, SIGPIPE);
+    pthread_sigmask(SIG_BLOCK, &pipeSet, &oldSet);
+    size_t off = 0;
+    while ( off < body.size() )
+    {
+        ssize_t n = write(in[1], body.data() + off, body.size() - off);
+        if ( n < 0 && errno == EINTR ) continue;
+        if ( n <= 0 ) break;
+        off += (size_t)n;
+    }
+    close(in[1]);
+    struct timespec pending = {0, 0};
+    sigtimedwait(&pipeSet, NULL, &pending); // drop a SIGPIPE raised by the write above
+    pthread_sigmask(SIG_SETMASK, &oldSet, NULL);
+    std::string got;
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    const long limitMs = timeoutMs + 2000;
+    bool timedOut = false;
+    for (;;)
+    {
+        struct timespec t1;
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        long left = limitMs - ((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000);
+        if ( left <= 0 ) { timedOut = true; break; }
+        struct pollfd pf = {out[0], POLLIN, 0};
+        int pr = poll(&pf, 1, (int)left);
+        if ( pr < 0 && errno == EINTR ) continue;
+        if ( pr <= 0 ) { timedOut = pr == 0; break; }
+        char buf[64];
+        ssize_t n = read(out[0], buf, sizeof(buf));
+        if ( n < 0 && errno == EINTR ) continue;
+        if ( n <= 0 ) break;
+        if ( got.size() < 64 ) got.append(buf, (size_t)n);
+    }
+    close(out[0]);
+    if ( timedOut ) kill(pid, SIGKILL);
+    int st = 0;
+    while ( waitpid(pid, &st, 0) < 0 && errno == EINTR ) {}
+    if ( timedOut ) return -2;
+    if ( !WIFEXITED(st) || got.size() != 3 ) return -1;
+    int code = atoi(got.c_str());
+    return code >= 100 && code <= 599 ? code : -1;
 }
 #elif !defined(__APPLE__)
 int DefaultSend(const std::string &, const std::string &, int)
