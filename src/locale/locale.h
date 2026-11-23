@@ -146,6 +146,12 @@ public:
         _localeName = name;
     }
 
+    // Every string of the loaded language (empty slots included), e.g. to check a font draws them all.
+    static const std::vector<std::string> &All()
+    {
+        return _localeStrings;
+    }
+
 protected:
     static std::string _localeName; // locale name
     static std::vector<std::string> _localeStrings;

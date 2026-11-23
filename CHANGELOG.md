@@ -45,6 +45,9 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
   stopped instead of reporting the download as broken and starting again: automatically a few times, then with a
   Try again button, and also after Cancel or the next time the app starts. A file is only used once its size (and
   checksum, where known) are right; a partial download of an older version of a file is never used.
+- **Russian and Japanese menus no longer show empty boxes with the modern menu style** (High, Ultra or
+  *STYLE: MODERN*). The modern style's font has Latin letters only; a language it cannot write now keeps its own
+  font in the modern menus. English, German and French keep the modern font.
 
 ## [0.8.4] - Desktop - 2026-11-22
 

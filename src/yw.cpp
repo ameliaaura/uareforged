@@ -26,6 +26,7 @@
 #include "env.h"
 #include "system/inivals.h"
 #include "locale/locale.h"
+#include "ui_font_cover.h"
 #include "version.h"
 #include "usage_stats.h"
 #include "system/radio.h"
@@ -6577,7 +6578,9 @@ size_t NC_STACK_ypaworld::ypaworld_func166(const std::string &langname)
         fontStr = Locale::Text::SmallFont();
 
     // UI graphics modern style (UISTYLE 1, UI >= 2): the OFL face Rajdhani SemiBold
-    // (fonts/), slightly larger - it is narrow - when it is installed.
+    // (fonts/), slightly larger - it is narrow - when it is installed. Rajdhani has
+    // Latin letters only: a language with a character it lacks (Russian, Japanese)
+    // keeps the language's own 1998 font, or every label would be empty boxes.
     if ( HDTex::UiLevel() >= 2 && HDTex::UiStyle() == 1 )
     {
         std::vector<std::string> sp = Stok::Split(fontStr, ",");
@@ -6587,9 +6590,18 @@ size_t NC_STACK_ypaworld::ypaworld_func166(const std::string &langname)
             System::AddFontDir(HDTex::UiRoot() + "fonts");
         if ( TTF_Font *t = System::LoadFont("Rajdhani SemiBold", h) )
         {
+            uint32_t missing = 0;
+            const bool covers = UiFontCover::Covers(Locale::Text::All(),
+                [t](uint32_t cp) { return TTF_GlyphIsProvided32(t, cp) != 0; }, &missing);
             TTF_CloseFont(t);
-            fontStr = fmt::sprintf("Rajdhani SemiBold,%d", h);
-            fmt::printf("ui-modern: UI font %s\n", fontStr);
+            if ( covers )
+            {
+                fontStr = fmt::sprintf("Rajdhani SemiBold,%d", h);
+                fmt::printf("ui-modern: UI font %s\n", fontStr);
+            }
+            else
+                fmt::printf("ui-modern: Rajdhani has no U+%04X (language %s) - keeping the language's font %s\n",
+                            missing, langname, fontStr);
         }
     }
 
