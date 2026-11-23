@@ -47,6 +47,9 @@ jobs:
               src/usage_stats_crash.cpp src/usage_stats_net_apple.mm -framework Foundation -o "$RUNNER_TEMP/usage_stats_test"
           (cd "$RUNNER_TEMP" && ./usage_stats_test)
 
+      - name: Launcher tests (new-version notice, no network)
+        run: bash tests/launcher/update_notice_test.sh
+
       - name: Cache third-party libraries
         uses: actions/cache@v6
         with:

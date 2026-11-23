@@ -182,6 +182,8 @@ build_app() {
     # "Get the game" + one-click Reforge pack download: the code, its progress window, the links.json check and
     # the addresses + pack checksum list
     cp "$PKGDIR/downloads.sh" "$PKGDIR/downloads.txt" "$PKGDIR/progress.js" "$PKGDIR/dialog.js" "$PKGDIR/consent.js" "$PKGDIR/links.js" "$PKGDIR/quest.sh" "$R/"
+    # this app's version, for the new-version notice (compared with links.json "latest")
+    printf '# this build (written by build-mac.sh; the new-version notice compares it with links.json "latest")\napp_version\t%s\n' "$VERSION" >> "$R/downloads.txt"
     sed -e "s/@VERSION@/$VERSION/" -e "s/@BUILD@/$VERSION/" -e "s/@MINOS@/$MINOS/" "$PKGDIR/Info.plist.in" > "$C/Info.plist"
     cp "$PKGDIR/AppIcon.icns" "$R/AppIcon.icns"
     mkdir -p "$R/licenses"

@@ -1,5 +1,5 @@
 // UA Reforged - strict check of the site's links.json (JavaScript for Automation, macOS built-in).
-//   osascript -l JavaScript links.js <file> "<allowed host> ..." <allow local http 0|1>
+//   osascript -l JavaScript links.js <file> "<allowed host> ..." <allow local http 0|1> [platform for "latest", mac]
 // Only reads and checks data: JSON.parse, types, lengths, https URLs on an allowlist of hosts. Nothing in the file
 // is ever run. Prints "key<TAB>value" lines (parts as "part<TAB>name<TAB>bytes<TAB>sha256"); any problem rejects
 // the WHOLE file (exit 1, the reason on stderr) and the app uses its built-in links.
@@ -14,6 +14,7 @@ function fail(why) {
 
 function run(argv) {
     var path = argv[0], hosts = (argv[1] || '').split(/\s+/).filter(function (h) { return h; }), local = argv[2] === '1';
+    var plat = argv[3] || 'mac';
     var data = $.NSData.dataWithContentsOfFile(path);
     if (data.isNil() || data.length > 16384) fail('missing or too big');
     var text = ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding));
@@ -86,5 +87,30 @@ function run(argv) {
         if (!sha(a.sha256)) fail(k + '.sha256');
         out.push(k + '\t' + u + '\t' + a.bytes + '\t' + a.sha256);
     });
+    // latest: the newest version per platform, for the "new version" notice at start-up:
+    //   "latest": {"mac": {"version": "0.8.5", "url": "https://github.com/ameliaaura/uareforged/releases/tag/v0.8.5"}, ...}
+    // Checked as strictly as the rest, but on its own: a problem here drops only this field (one "latest_ignored" line
+    // with the reason), the links above still count. Apps before 0.8.5 skip the key (they read only the keys they know).
+    if ('latest' in j) {
+        var why = '', lv = j.latest, e;
+        if (lv === null || typeof lv !== 'object' || Array.isArray(lv)) why = 'latest: not an object';
+        else if (Object.prototype.hasOwnProperty.call(lv, plat)) {
+            e = lv[plat];
+            if (e === null || typeof e !== 'object' || Array.isArray(e)) why = 'latest.' + plat + ': not an object';
+            else if (typeof e.version !== 'string' || !/^[0-9]{1,6}(\.[0-9]{1,6}){1,3}$/.test(e.version)) why = 'latest.' + plat + '.version';
+            else if (!releaseUrl(e.url)) why = 'latest.' + plat + '.url';
+            else out.push('latest\t' + e.version + '\t' + e.url);
+        }
+        if (why) out.push('latest_ignored\t' + why);
+    }
     return out.join('\n');
+}
+
+// The release page the notice opens: https on github.com/ameliaaura/uareforged or uareforged.pages.dev only, plain
+// path characters, no "." or ".." segments, no query, no port.
+function releaseUrl(u) {
+    if (typeof u !== 'string' || u.length > 300) return false;
+    var m = /^https:\/\/(github\.com\/ameliaaura\/uareforged|uareforged\.pages\.dev)((\/[A-Za-z0-9._~-]*)*)(#[A-Za-z0-9_-]*)?$/.exec(u);
+    if (!m) return false;
+    return !/\/\.{1,2}(\/|$)/.test(m[2]);
 }

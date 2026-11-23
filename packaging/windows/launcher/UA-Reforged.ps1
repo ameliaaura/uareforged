@@ -28,7 +28,9 @@
 #
 # Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup, UA_CAMPAIGN=base|ghor|taer skips the
 # launcher (and, without UA_STATS_AUTO, the stats question), UA_DATA_DIR=<folder> uses that folder instead of
-# %LOCALAPPDATA%\UA Reforged.
+# %LOCALAPPDATA%\UA Reforged, UA_LINKS_FILE=<file> reads that file instead of the site's links.json,
+# UA_UPDATE_AUTO=download|later|skip answers the new-version notice (Update-Check in downloads.ps1: when links.json
+# names a newer Windows version, one dialog before the game starts; offline or anything odd: no dialog, no wait).
 # Arguments go to the engine. "-UaPurge" (used by the uninstaller) removes %LOCALAPPDATA%\UA Reforged safely.
 # "-UaQuest" (the Start menu shortcut "Install UA Reforged VR on my Quest") runs only "Install on my Quest" (quest.ps1);
 # the first-launch dialog and the launcher have an "Install on my Quest" button, a Meta Quest plugged in at launch is
@@ -80,6 +82,10 @@ $questAsked = (([Windows.Forms.Control]::ModifierKeys -band [Windows.Forms.Keys]
 $script:GAME = ''
 if ($env:UA_GAME_DIR) { $script:GAME = $env:UA_GAME_DIR }
 elseif ([IO.File]::Exists($CONF)) { $script:GAME = ([IO.File]::ReadAllText($CONF)).Trim() }
+
+# the site's links.json, read once per start in the background (the setup, the pack, the Quest install and the
+# new-version notice all use that one read)
+Links-Prefetch ((Is-GameDir $script:GAME) -and [IO.Directory]::Exists((Join-Path $PACK 'hd-models')))
 
 try {
     # the Start menu shortcut: only "Install on my Quest" (the game folder, if any, is offered for copying)
@@ -192,6 +198,9 @@ try {
     if ((-not $env:UA_NOTICE_AUTO -and -not $env:UA_DIALOG_SNAP) -and (Ask $msg 'OK' @('Show log in Explorer', 'OK')) -eq 'Show log in Explorer') { Show-InExplorer $LOG }
     exit 1
 }
+
+# a newer UA Reforged is out (links.json "latest"): one small notice, then the game starts either way
+try { Update-Check } catch { Log "update check: $_" }
 
 $engineArgs = @($args | Where-Object { $_ -ne '-UaQuest' })
 if ($campaign -eq 'ghor') { $engineArgs = @('-env', 'Ghor_env') + $engineArgs }

@@ -35,8 +35,13 @@
 # usage-stats.txt next to launcher.log; the game (UA_SETTINGS_DIR) does the sending.
 #
 # Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup,
-# UA_CAMPAIGN=base|ghor|taer skips the launcher (and, without UA_STATS_AUTO, the stats question). Arguments go to
-# the engine.
+# UA_CAMPAIGN=base|ghor|taer skips the launcher (and, without UA_STATS_AUTO, the stats question),
+# UA_LINKS_FILE=<file> reads that file instead of the site's links.json, UA_UPDATE_AUTO=download|later|skip answers
+# the new-version notice. Arguments go to the engine.
+#
+# New-version notice (update_check in downloads.sh): when links.json names a newer Mac version than this app, one
+# dialog before the game starts (Download / Later / Don't remind me for this version). Offline or anything odd: no
+# dialog, no wait.
 
 CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="$CONTENTS/MacOS/UA_source"
@@ -75,6 +80,9 @@ GAME="${UA_GAME_DIR:-}"
 . "$CONTENTS/Resources/downloads.sh"
 # "Install on my Quest": UA Reforged VR onto a Meta Quest over USB
 . "$CONTENTS/Resources/quest.sh"
+# the site's links.json, read once per start in the background (the setup, the pack, the Quest install and the
+# new-version notice all use that one read)
+links_prefetch
 # no game folder yet: "Set up UA Reforged" (the game + the Reforge pack in one step, or your own folder)
 setup_first
 [ -n "${UA_GAME_DIR:-}" ] || printf '%s\n' "$GAME" > "$CONF"
@@ -141,6 +149,9 @@ esac
 
 # no network side features in this build
 unset UA_RADIO UA_RADIO_LLM
+
+# a newer UA Reforged is out (links.json "latest"): one small notice, then the game starts either way
+update_check
 
 cd "$RUN" || fail "UA Reforged could not open its game folder."
 echo "campaign=$campaign"

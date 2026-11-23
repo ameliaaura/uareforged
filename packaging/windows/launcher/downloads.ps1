@@ -29,7 +29,8 @@
 # the notices (and opens no browser); UA_PLAY_AUTO=play|quest|pack|quit answers the launcher once (UA_CAMPAIGN skips
 # it); UA_PACK_NOUI=1 shows no progress window. UA_DIALOG_SNAP=<folder> saves every dialog and progress window as a
 # PNG there and answers each dialog with its default button (opens no browser). UA_TEST_CANCEL_MB=<n> presses Cancel
-# once a download passes n MB.
+# once a download passes n MB. UA_LINKS_FILE=<file> reads that file instead of links.json (no request);
+# UA_UPDATE_AUTO=download|later|skip answers the new-version notice.
 
 # ---------------------------------------------------------------- shared helpers (also used by UA-Reforged.ps1)
 function Log([string]$msg) {
@@ -293,7 +294,7 @@ function Open-Help([string]$url) {
 # ---------------------------------------------------------------- links: built-in values, then the site's links.json
 # Test-LinksJson <file> <allowed hosts> <allow local http>: the Windows twin of packaging/macos/links.js.
 # Returns "key<TAB>value" lines; throws (the reason) on any problem, and then the WHOLE file is ignored.
-function Test-LinksJson([string]$path, [string[]]$hosts, [bool]$local) {
+function Test-LinksJson([string]$path, [string[]]$hosts, [bool]$local, [string]$plat = 'windows') {
     $bytes = [IO.File]::ReadAllBytes($path)
     if ($bytes.Length -gt 16384) { throw 'missing or too big' }
     try { $text = (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes) } catch { throw 'not UTF-8 text' }
@@ -372,7 +373,64 @@ function Test-LinksJson([string]$path, [string[]]$hosts, [bool]$local) {
         if (-not (& $isSha $g['sha256'])) { throw "$k.sha256" }
         $out.Add("$k`t$u`t" + ([long]$g['bytes']).ToString($script:INV) + "`t" + $g['sha256'])
     }
+    # latest: the newest version per platform, for the new-version notice at start-up (as links.js):
+    #   "latest": {"windows": {"version": "0.8.5", "url": "https://github.com/ameliaaura/uareforged/releases/tag/v0.8.5"}, ...}
+    # Checked on its own: a problem here drops only this field (one "latest_ignored" line with the reason); the links
+    # above still count. Apps before 0.8.5 skip the key (they read only the keys they know).
+    if ($props.ContainsKey('latest')) {
+        $why = ''; $lv = $props['latest']
+        if ($null -eq $lv -or $lv -isnot [Management.Automation.PSCustomObject]) { $why = 'latest: not an object' }
+        else {
+            $e = $lv.PSObject.Properties | Where-Object { $_.Name -ceq $plat } | Select-Object -First 1
+            if ($e) {
+                $e = $e.Value
+                if ($null -eq $e -or $e -isnot [Management.Automation.PSCustomObject]) { $why = "latest.${plat}: not an object" }
+                else {
+                    $ev = $e.PSObject.Properties['version']; $eu = $e.PSObject.Properties['url']
+                    if (-not $ev -or $ev.Value -isnot [string] -or $ev.Value -cnotmatch '^[0-9]{1,6}(\.[0-9]{1,6}){1,3}\z') { $why = "latest.$plat.version" }
+                    elseif (-not $eu -or -not (Test-ReleaseUrl $eu.Value)) { $why = "latest.$plat.url" }
+                    else { $out.Add("latest`t" + $ev.Value + "`t" + $eu.Value) }
+                }
+            }
+        }
+        if ($why) { $out.Add("latest_ignored`t$why") }
+    }
     return $out.ToArray()
+}
+
+# Test-ReleaseUrl <url>: the release page the notice opens: https on github.com/ameliaaura/uareforged or
+# uareforged.pages.dev only, plain path characters, no "." or ".." segments, no query, no port (as links.js).
+function Test-ReleaseUrl($u) {
+    if ($u -isnot [string] -or $u.Length -gt 300) { return $false }
+    $m = [regex]::Match($u, '^https://(github\.com/ameliaaura/uareforged|uareforged\.pages\.dev)((/[A-Za-z0-9._~-]*)*)(#[A-Za-z0-9_-]*)?\z')
+    if (-not $m.Success) { return $false }
+    return ($m.Groups[2].Value -notmatch '/\.{1,2}(/|$)')
+}
+
+# One read of links.json per start at most. The launcher starts it in the background (Links-Prefetch) as soon as it
+# knows the game folder; the setup, the pack, the Quest install and the new-version notice all use that one read.
+# A start with the game and the Reforge pack in place used to read nothing; it now reads links.json too (for the
+# notice) and says so with "?start" on the address, which the site does not count as a setup (docs/usage-stats.md).
+$script:LINKS_PRE = $null; $script:LINKS_PRE_SRC = ''
+$script:L_LATEST = ''; $script:L_LATEST_URL = ''
+function Links-Src { if ($env:UA_LINKS_URL) { return [string]$env:UA_LINKS_URL } return (Conf1 'links_url') }
+function Links-CurlArgs([string]$src, [string]$file) {
+    $proto = if ($env:UA_LINKS_ALLOW_LOCAL) { '=https,http' } else { '=https' }
+    return @('-fsSL', '--proto', $proto, '--proto-redir', $proto, '--max-time', '8', '--connect-timeout', '5',
+             '--max-filesize', '16384', '-A', $script:DL_UA, '-o', $file, $src)
+}
+function Links-Prefetch([bool]$startOnly) {
+    if ($script:LINKS_DONE -or $script:LINKS_PRE -or $env:UA_LINKS_FILE) { return }
+    if (-not [IO.File]::Exists($script:DL_CONF) -or -not [IO.File]::Exists($script:CURL)) { return }
+    $src = Links-Src
+    if (-not $src) { return }
+    if ($startOnly) { if ($src.Contains('?')) { $src += '&start' } else { $src += '?start' } }
+    $pre = Join-Path $SUPPORT 'links.json.pre'
+    try {
+        if ([IO.File]::Exists($pre)) { [IO.File]::Delete($pre) }
+        $script:LINKS_PRE = Start-Curl (Links-CurlArgs $src $pre) $false
+        $script:LINKS_PRE_SRC = $src
+    } catch { Log "links: could not start the read: $_"; $script:LINKS_PRE = $null }
 }
 
 function Links-Load {
@@ -380,20 +438,30 @@ function Links-Load {
     $script:L_PACK_URL = Conf1 'url'; $script:L_PACK_PARTS = @(Conf 'part')
     $script:L_HELP = Conf1 'help_url'; $script:L_PACK_HELP = Conf1 'pack_help_url'; $script:L_MESSAGE = ''
     $script:L_QUEST_APK_URL = ''; $script:L_QUEST_APK = ''; $script:L_QUEST_HELP = ''; $script:L_ADB_WIN = ''
-    $src = if ($env:UA_LINKS_URL) { $env:UA_LINKS_URL } else { Conf1 'links_url' }
+    $script:L_LATEST = ''; $script:L_LATEST_URL = ''
+    $src = Links-Src
     $tmp = Join-Path $SUPPORT 'links.json.tmp'
     $allow = @(Conf 'allow_host')
     $loc = [bool]$env:UA_LINKS_ALLOW_LOCAL
-    $proto = if ($loc) { '=https,http' } else { '=https' }
     if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) }
     $rc = 1
-    if ($src) {
-        $rc = Run-Curl @('-fsSL', '--proto', $proto, '--proto-redir', $proto, '--max-time', '8', '--connect-timeout', '5',
-                         '--max-filesize', '16384', '-A', $script:DL_UA, '-o', $tmp, $src) $null
+    if ($env:UA_LINKS_FILE) {
+        $src = "$env:UA_LINKS_FILE (test file)"
+        try { [IO.File]::Copy($env:UA_LINKS_FILE, $tmp, $true); $rc = 0 } catch { $rc = 1 }
+    } elseif ($script:LINKS_PRE) {
+        # the read started at launch (Links-Prefetch)
+        $src = $script:LINKS_PRE_SRC
+        while (-not $script:LINKS_PRE.HasExited) { Pump; Start-Sleep -Milliseconds 50 }
+        $script:LINKS_PRE.WaitForExit(); $rc = $script:LINKS_PRE.ExitCode; $script:LINKS_PRE = $null
+        $pre = Join-Path $SUPPORT 'links.json.pre'
+        if ($rc -eq 0 -and [IO.File]::Exists($pre)) { [IO.File]::Copy($pre, $tmp, $true) } else { $rc = 1 }
+        if ([IO.File]::Exists($pre)) { [IO.File]::Delete($pre) }
+    } elseif ($src) {
+        $rc = Run-Curl (Links-CurlArgs $src $tmp) $null
     }
     if ($rc -eq 0 -and [IO.File]::Exists($tmp)) {
         try {
-            $lines = Test-LinksJson $tmp $allow $loc
+            $lines = Test-LinksJson $tmp $allow $loc 'windows'
             $parts = New-Object System.Collections.Generic.List[string]
             foreach ($l in $lines) {
                 $i = $l.IndexOf("`t"); $k = $l.Substring(0, $i); $v = $l.Substring($i + 1)
@@ -403,6 +471,8 @@ function Links-Load {
                     'part' { $parts.Add($v) }
                     'quest_apk_url' { $script:L_QUEST_APK_URL = $v } 'quest_apk' { $script:L_QUEST_APK = $v }
                     'quest_help_url' { $script:L_QUEST_HELP = $v } 'adb_win' { $script:L_ADB_WIN = $v }
+                    'latest' { $j = $v.IndexOf("`t"); $script:L_LATEST = $v.Substring(0, $j); $script:L_LATEST_URL = $v.Substring($j + 1) }
+                    'latest_ignored' { Log "links: $v (ignored; no new-version notice)" }
                 }
             }
             if ($parts.Count -gt 0) { $script:L_PACK_PARTS = $parts.ToArray() }
@@ -420,6 +490,62 @@ function Links-Load {
     if ($env:UA_PACK_URL) { $script:L_PACK_URL = $env:UA_PACK_URL }
     if ($script:L_PACK_URL -and -not $script:L_PACK_URL.EndsWith('/')) { $script:L_PACK_URL += '/' }
     $script:LINKS_DONE = $true
+}
+
+# ---------------------------------------------------------------- the new-version notice (every start)
+# Compare-Version <a> <b>: -1, 0 or 1. Up to four numeric parts, missing parts count as 0 (0.8.4 = 0.8.4.0 < 0.8.4.1 < 0.8.5).
+function Compare-Version([string]$a, [string]$b) {
+    $x = $a.Split('.'); $y = $b.Split('.')
+    for ($i = 0; $i -lt 4; $i++) {
+        $p = [long]0; $q = [long]0
+        if ($i -lt $x.Count) { $p = [long]::Parse($x[$i], $script:INV) }
+        if ($i -lt $y.Count) { $q = [long]::Parse($y[$i], $script:INV) }
+        if ($p -lt $q) { return -1 }
+        if ($p -gt $q) { return 1 }
+    }
+    return 0
+}
+function Is-Version([string]$v) { return ($v -cmatch '^[0-9]{1,6}(\.[0-9]{1,6}){1,3}\z') }
+
+# Update-Check: just before the game starts. When links.json names a newer Windows version than this app (app_version
+# in downloads.txt, written by build-windows.sh), one dialog: Download (opens the release page in the browser) / Later /
+# Don't remind me for this version (kept in update-skip.txt; a newer version asks again). Anything missing, late
+# (links.json not read within 2 s of this point), invalid or not newer: no dialog, no delay, the game starts.
+# Test runs: UA_UPDATE_AUTO=download|later|skip answers the dialog (and opens no browser).
+function Update-Check {
+    $mine = Conf1 'app_version'
+    if (-not (Is-Version $mine)) { Log 'update check: this build has no version'; return }
+    if (-not $script:LINKS_DONE -and $script:LINKS_PRE) {
+        $t0 = [DateTime]::UtcNow
+        while (-not $script:LINKS_PRE.HasExited -and ([DateTime]::UtcNow - $t0).TotalMilliseconds -lt 2000) { Start-Sleep -Milliseconds 50 }
+        if (-not $script:LINKS_PRE.HasExited) {
+            try { $script:LINKS_PRE.Kill() } catch { }
+            $script:LINKS_PRE = $null
+            Log 'update check: links.json is slow to answer; skipped'; return
+        }
+    }
+    if (-not $script:LINKS_DONE) { Links-Load }
+    if (-not $script:L_LATEST) { Log 'update check: no version information'; return }
+    if ((Compare-Version $script:L_LATEST $mine) -le 0) { Log "update check: $mine is up to date (latest $($script:L_LATEST))"; return }
+    $skipFile = Join-Path $SUPPORT 'update-skip.txt'
+    $skip = ''
+    try { if ([IO.File]::Exists($skipFile)) { $skip = ([IO.File]::ReadAllLines($skipFile) | Select-Object -First 1) } } catch { }
+    if ($skip) { $skip = $skip.Trim() }
+    if ((Is-Version $skip) -and (Compare-Version $script:L_LATEST $skip) -le 0) { Log "update check: $($script:L_LATEST) is out; not reminding (skipped)"; return }
+    $dl = 'Download'; $later = 'Later'; $never = "Don't remind me for this version"
+    $b = '' + $env:UA_UPDATE_AUTO
+    if ($b) {
+        Log "update check: $($script:L_LATEST) is out (this app $mine); test answer $b"
+    } else {
+        $b = Ask ("A new version of UA Reforged ($($script:L_LATEST)) is out.`r`n`r`nYou have version $mine. Download opens the download page in your browser. The game starts either way.") $dl @($never, $later, $dl)
+        Log "update check: $($script:L_LATEST) is out (this app $mine); chose [$(if ($b) { $b } else { 'closed' })]"
+    }
+    if ($b -eq $dl -or $b -eq 'download') {
+        if ($env:UA_UPDATE_AUTO -or $env:UA_DIALOG_SNAP) { Log "update page: $($script:L_LATEST_URL) (test run: not opened)" }
+        else { Log "update page: $($script:L_LATEST_URL)"; try { Start-Process $script:L_LATEST_URL } catch { Log "could not open the browser: $_" } }
+    } elseif ($b -eq $never -or $b -eq 'skip') {
+        try { [IO.File]::WriteAllText($skipFile, $script:L_LATEST + "`r`n"); Log "update check: no reminder for $($script:L_LATEST)" } catch { Log "update check: could not save the answer: $_" }
+    }
 }
 
 # ---------------------------------------------------------------- curl.exe (Windows 10 1803+ / 11)

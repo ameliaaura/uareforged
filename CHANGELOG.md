@@ -8,6 +8,12 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [0.8.5] - Desktop - not yet released
 
+### Added
+- **Desktop: a short notice when a new version is out.** At start-up the app checks the small links file it already
+  reads from the UA Reforged site; when a newer version is listed there, one dialog says so before the game starts:
+  Download (opens the download page in your browser), Later, or Don't remind me for this version. Offline or
+  anything unexpected: no notice and no wait. The check sends nothing about you or your game.
+
 ### Changed
 - **Desktop: the game speed no longer depends on the frame rate.** The game used to run faster the higher the
   frame rate (about 8 % at 144 fps, 17 % at 240 fps, twice as fast at 1000 fps), which is why it was held at

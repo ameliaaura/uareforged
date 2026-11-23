@@ -94,7 +94,12 @@ After the pack is zipped:
    commit, and rebuild (step 2). Re-check every checksum.
 3. Tag the release commit `v<version>` and create the GitHub release with the notes, the app files, `SHA256SUMS`
    and, for the Quest, the APK. The GPL source is the tagged commit (each app's `SOURCE.txt` names this repository).
-4. Update the site's Downloads page (addresses, checksums, sizes) and `release/links.json`.
+4. Update the site's Downloads page (addresses, checksums, sizes) and `release/links.json`. Set `latest` in
+   links.json to the new version for each platform that got it (`"latest": {"mac": {"version": "<version>",
+   "url": "<download page>"}, "windows": {...}, "linux": {...}}`), **only once its files are downloadable**: from
+   then on, desktop apps older than that version show a "new version" notice at start-up. The url must be https on
+   `github.com/ameliaaura/uareforged` or `uareforged.pages.dev`; anything else is ignored (the rest of the file
+   still counts). Apps before 0.8.5 ignore the key.
 5. Download every asset from its public link, check the SHA-256, and run a fresh first launch once more.
 
 ## 6. After the release

@@ -25,7 +25,8 @@
 # the notices (and opens no browser); UA_PLAY_AUTO=play|quest|pack|quit answers the launcher once (UA_CAMPAIGN skips
 # it); UA_PACK_NOUI=1 shows no progress window; UA_DIALOG_SNAP=<folder> saves each setup/launcher dialog as a PNG
 # there and answers it with its default (the usage stats question: dismissed = no); UA_STATS_AUTO=yes|no|dismiss
-# answers the usage stats question.
+# answers the usage stats question. UA_LINKS_FILE=<file> reads that file instead of links.json (no request);
+# UA_UPDATE_AUTO=download|later|skip answers the new-version notice.
 
 DL_CONF="$CONTENTS/Resources/downloads.txt"
 PACK_DL="$SUPPORT/reforge-pack-download"
@@ -78,27 +79,65 @@ open_help() {
 }
 
 # ---------------------------------------------------------------- links: built-in values, then the site's links.json
+# One read of links.json per start at most. The launcher starts it in the background (links_prefetch) as soon as it
+# knows the game folder; the setup, the pack, the Quest install and the new-version notice all use that one read.
+# A start with the game and the Reforge pack in place used to read nothing; it now reads links.json too (for the
+# notice) and says so with "?start" on the address, which the site does not count as a setup (docs/usage-stats.md).
+links_src() { printf '%s' "${UA_LINKS_URL:-$(conf links_url | head -1)}"; }
+links_curl() { # links_curl <url> <file>: the one request (the same limits as always)
+    local proto="=https"; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && proto="=https,http"
+    ${LINKS_EXEC:+exec} /usr/bin/curl -fsSL --proto "$proto" --proto-redir "$proto" --max-time 8 --connect-timeout 5 \
+        --max-filesize 16384 -A "$DL_UA" -o "$2" "$1" </dev/null 2>/dev/null
+}
+links_prefetch() {
+    [ -n "${LINKS_DONE:-}${LINKS_PRE_SRC:-}" ] && return 0
+    [ -f "$DL_CONF" ] || return 0
+    [ -n "${UA_LINKS_FILE:-}" ] && return 0   # test runs: a local file, read by links_load
+    local src; src="$(links_src)"; [ -n "$src" ] || return 0
+    if is_game_dir "$GAME" && [ -d "$PACK/hd-models" ]; then
+        case "$src" in *\?*) src="$src&start" ;; *) src="$src?start" ;; esac
+    fi
+    LINKS_PRE_SRC="$src"
+    rm -f "$SUPPORT/links.json.pre"
+    ( LINKS_EXEC=1 links_curl "$src" "$SUPPORT/links.json.pre" ) &   # (exec: the job is curl itself)
+    LINKS_PRE_PID=$!
+}
+links_pre_wait() { # the background read is over (or this waits for it): LINKS_PRE_RC = curl's exit code
+    [ -n "${LINKS_PRE_PID:-}" ] || return 0
+    wait "$LINKS_PRE_PID" 2>/dev/null; LINKS_PRE_RC=$?; LINKS_PRE_PID=""
+}
 links_load() {
     L_GAME_URL="$(conf game_url | head -1)"; L_GAME_MIN="$(conf game_min_bytes | head -1)"
     L_GAME_MAX="$(conf game_max_bytes | head -1)"
     L_PACK_URL="$(conf url | head -1)"; L_PACK_PARTS="$(conf part)"
     L_HELP="$(conf help_url | head -1)"; L_PACK_HELP="$(conf pack_help_url | head -1)"; L_MESSAGE=""
-    L_QUEST_APK_URL=""; L_QUEST_APK=""; L_QUEST_HELP=""; L_ADB_MAC=""
-    local src="${UA_LINKS_URL:-$(conf links_url | head -1)}" tmp="$SUPPORT/links.json.tmp" out proto="=https"
+    L_QUEST_APK_URL=""; L_QUEST_APK=""; L_QUEST_HELP=""; L_ADB_MAC=""; L_LATEST=""; L_LATEST_URL=""
+    local src tmp="$SUPPORT/links.json.tmp" out ok=1
     local allow; allow="$(conf allow_host | tr '\n' ' ')"
-    local loc=0; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && { loc=1; proto="=https,http"; }
+    local loc=0; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && loc=1
     rm -f "$tmp"
-    if [ -n "$src" ] && /usr/bin/curl -fsSL --proto "$proto" --proto-redir "$proto" --max-time 8 --connect-timeout 5 \
-            --max-filesize 16384 -A "$DL_UA" -o "$tmp" "$src" </dev/null 2>/dev/null; then
-        if out="$(/usr/bin/osascript -l JavaScript "$CONTENTS/Resources/links.js" "$tmp" "$allow" "$loc" 2>&1)"; then
-            local k v parts=""
-            while IFS="$(printf '\t')" read -r k v; do
+    if [ -n "${UA_LINKS_FILE:-}" ]; then
+        src="$UA_LINKS_FILE (test file)"; cp "$UA_LINKS_FILE" "$tmp" 2>/dev/null && ok=0
+    elif [ -n "${LINKS_PRE_SRC:-}" ]; then
+        src="$LINKS_PRE_SRC"; links_pre_wait
+        [ "${LINKS_PRE_RC:-1}" = 0 ] && [ -f "$SUPPORT/links.json.pre" ] && mv -f "$SUPPORT/links.json.pre" "$tmp" && ok=0
+        rm -f "$SUPPORT/links.json.pre"
+    else
+        src="$(links_src)"; [ -n "$src" ] && links_curl "$src" "$tmp" && ok=0
+    fi
+    if [ $ok = 0 ]; then
+        if out="$(/usr/bin/osascript -l JavaScript "$CONTENTS/Resources/links.js" "$tmp" "$allow" "$loc" mac 2>&1)"; then
+            local k v w parts=""
+            while IFS="$(printf '\t')" read -r k v w; do
+                [ -n "$w" ] && [ "$k" != latest ] && v="$v"$'\t'"$w"
                 case "$k" in
                     game_url) L_GAME_URL="$v" ;; game_min_bytes) L_GAME_MIN="$v" ;; pack_url) L_PACK_URL="$v" ;;
                     help_url) L_HELP="$v" ;; pack_help_url) L_PACK_HELP="$v" ;; message) L_MESSAGE="$v" ;;
                     quest_apk_url) L_QUEST_APK_URL="$v" ;; quest_apk) L_QUEST_APK="$v" ;; quest_help_url) L_QUEST_HELP="$v" ;;
                     adb_mac) L_ADB_MAC="$v" ;;
                     part) parts="$parts$v"$'\n' ;;
+                    latest) L_LATEST="$v"; L_LATEST_URL="$w" ;;
+                    latest_ignored) echo "links: $v (ignored; no new-version notice)" ;;
                 esac
             done <<< "$out"
             [ -n "$parts" ] && L_PACK_PARTS="${parts%$'\n'}"
@@ -116,6 +155,57 @@ links_load() {
     [ -n "${UA_QUEST_APK_URL:-}" ] && L_QUEST_APK_URL="$UA_QUEST_APK_URL"
     case "$L_PACK_URL" in */) ;; *) L_PACK_URL="$L_PACK_URL/" ;; esac
     LINKS_DONE=1
+}
+
+# ---------------------------------------------------------------- the new-version notice (every start)
+# ver_cmp <a> <b>: prints -1, 0 or 1. Up to four numeric parts, missing parts count as 0 (0.8.4 = 0.8.4.0 < 0.8.4.1 < 0.8.5).
+ver_cmp() {
+    awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, "."); r = 0
+        for (i = 1; i <= 4; i++) { p = (i <= n) ? x[i] + 0 : 0; q = (i <= m) ? y[i] + 0 : 0
+            if (p < q) { r = -1; break } if (p > q) { r = 1; break } }
+        print r }'
+}
+# update_check: just before the game starts. When links.json names a newer version for the Mac than this app (app_version
+# in downloads.txt, written by build-mac.sh), one dialog: Download (opens the release page in the browser) / Later /
+# Don't remind me for this version (kept in update-skip.txt; a newer version asks again). Anything missing, late
+# (links.json not read within 2 s of this point), invalid or not newer: no dialog, no delay, the game starts.
+# Test runs: UA_UPDATE_AUTO=download|later|skip answers the dialog (and opens no browser).
+UPDATE_SKIP="$SUPPORT/update-skip.txt"
+update_check() {
+    local mine; mine="$(conf app_version | head -1)"
+    case "$mine" in ''|*[!0-9.]*) echo "update check: this build has no version"; return 0 ;; esac
+    if [ -z "${LINKS_DONE:-}" ] && [ -n "${LINKS_PRE_PID:-}" ]; then
+        # at most 2 s more for the background read: a watchdog stops it after that
+        ( sleep 2; kill "$LINKS_PRE_PID" 2>/dev/null ) & local dog=$!
+        links_pre_wait
+        kill "$dog" 2>/dev/null; wait "$dog" 2>/dev/null
+        if [ "${LINKS_PRE_RC:-0}" -gt 128 ]; then
+            rm -f "$SUPPORT/links.json.pre"; LINKS_PRE_SRC=""
+            echo "update check: links.json is slow to answer; skipped"; return 0
+        fi
+    fi
+    [ -n "${LINKS_DONE:-}" ] || links_load
+    [ -n "${L_LATEST:-}" ] || { echo "update check: no version information"; return 0; }
+    if [ "$(ver_cmp "$L_LATEST" "$mine")" != 1 ]; then echo "update check: $mine is up to date (latest $L_LATEST)"; return 0; fi
+    local skip; skip="$(head -1 "$UPDATE_SKIP" 2>/dev/null)"
+    case "$skip" in ''|*[!0-9.]*) skip="" ;; esac
+    if [ -n "$skip" ] && [ "$(ver_cmp "$L_LATEST" "$skip")" != 1 ]; then echo "update check: $L_LATEST is out; not reminding (skipped)"; return 0; fi
+    local b="${UA_UPDATE_AUTO:-}" dl="Download" later="Later" never="Don't remind me for this version"
+    if [ -n "$b" ]; then
+        echo "update check: $L_LATEST is out (this app $mine); test answer $b"
+    else
+        b="$(ask "A new version of UA Reforged ($L_LATEST) is out.
+
+You have version $mine. Download opens the download page in your browser. The game starts either way." "$dl" "$never" "$later" "$dl")"
+        echo "update check: $L_LATEST is out (this app $mine); chose [${b:-closed}]"
+    fi
+    case "$b" in
+        "$dl"|download)
+            if [ -n "${UA_UPDATE_AUTO:-}" ]; then echo "update page: $L_LATEST_URL (test run: not opened)"
+            else echo "update page: $L_LATEST_URL"; /usr/bin/open "$L_LATEST_URL"; fi ;;
+        "$never"|skip) printf '%s\n' "$L_LATEST" > "$UPDATE_SKIP"; echo "update check: no reminder for $L_LATEST" ;;
+    esac
+    return 0
 }
 
 # ---------------------------------------------------------------- progress window + cancel

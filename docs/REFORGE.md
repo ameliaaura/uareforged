@@ -28,6 +28,22 @@ the `allow_host` list of `downloads.txt`); one bad value rejects the whole file 
 values are used. Testing: `UA_LINKS_URL`, `UA_GAME_URL`, `UA_PACK_URL` (other addresses),
 `UA_GAME_AUTO=get`, `UA_PACK_AUTO=yes|no`, `UA_NOTICE_AUTO=help|folder|later`, `UA_PACK_NOUI=1`.
 
+**New-version notice (desktop, from 0.8.5).** The app reads links.json once per start, in the background from
+the moment it knows the game folder (the setup, the pack and the Quest install use that same read). Its optional
+`latest` field names the newest version per platform:
+`"latest": {"mac": {"version": "0.8.5", "url": "https://uareforged.pages.dev/downloads/"}, "windows": {...}, "linux": {...}}`.
+`version` = 2 to 4 numbers (`0.8.5`, `0.8.4.1`; compared part by part, missing parts = 0), `url` = https on
+`github.com/ameliaaura/uareforged` or `uareforged.pages.dev` only (no port, query, `.`/`..` segments). A bad `latest`
+is dropped on its own (logged `latest_ignored`); the rest of the file still counts. Older apps skip the key. When
+the version is newer than the app's own (`app_version`, written into `downloads.txt` by the build script), one
+dialog before the game starts: Download (opens the url) / Later / Don't remind me for this version
+(`update-skip.txt` in the app's support folder; a newer version asks again). Offline, a bad file, a missing field,
+the same or an older version, or links.json not read within 2 s of that point: no dialog, the game starts. A start
+with the game and the Reforge pack in place asks for `links.json?start` (the site does not count it as a setup).
+Testing: `UA_LINKS_FILE=<file>` (a local links.json, no request), `UA_UPDATE_AUTO=download|later|skip` (answers the
+dialog, opens no browser); tests `tests/launcher/update_notice_test.sh` (Mac, CI) and `update_notice_test.ps1`
+(Windows PowerShell 5.1).
+
 The campaign map always shows the 1998 picture (the pack carries no campaign-map pictures).
 
 ## Graphics presets
