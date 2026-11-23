@@ -14,9 +14,16 @@
 // sheet). MTL directives, after map_Kd:
 //   ua_flipbook <cols> <rows> <frame> <frame> ...      sequence of cell 0
 //   ua_flipbook_cell <cell> <frame> <frame> ...        sequence of another cell
-//   frame = <cell>:<ms>[:h|v|hv]   cell = row-major index in the cols x rows
+//   frame = <cell>:<ms>[:h|v|hv][r<deg>]   cell = row-major index in the cols x rows
 //                                  grid of map_Kd (row 0 = top of the image),
-//                                  ms = hold time, h/v = mirror inside the cell
+//                                  ms = hold time, h/v = mirror inside the cell,
+//                                  r<deg> = turn the picture by <deg> degrees about
+//                                  the cell centre (after the mirrors): the 1998
+//                                  rotor-blur trick (PROP1.ANM etc. turn one sprite
+//                                  in 45 / 90 degree steps every 40 ms). Only for
+//                                  round pictures with an empty border: the turned
+//                                  corners read outside the cell. Engines without
+//                                  r ignore it (static frame).
 // A face belongs to the group of the cell its static UVs address (centroid);
 // every group runs its own looping sequence, so ONE material (one draw call)
 // carries many independently flickering sheets (the original gives each arc
@@ -37,6 +44,7 @@ public:
         int32_t cell = 0;
         bool mirU = false;
         bool mirV = false;
+        float rot = 0.0f;   // degrees, about the cell centre
     };
     typedef std::map<int, std::vector<Frame> > Groups; // static cell -> sequence
 
