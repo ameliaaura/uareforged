@@ -30,7 +30,8 @@
 # it); UA_PACK_NOUI=1 shows no progress window. UA_DIALOG_SNAP=<folder> saves every dialog and progress window as a
 # PNG there and answers each dialog with its default button (opens no browser). UA_TEST_CANCEL_MB=<n> presses Cancel
 # once a download passes n MB. UA_LINKS_FILE=<file> reads that file instead of links.json (no request);
-# UA_UPDATE_AUTO=download|later|skip answers the new-version notice.
+# UA_UPDATE_AUTO=update|download|later|skip answers the new-version notice. A build with test hooks (UA_TEST_HOOKS=ON)
+# also accepts updates signed with the test key (update_key_test in downloads.txt); release builds never carry it.
 
 # ---------------------------------------------------------------- shared helpers (also used by UA-Reforged.ps1)
 function Log([string]$msg) {
@@ -389,13 +390,38 @@ function Test-LinksJson([string]$path, [string[]]$hosts, [bool]$local, [string]$
                     $ev = $e.PSObject.Properties['version']; $eu = $e.PSObject.Properties['url']
                     if (-not $ev -or $ev.Value -isnot [string] -or $ev.Value -cnotmatch '^[0-9]{1,6}(\.[0-9]{1,6}){1,3}\z') { $why = "latest.$plat.version" }
                     elseif (-not $eu -or -not (Test-ReleaseUrl $eu.Value)) { $why = "latest.$plat.url" }
-                    else { $out.Add("latest`t" + $ev.Value + "`t" + $eu.Value) }
+                    else {
+                        $out.Add("latest`t" + $ev.Value + "`t" + $eu.Value)
+                        # update (0.8.5 and later): the signed one-click update for this platform. Only its shape is
+                        # checked here; Update-Verify checks the signature, the manifest and the file. A bad one drops
+                        # only the update.
+                        $up = $e.PSObject.Properties['update']
+                        if ($up) {
+                            $uw = Test-UpdateShape $up.Value $local
+                            if ($uw) { $out.Add("latest_update_ignored`tlatest.$plat.update$uw") }
+                            else { $out.Add("latest_update`t" + $up.Value.url + "`t" + $up.Value.manifest + "`t" + $up.Value.sig) }
+                        }
+                    }
                 }
             }
         }
         if ($why) { $out.Add("latest_ignored`t$why") }
     }
     return $out.ToArray()
+}
+
+# Test-UpdateShape <update> <allow local>: "update": {"url": "<file>", "manifest": "<base64>", "sig": "<base64>"} (as
+# links.js updateWhy): the file on the release page (or http://127.0.0.1 in test runs). '' when the shape is fine.
+function Test-UpdateShape($u, [bool]$local) {
+    if ($null -eq $u -or $u -isnot [Management.Automation.PSCustomObject]) { return ': not an object' }
+    $g = @{}; foreach ($q in $u.PSObject.Properties) { $g[$q.Name] = $q.Value }
+    $url = $g['url']
+    $ok = (Test-ReleaseUrl $url) -and ($url -cmatch '/[A-Za-z0-9._-]+\.(zip|exe)\z')
+    if (-not $ok -and $local -and $url -is [string]) { $ok = $url -cmatch '^http://127\.0\.0\.1:[0-9]{1,5}(/[A-Za-z0-9._~-]+)+\.(zip|exe)\z' }
+    if (-not $ok) { return '.url' }
+    if ($g['manifest'] -isnot [string] -or $g['manifest'] -cnotmatch '^[A-Za-z0-9+/]{20,1024}={0,2}\z') { return '.manifest' }
+    if ($g['sig'] -isnot [string] -or $g['sig'] -cnotmatch '^[A-Za-z0-9+/]{20,200}={0,2}\z') { return '.sig' }
+    return ''
 }
 
 # Test-ReleaseUrl <url>: the release page the notice opens: https on github.com/ameliaaura/uareforged or
@@ -412,7 +438,7 @@ function Test-ReleaseUrl($u) {
 # A start with the game and the Reforge pack in place used to read nothing; it now reads links.json too (for the
 # notice) and says so with "?start" on the address, which the site does not count as a setup (docs/usage-stats.md).
 $script:LINKS_PRE = $null; $script:LINKS_PRE_SRC = ''
-$script:L_LATEST = ''; $script:L_LATEST_URL = ''
+$script:L_LATEST = ''; $script:L_LATEST_URL = ''; $script:L_UPD_URL = ''; $script:L_UPD_MAN = ''; $script:L_UPD_SIG = ''
 function Links-Src { if ($env:UA_LINKS_URL) { return [string]$env:UA_LINKS_URL } return (Conf1 'links_url') }
 function Links-CurlArgs([string]$src, [string]$file) {
     $proto = if ($env:UA_LINKS_ALLOW_LOCAL) { '=https,http' } else { '=https' }
@@ -438,7 +464,7 @@ function Links-Load {
     $script:L_PACK_URL = Conf1 'url'; $script:L_PACK_PARTS = @(Conf 'part')
     $script:L_HELP = Conf1 'help_url'; $script:L_PACK_HELP = Conf1 'pack_help_url'; $script:L_MESSAGE = ''
     $script:L_QUEST_APK_URL = ''; $script:L_QUEST_APK = ''; $script:L_QUEST_HELP = ''; $script:L_ADB_WIN = ''
-    $script:L_LATEST = ''; $script:L_LATEST_URL = ''
+    $script:L_LATEST = ''; $script:L_LATEST_URL = ''; $script:L_UPD_URL = ''; $script:L_UPD_MAN = ''; $script:L_UPD_SIG = ''
     $src = Links-Src
     $tmp = Join-Path $SUPPORT 'links.json.tmp'
     $allow = @(Conf 'allow_host')
@@ -473,6 +499,8 @@ function Links-Load {
                     'quest_help_url' { $script:L_QUEST_HELP = $v } 'adb_win' { $script:L_ADB_WIN = $v }
                     'latest' { $j = $v.IndexOf("`t"); $script:L_LATEST = $v.Substring(0, $j); $script:L_LATEST_URL = $v.Substring($j + 1) }
                     'latest_ignored' { Log "links: $v (ignored; no new-version notice)" }
+                    'latest_update' { $f3 = $v.Split("`t"); $script:L_UPD_URL = $f3[0]; $script:L_UPD_MAN = $f3[1]; $script:L_UPD_SIG = $f3[2] }
+                    'latest_update_ignored' { Log "links: $v (ignored; no one-click update)" }
                 }
             }
             if ($parts.Count -gt 0) { $script:L_PACK_PARTS = $parts.ToArray() }
@@ -508,10 +536,11 @@ function Compare-Version([string]$a, [string]$b) {
 function Is-Version([string]$v) { return ($v -cmatch '^[0-9]{1,6}(\.[0-9]{1,6}){1,3}\z') }
 
 # Update-Check: just before the game starts. When links.json names a newer Windows version than this app (app_version
-# in downloads.txt, written by build-windows.sh), one dialog: Download (opens the release page in the browser) / Later /
-# Don't remind me for this version (kept in update-skip.txt; a newer version asks again). Anything missing, late
+# in downloads.txt, written by build-windows.sh), one dialog: Update now / Later / Don't remind me for this version (kept
+# in update-skip.txt; a newer version asks again), with a "What's new" link (opens the release page, the dialog stays).
+# Without a one-click update in links.json the first button is Download (opens the release page). Anything missing, late
 # (links.json not read within 2 s of this point), invalid or not newer: no dialog, no delay, the game starts.
-# Test runs: UA_UPDATE_AUTO=download|later|skip answers the dialog (and opens no browser).
+# Test runs: UA_UPDATE_AUTO=update|download|later|skip answers the dialog (and opens no browser).
 function Update-Check {
     $mine = Conf1 'app_version'
     if (-not (Is-Version $mine)) { Log 'update check: this build has no version'; return }
@@ -532,20 +561,174 @@ function Update-Check {
     try { if ([IO.File]::Exists($skipFile)) { $skip = ([IO.File]::ReadAllLines($skipFile) | Select-Object -First 1) } } catch { }
     if ($skip) { $skip = $skip.Trim() }
     if ((Is-Version $skip) -and (Compare-Version $script:L_LATEST $skip) -le 0) { Log "update check: $($script:L_LATEST) is out; not reminding (skipped)"; return }
-    $dl = 'Download'; $later = 'Later'; $never = "Don't remind me for this version"
+    # update.ps1 just failed to install this version (it started this launcher again): not offered again this start
+    $failFile = Join-Path $SUPPORT 'update-failed.txt'
+    if ([IO.File]::Exists($failFile)) {
+        $fv = ''; try { $fv = ([IO.File]::ReadAllText($failFile)).Trim(); [IO.File]::Delete($failFile) } catch { }
+        if ($fv -eq $script:L_LATEST) { Log "update check: the update to $fv did not install just now; not asking again this start"; return }
+    }
+    $up = 'Update now'; $dl = 'Download'; $later = 'Later'; $never = "Don't remind me for this version"
+    $first = $up; $how = 'Update now downloads it, checks it and starts the new version.'
+    if (-not $script:L_UPD_URL) { $first = $dl; $how = 'Download opens the download page in your browser.' }
     $b = '' + $env:UA_UPDATE_AUTO
     if ($b) {
         Log "update check: $($script:L_LATEST) is out (this app $mine); test answer $b"
     } else {
-        $b = Ask ("A new version of UA Reforged ($($script:L_LATEST)) is out.`r`n`r`nYou have version $mine. Download opens the download page in your browser. The game starts either way.") $dl @($never, $later, $dl)
+        $news = "What's new in $($script:L_LATEST)"
+        $script:AskLinkText = $news; $script:AskLinkUrl = $script:L_LATEST_URL
+        try {
+            $b = (Ask-Ex "A new version of UA Reforged ($($script:L_LATEST)) is out." ("You have version $mine. $how Later starts the game now.`r`n`r`n$news") $first @($never, $later, $first) '' $false '' @() 0).Button
+        } finally { $script:AskLinkText = ''; $script:AskLinkUrl = '' }
         Log "update check: $($script:L_LATEST) is out (this app $mine); chose [$(if ($b) { $b } else { 'closed' })]"
     }
-    if ($b -eq $dl -or $b -eq 'download') {
-        if ($env:UA_UPDATE_AUTO -or $env:UA_DIALOG_SNAP) { Log "update page: $($script:L_LATEST_URL) (test run: not opened)" }
-        else { Log "update page: $($script:L_LATEST_URL)"; try { Start-Process $script:L_LATEST_URL } catch { Log "could not open the browser: $_" } }
+    if ($b -eq $up -or $b -eq 'update') {
+        if ($script:L_UPD_URL) { [void](Update-Apply $mine) } else { Update-Page }
+    } elseif ($b -eq $dl -or $b -eq 'download') {
+        Update-Page
     } elseif ($b -eq $never -or $b -eq 'skip') {
         try { [IO.File]::WriteAllText($skipFile, $script:L_LATEST + "`r`n"); Log "update check: no reminder for $($script:L_LATEST)" } catch { Log "update check: could not save the answer: $_" }
     }
+}
+function Update-Page {
+    if ($env:UA_UPDATE_AUTO -or $env:UA_DIALOG_SNAP) { Log "update page: $($script:L_LATEST_URL) (test run: not opened)" }
+    else { Log "update page: $($script:L_LATEST_URL)"; try { Start-Process $script:L_LATEST_URL } catch { Log "could not open the browser: $_" } }
+}
+# Update-Fail <what went wrong> [extra sentence]: a short notice, then the download page; the current version starts
+function Update-Fail([string]$why, [string]$extra = '') {
+    Log "update: not installed - $why"
+    Dl-UiClose
+    try { if ([IO.Directory]::Exists($script:UPDATE_DL)) { Remove-Tree $script:UPDATE_DL } } catch { }
+    $msg = "UA Reforged could not update itself: $(No-Paths $why)." + $(if ($extra) { " $extra" } else { '' }) + "`r`n`r`nThe download page opens now, so you can get the new version there. Your current version starts as usual."
+    Log ('notice: ' + ($msg -replace '\s+', ' '))
+    if (-not $env:UA_UPDATE_AUTO -and -not $env:UA_DIALOG_SNAP) { [void](Ask $msg 'OK' @('OK')) }
+    Update-Page
+    return $false
+}
+
+# ---------------------------------------------------------------- one-click update (signed)
+# links.json "latest.windows.update" = the installer's address, a small manifest (name, version, platform, bytes, sha256)
+# and an ECDSA P-256 / SHA-256 signature over that manifest, made at release time with the UA Reforged update key. Only
+# its public half is in the app (downloads.txt update_key; a build with test hooks also takes update_key_test). The app
+# refuses an update whose signature does not check out with one of those keys, whose manifest names another platform or
+# a version that is not newer than this app (no downgrade, no replay of an old update), or whose file differs from the
+# manifest in size or SHA-256 (the site alone can never push an update). Checked with .NET's ECDsaCng (Windows 10/11).
+$script:UPDATE_DL = Join-Path $SUPPORT 'update-download'
+$script:UPDATE_HANDED = $false
+# Test-UpdateSig <manifest bytes> <DER signature bytes> <base64 public key (DER SubjectPublicKeyInfo, P-256)>
+function Test-UpdateSig([byte[]]$data, [byte[]]$der, [string]$keyB64) {
+    $spki = [Convert]::FromBase64String($keyB64)
+    if ($spki.Length -ne 91 -or $spki[26] -ne 4) { return $false }
+    # signature: DER SEQUENCE { INTEGER r, INTEGER s } -> r||s, 32 bytes each
+    if ($der.Length -lt 8 -or $der[0] -ne 0x30 -or $der[1] -ne ($der.Length - 2)) { return $false }
+    $raw = New-Object byte[] 64; $pos = 2
+    for ($n = 0; $n -lt 2; $n++) {
+        if ($pos + 2 -gt $der.Length -or $der[$pos] -ne 2) { return $false }
+        $len = [int]$der[$pos + 1]; $pos += 2
+        if ($len -lt 1 -or $len -gt 33 -or $pos + $len -gt $der.Length) { return $false }
+        $start = $pos; $cnt = $len
+        while ($cnt -gt 32) { if ($der[$start] -ne 0) { return $false }; $start++; $cnt-- }
+        [Array]::Copy($der, $start, $raw, $n * 32 + (32 - $cnt), $cnt)
+        $pos += $len
+    }
+    if ($pos -ne $der.Length) { return $false }
+    # public key blob: "ECS1", 32, X, Y
+    $blob = New-Object byte[] 72
+    [Array]::Copy([byte[]](0x45, 0x43, 0x53, 0x31, 0x20, 0, 0, 0), 0, $blob, 0, 8)
+    [Array]::Copy($spki, 27, $blob, 8, 64)
+    $key = $null; $ec = $null
+    try {
+        $key = [Security.Cryptography.CngKey]::Import($blob, [Security.Cryptography.CngKeyBlobFormat]::EccPublicBlob)
+        $ec = New-Object Security.Cryptography.ECDsaCng($key)
+        $ec.HashAlgorithm = [Security.Cryptography.CngAlgorithm]::Sha256
+        return [bool]$ec.VerifyData($data, $raw)
+    } catch { return $false } finally { if ($ec) { $ec.Dispose() }; if ($key) { $key.Dispose() } }
+}
+# Update-Verify <this version>: checks the signature and the manifest; sets $script:U (Name Version Bytes Sha) or
+# returns $false with $script:U_WHY
+function Update-Verify([string]$mine) {
+    $script:U = $null; $script:U_WHY = ''
+    try { $man = [Convert]::FromBase64String($script:L_UPD_MAN); $sig = [Convert]::FromBase64String($script:L_UPD_SIG) } catch { $script:U_WHY = "the update's signature is not valid"; return $false }
+    $ok = $false
+    foreach ($k in @(@(Conf 'update_key') + @(Conf 'update_key_test'))) {
+        if ($k -and (Test-UpdateSig $man $sig $k.Trim())) { $ok = $true; break }
+    }
+    if (-not $ok) { $script:U_WHY = "the update's signature is not valid"; return $false }
+    $bad = "the update's manifest is not readable"
+    try { $text = (New-Object Text.UTF8Encoding($false, $true)).GetString($man) } catch { $script:U_WHY = $bad; return $false }
+    $lines = $text.Split("`n")
+    if ($lines[0] -cne 'UA Reforged update 1') { $script:U_WHY = $bad; return $false }
+    $g = @{}
+    for ($i = 1; $i -lt $lines.Count; $i++) {
+        if (-not $lines[$i]) { continue }
+        $t = $lines[$i].IndexOf("`t"); if ($t -lt 1) { $script:U_WHY = $bad; return $false }
+        $k = $lines[$i].Substring(0, $t)
+        if ($g.ContainsKey($k)) { $script:U_WHY = $bad; return $false }
+        $g[$k] = $lines[$i].Substring($t + 1)
+    }
+    if ($g['name'] -cnotmatch '^[A-Za-z0-9._-]{1,100}\z' -or -not (Is-Version $g['version']) -or $g['bytes'] -cnotmatch '^[0-9]{1,11}\z' -or $g['sha256'] -cnotmatch '^[0-9a-f]{64}\z') { $script:U_WHY = $bad; return $false }
+    if ($g['platform'] -cne 'windows') { $script:U_WHY = "the update is for another system ($($g['platform']))"; return $false }
+    if (-not $g['name'].EndsWith('.exe')) { $script:U_WHY = 'the update is not a Windows installer'; return $false }
+    if ((Compare-Version $g['version'] $mine) -le 0) { $script:U_WHY = "the update ($($g['version'])) is not newer than this version ($mine)"; return $false }
+    if ($g['version'] -cne $script:L_LATEST) { $script:U_WHY = "the update ($($g['version'])) is not the version the site names ($($script:L_LATEST))"; return $false }
+    if ($script:L_UPD_URL.Substring($script:L_UPD_URL.LastIndexOf('/') + 1) -cne $g['name']) { $script:U_WHY = "the update's address does not match its manifest"; return $false }
+    $script:U = @{ Name = $g['name']; Version = $g['version']; Bytes = [long]$g['bytes']; Sha = $g['sha256'] }
+    return $true
+}
+
+# Update-Apply <this version>: download, check, then hand over to update.ps1 (it waits for this launcher to close, runs
+# the installer silently into this folder, and starts the new version). Any problem: a short notice, the download page,
+# and the current version starts ($false). On success this launcher exits.
+function Update-Apply([string]$mine) {
+    $script:UPDATE_DL = Join-Path $SUPPORT 'update-download'
+    Log "update: $mine -> $($script:L_LATEST) from $($script:L_UPD_URL) (installed in $($script:INST))"
+    if (-not [IO.File]::Exists((Join-Path $script:INST 'Uninstall.exe'))) {
+        return (Update-Fail 'this copy was unpacked from the zip, not installed' 'Download the new zip, or install UA Reforged with the installer to get one-click updates.')
+    }
+    $probe = Join-Path $script:INST ('.update-probe-' + $PID)
+    try { [IO.File]::WriteAllText($probe, 'x'); [IO.File]::Delete($probe) } catch { return (Update-Fail 'it may not change its own program folder') }
+    try { if ([IO.Directory]::Exists($script:UPDATE_DL)) { Remove-Tree $script:UPDATE_DL }; [void][IO.Directory]::CreateDirectory($script:UPDATE_DL) } catch { return (Update-Fail 'its folder could not be created') }
+    $script:DL_DIR = $script:UPDATE_DL
+    if (-not (Update-Verify $mine)) { return (Update-Fail $script:U_WHY) }
+    $u = $script:U
+    Log "update: signature and manifest ok ($($u.Name), $($u.Version), $($u.Bytes) bytes)"
+    if ((Free-Bytes $SUPPORT) -lt $u.Bytes * 4) { return (Update-Fail 'there is not enough free disk space') }
+    Dl-UiStart "Updating UA Reforged to $($u.Version)"
+    if (-not (Dl-Precheck $script:L_UPD_URL 0 0 $u.Bytes $false '4D-5A')) { return (Update-Fail $script:PC_WHY) }
+    $f = Join-Path $script:UPDATE_DL $u.Name
+    $script:DL_WHAT = 'Downloading the update'; $script:DL_BASE = 0; $script:DL_TOTAL = $u.Bytes; $script:DL_MAXSIZE = $u.Bytes
+    $rc = Dl-Fetch $script:L_UPD_URL $f; $script:DL_MAXSIZE = $null
+    if ($rc -eq 130) { Dl-UiClose; try { Remove-Tree $script:UPDATE_DL } catch { }; Log 'update: cancelled; the current version starts'; return $false }
+    if ($rc -ne 0) { return (Update-Fail $script:DL_WHY) }
+    Dl-Status 92 'Checking the update...'
+    if ((File-Size $f) -ne $u.Bytes) { return (Update-Fail 'the downloaded file is not the expected size') }
+    $got = Get-Sha256 $f
+    if ($got -cne $u.Sha) { return (Update-Fail 'the downloaded file does not match its signature') }
+    # downloaded by curl.exe, so Windows has no "from the internet" mark on it; remove one if anything added it
+    try { Remove-Item -LiteralPath $f -Stream 'Zone.Identifier' -ErrorAction SilentlyContinue } catch { }
+    Dl-Status 97 'Installing the update...'
+    # update.ps1 runs from the download folder (the installer replaces the launcher folder)
+    $runner = Join-Path $script:UPDATE_DL 'update.ps1'
+    try { [IO.File]::Copy((Join-Path $HERE 'update.ps1'), $runner, $true) } catch { return (Update-Fail 'the update helper is missing') }
+    $stub = 0
+    try { $stub = [int](Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).ParentProcessId } catch { }
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $a = @('-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $runner,
+           '-Setup', $f, '-Inst', $script:INST, '-Version', $u.Version, '-Page', $script:L_LATEST_URL, '-Support', $SUPPORT, '-WaitPids', "$PID,$stub")
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $ps; $psi.Arguments = (($a | ForEach-Object { Quote-Arg ([string]$_) }) -join ' ')
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.WorkingDirectory = $SUPPORT   # not the download folder: it is removed afterwards
+    try { [void][System.Diagnostics.Process]::Start($psi) } catch { return (Update-Fail 'the installer could not be started') }
+    Log "update: verified $($u.Name); the installer runs once this launcher has closed"
+    Dl-UiClose
+    $script:UPDATE_HANDED = $true   # UA-Reforged.ps1 stops here (the game is not started by this launcher)
+    return $true
+}
+# Update-Finish: at every start. Logs when update.ps1 has just installed this version.
+function Update-Finish {
+    $f = Join-Path $SUPPORT 'update-installed.txt'
+    if (-not [IO.File]::Exists($f)) { return }
+    try { $v = ([IO.File]::ReadAllText($f)).Trim(); [IO.File]::Delete($f) } catch { return }
+    if ($v -eq (Conf1 'app_version')) { Log "update: now running $v" } else { Log "update: expected $v, this is $(Conf1 'app_version')" }
 }
 
 # ---------------------------------------------------------------- curl.exe (Windows 10 1803+ / 11)
@@ -671,7 +854,7 @@ function Dl-Progress {
 
 # ---------------------------------------------------------------- link check: Dl-Precheck <url> <min> <max> <exact>
 # sets PC_SIZE (0 = unknown), PC_RANGES (1/0); on failure returns $false with PC_WHY in plain words
-function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact = 0, [bool]$quiet = $false) {
+function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact = 0, [bool]$quiet = $false, [string]$want = '50-4B-03-04') {
     $h = Join-Path $script:DL_DIR 'check.h'; $b = Join-Path $script:DL_DIR 'check.b'
     $script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''; $script:ST_DETAIL = ''
     foreach ($x in @($h, $b)) { if ([IO.File]::Exists($x)) { [IO.File]::Delete($x) } }
@@ -698,8 +881,9 @@ function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact 
     if ($code -ne '200' -and $code -ne '206') { $script:ST_DETAIL = "$code"; $script:PC_WHY = "the server answered HTTP $code instead of the file"; Log "link check: $url -> $($script:PC_WHY)"; return $false }
     if ($type -like 'text/html*' -or $type -like 'application/xhtml*') { $script:PC_WHY = 'the link now leads to a web page, not to the file'; Log "link check: $url -> $($script:PC_WHY) ($type)"; return $false }
     $magic = ''
-    try { $fs = [IO.File]::OpenRead($b); $buf = New-Object byte[] 4; $n = $fs.Read($buf, 0, 4); $fs.Dispose(); if ($n -eq 4) { $magic = [BitConverter]::ToString($buf) } } catch { }
-    if ($magic -ne '50-4B-03-04') { $script:PC_WHY = 'the link does not lead to a zip file'; Log "link check: $url -> $($script:PC_WHY)"; return $false }
+    $wn = [int](($want.Length + 1) / 3)
+    try { $fs = [IO.File]::OpenRead($b); $buf = New-Object byte[] $wn; $n = $fs.Read($buf, 0, $wn); $fs.Dispose(); if ($n -eq $wn) { $magic = [BitConverter]::ToString($buf) } } catch { }
+    if ($magic -ne $want) { $script:PC_WHY = $(if ($want -eq '50-4B-03-04') { 'the link does not lead to a zip file' } else { 'the link does not lead to the expected file' }); Log "link check: $url -> $($script:PC_WHY)"; return $false }
     # the last response's headers (redirects come first)
     $cr = ''; $cl = ''
     if ([IO.File]::Exists($h)) {

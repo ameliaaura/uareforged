@@ -100,6 +100,11 @@ After the pack is zipped:
    then on, desktop apps older than that version show a "new version" notice at start-up. The url must be https on
    `github.com/ameliaaura/uareforged` or `uareforged.pages.dev`; anything else is ignored (the rest of the file
    still counts). Apps before 0.8.5 ignore the key.
+   For one-click updates, sign each platform's file (Mac zip, Windows Setup.exe) on the release machine and add the
+   printed object as `"update"` inside that platform's `latest` entry:
+   `tools/sign-update.sh --key-cmd '<prints the update private key>' <file> <version> mac|windows <release asset url>`.
+   It signs a small manifest (name, version, platform, bytes, sha256) with the UA Reforged update key (ECDSA P-256;
+   the public half is `update_key` in `packaging/macos/downloads.txt`). Without `update`, the notice offers Download.
 5. Download every asset from its public link, check the SHA-256, and run a fresh first launch once more.
 
 ## 6. After the release

@@ -108,9 +108,13 @@ PY
     cp -R "$ROOT/res" "$ROOT/fonts" "$E/"
     find "$STAGE" -name '.DS_Store' -delete
     # launcher: the script, the downloads code and the addresses + pack checksum list (shared with the Mac app)
-    cp "$PKG/launcher/UA-Reforged.ps1" "$PKG/launcher/downloads.ps1" "$PKG/launcher/quest.ps1" "$STAGE/launcher/"
+    cp "$PKG/launcher/UA-Reforged.ps1" "$PKG/launcher/downloads.ps1" "$PKG/launcher/quest.ps1" "$PKG/launcher/update.ps1" "$STAGE/launcher/"
     cp "$ROOT/packaging/macos/downloads.txt" "$STAGE/launcher/downloads.txt"
     printf '# this build (written by build-windows.sh; the new-version notice compares it with links.json "latest")\napp_version\t%s\n' "$VERSION" >> "$STAGE/launcher/downloads.txt"
+    # test-hook builds only: also accept one-click updates signed with the test key (release builds never carry it)
+    if [ "${UA_TEST_HOOKS:-OFF}" = ON ]; then
+        printf '# TEST BUILD: updates signed with the test key are accepted too\nupdate_key_test\t%s\n' "$(tr -d '\n' < "$ROOT/tests/launcher/update-key-test.txt")" >> "$STAGE/launcher/downloads.txt"
+    elif grep -q '^update_key_test' "$STAGE/launcher/downloads.txt"; then die "a release build must not accept the test update key"; fi
     LC_ALL=C grep -n '[^ -~	]' "$STAGE/launcher/"*.ps1 && die "the launcher scripts must be plain ASCII (Windows PowerShell 5.1)"
 
     # docs + licences

@@ -26,7 +26,9 @@
 # it); UA_PACK_NOUI=1 shows no progress window; UA_DIALOG_SNAP=<folder> saves each setup/launcher dialog as a PNG
 # there and answers it with its default (the usage stats question: dismissed = no); UA_STATS_AUTO=yes|no|dismiss
 # answers the usage stats question. UA_LINKS_FILE=<file> reads that file instead of links.json (no request);
-# UA_UPDATE_AUTO=download|later|skip answers the new-version notice.
+# UA_UPDATE_AUTO=update|download|later|skip|whatsnew answers the new-version notice. A build with test hooks
+# (UA_TEST_HOOKS=ON) also accepts updates signed with the test key (update_key_test in downloads.txt); release builds
+# never carry that line.
 
 DL_CONF="$CONTENTS/Resources/downloads.txt"
 PACK_DL="$SUPPORT/reforge-pack-download"
@@ -112,6 +114,7 @@ links_load() {
     L_PACK_URL="$(conf url | head -1)"; L_PACK_PARTS="$(conf part)"
     L_HELP="$(conf help_url | head -1)"; L_PACK_HELP="$(conf pack_help_url | head -1)"; L_MESSAGE=""
     L_QUEST_APK_URL=""; L_QUEST_APK=""; L_QUEST_HELP=""; L_ADB_MAC=""; L_LATEST=""; L_LATEST_URL=""
+    L_UPD_URL=""; L_UPD_MAN=""; L_UPD_SIG=""
     local src tmp="$SUPPORT/links.json.tmp" out ok=1
     local allow; allow="$(conf allow_host | tr '\n' ' ')"
     local loc=0; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && loc=1
@@ -129,7 +132,7 @@ links_load() {
         if out="$(/usr/bin/osascript -l JavaScript "$CONTENTS/Resources/links.js" "$tmp" "$allow" "$loc" mac 2>&1)"; then
             local k v w parts=""
             while IFS="$(printf '\t')" read -r k v w; do
-                [ -n "$w" ] && [ "$k" != latest ] && v="$v"$'\t'"$w"
+                [ -n "$w" ] && [ "$k" != latest ] && [ "$k" != latest_update ] && v="$v"$'\t'"$w"
                 case "$k" in
                     game_url) L_GAME_URL="$v" ;; game_min_bytes) L_GAME_MIN="$v" ;; pack_url) L_PACK_URL="$v" ;;
                     help_url) L_HELP="$v" ;; pack_help_url) L_PACK_HELP="$v" ;; message) L_MESSAGE="$v" ;;
@@ -138,6 +141,8 @@ links_load() {
                     part) parts="$parts$v"$'\n' ;;
                     latest) L_LATEST="$v"; L_LATEST_URL="$w" ;;
                     latest_ignored) echo "links: $v (ignored; no new-version notice)" ;;
+                    latest_update) L_UPD_URL="$v"; L_UPD_MAN="${w%%$'\t'*}"; L_UPD_SIG="${w#*$'\t'}" ;;
+                    latest_update_ignored) echo "links: $v (ignored; no one-click update)" ;;
                 esac
             done <<< "$out"
             [ -n "$parts" ] && L_PACK_PARTS="${parts%$'\n'}"
@@ -166,10 +171,11 @@ ver_cmp() {
         print r }'
 }
 # update_check: just before the game starts. When links.json names a newer version for the Mac than this app (app_version
-# in downloads.txt, written by build-mac.sh), one dialog: Download (opens the release page in the browser) / Later /
-# Don't remind me for this version (kept in update-skip.txt; a newer version asks again). Anything missing, late
+# in downloads.txt, written by build-mac.sh), one dialog: Update now / Later / Don't remind me for this version (kept in
+# update-skip.txt; a newer version asks again) / What's new (opens the release page, then the dialog comes back). Without
+# a one-click update in links.json the first button is Download (opens the release page). Anything missing, late
 # (links.json not read within 2 s of this point), invalid or not newer: no dialog, no delay, the game starts.
-# Test runs: UA_UPDATE_AUTO=download|later|skip answers the dialog (and opens no browser).
+# Test runs: UA_UPDATE_AUTO=update|download|later|skip|whatsnew answers the dialog (and opens no browser).
 UPDATE_SKIP="$SUPPORT/update-skip.txt"
 update_check() {
     local mine; mine="$(conf app_version | head -1)"
@@ -190,22 +196,178 @@ update_check() {
     local skip; skip="$(head -1 "$UPDATE_SKIP" 2>/dev/null)"
     case "$skip" in ''|*[!0-9.]*) skip="" ;; esac
     if [ -n "$skip" ] && [ "$(ver_cmp "$L_LATEST" "$skip")" != 1 ]; then echo "update check: $L_LATEST is out; not reminding (skipped)"; return 0; fi
-    local b="${UA_UPDATE_AUTO:-}" dl="Download" later="Later" never="Don't remind me for this version"
+    local b="${UA_UPDATE_AUTO:-}" up="Update now" dl="Download" later="Later" never="Don't remind me for this version" news="What's new"
+    local first="$up" how="Update now downloads it, checks it and starts the new version."
+    [ -n "$L_UPD_URL" ] || { first="$dl"; how="Download opens the download page in your browser."; }
     if [ -n "$b" ]; then
         echo "update check: $L_LATEST is out (this app $mine); test answer $b"
+        [ "$b" = whatsnew ] && { echo "update page: $L_LATEST_URL (test run: not opened)"; b=later; }
     else
-        b="$(ask "A new version of UA Reforged ($L_LATEST) is out.
-
-You have version $mine. Download opens the download page in your browser. The game starts either way." "$dl" "$never" "$later" "$dl")"
-        echo "update check: $L_LATEST is out (this app $mine); chose [${b:-closed}]"
+        while :; do
+            b="$(dlg "A new version of UA Reforged ($L_LATEST) is out." "You have version $mine. $how Later starts the game now." "" 0 "" "" 0 "$first" "$later" "$never" "$news")"
+            b="${b%%$'\t'*}"
+            echo "update check: $L_LATEST is out (this app $mine); chose [${b:-closed}]"
+            [ "$b" = "$news" ] || break
+            echo "update page: $L_LATEST_URL"; /usr/bin/open "$L_LATEST_URL"
+        done
     fi
     case "$b" in
-        "$dl"|download)
-            if [ -n "${UA_UPDATE_AUTO:-}" ]; then echo "update page: $L_LATEST_URL (test run: not opened)"
-            else echo "update page: $L_LATEST_URL"; /usr/bin/open "$L_LATEST_URL"; fi ;;
+        "$up"|update)
+            if [ -n "$L_UPD_URL" ]; then update_apply "$mine"; else update_page; fi ;;
+        "$dl"|download) update_page ;;
         "$never"|skip) printf '%s\n' "$L_LATEST" > "$UPDATE_SKIP"; echo "update check: no reminder for $L_LATEST" ;;
     esac
     return 0
+}
+update_page() {
+    if [ -n "${UA_UPDATE_AUTO:-}" ]; then echo "update page: $L_LATEST_URL (test run: not opened)"
+    else echo "update page: $L_LATEST_URL"; /usr/bin/open "$L_LATEST_URL"; fi
+}
+# update_fail <what went wrong> [extra sentence]: a short notice, then the download page; the current version starts
+update_fail() {
+    echo "update: not installed - $1"
+    rm -rf "$UPDATE_DL"; dl_ui_close
+    local msg="UA Reforged could not update itself: $(no_paths "$1").${2:+ $2}
+
+The download page opens now, so you can get the new version there. Your current version starts as usual."
+    echo "notice: $msg" | tr '\n' ' '; echo
+    [ -n "${UA_UPDATE_AUTO:-}" ] || ask "$msg" "OK" "OK" >/dev/null
+    update_page
+    return 1
+}
+
+# ---------------------------------------------------------------- one-click update (signed)
+# links.json "latest.mac.update" = the file's address, a small manifest (name, version, platform, bytes, sha256) and an
+# ECDSA P-256 / SHA-256 signature over that manifest, made at release time with the UA Reforged update key. Only its public
+# half is in the app (downloads.txt update_key; a build with test hooks also takes update_key_test). The app refuses an
+# update whose signature does not check out with one of those keys, whose manifest names another platform or a version
+# that is not newer than this app (no downgrade, no replay of an old update), or whose file differs from the manifest in
+# size or SHA-256 (the site alone can never push an update). Checked with /usr/bin/openssl (part of macOS).
+UPDATE_DL="$SUPPORT/update-download"
+UPDATE_PENDING="$SUPPORT/update-pending.txt"
+# update_verify <work dir> <this version>: checks the signature and the manifest; sets U_NAME U_VER U_BYTES U_SHA or
+# returns 1 with U_WHY
+update_verify() {
+    local d="$1" mine="$2" k ok=1 line key val n=0 seen=" "
+    U_WHY=""; U_NAME=""; U_VER=""; U_PLAT=""; U_BYTES=""; U_SHA=""
+    printf '%s' "$L_UPD_MAN" | /usr/bin/openssl base64 -d -A > "$d/manifest" 2>/dev/null
+    printf '%s' "$L_UPD_SIG" | /usr/bin/openssl base64 -d -A > "$d/manifest.sig" 2>/dev/null
+    [ -s "$d/manifest" ] && [ -s "$d/manifest.sig" ] || { U_WHY="the update's signature is missing"; return 1; }
+    while IFS= read -r k; do
+        [ -n "$k" ] || continue
+        { echo '-----BEGIN PUBLIC KEY-----'; printf '%s\n' "$k" | fold -w 64; echo '-----END PUBLIC KEY-----'; } > "$d/key.pem"
+        if /usr/bin/openssl dgst -sha256 -verify "$d/key.pem" -signature "$d/manifest.sig" "$d/manifest" >/dev/null 2>&1; then ok=0; break; fi
+    done < <(conf update_key; conf update_key_test)
+    rm -f "$d/key.pem"
+    [ $ok = 0 ] || { U_WHY="the update's signature is not valid"; return 1; }
+    while IFS= read -r line || [ -n "$line" ]; do
+        n=$((n + 1))
+        if [ $n = 1 ]; then [ "$line" = "UA Reforged update 1" ] || { U_WHY="the update's manifest is not readable"; return 1; }; continue; fi
+        key="${line%%$'\t'*}"; val="${line#*$'\t'}"
+        case "$seen" in *" $key "*) U_WHY="the update's manifest is not readable"; return 1 ;; esac
+        seen="$seen$key "
+        case "$key" in name) U_NAME="$val" ;; version) U_VER="$val" ;; platform) U_PLAT="$val" ;; bytes) U_BYTES="$val" ;; sha256) U_SHA="$val" ;; esac
+    done < "$d/manifest"
+    if ! [[ "$U_NAME" =~ ^[A-Za-z0-9._-]{1,100}$ && "$U_VER" =~ ^[0-9]{1,6}(\.[0-9]{1,6}){1,3}$ && "$U_BYTES" =~ ^[0-9]{1,11}$ && "$U_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+        U_WHY="the update's manifest is not readable"; return 1
+    fi
+    [ "$U_PLAT" = mac ] || { U_WHY="the update is for another system ($U_PLAT)"; return 1; }
+    case "$U_NAME" in *.zip) ;; *) U_WHY="the update is not a Mac app"; return 1 ;; esac
+    [ "$(ver_cmp "$U_VER" "$mine")" = 1 ] || { U_WHY="the update ($U_VER) is not newer than this version ($mine)"; return 1; }
+    [ "$U_VER" = "$L_LATEST" ] || { U_WHY="the update ($U_VER) is not the version the site names ($L_LATEST)"; return 1; }
+    [ "${L_UPD_URL##*/}" = "$U_NAME" ] || { U_WHY="the update's address does not match its manifest"; return 1; }
+    return 0
+}
+
+# update_apply <this version>: download, check, unpack next to the app, check the new app's signature and version, swap
+# the apps (the old one stays as a hidden backup until the new one has started), start the new one. Any problem: a
+# short notice, the download page, and the current version starts (returns 1). On success this launcher exits.
+update_apply() {
+    local mine="$1" app parent f rc got new found bak work
+    app="$(cd "$CONTENTS/.." && pwd)"; parent="$(dirname "$app")"
+    echo "update: $mine -> $L_LATEST from $L_UPD_URL (app at $app)"
+    case "$app" in
+        */AppTranslocation/*) update_fail "macOS runs it from a temporary place" "Move UA Reforged to your Applications folder to enable one-click updates."; return 1 ;;
+    esac
+    case "$app" in *.app) ;; *) update_fail "the app is not where UA Reforged expects it"; return 1 ;; esac
+    if [ ! -w "$parent" ] || [ ! -w "$app" ] || [ ! -O "$app" ]; then
+        update_fail "it may not change the folder it is in" "Move UA Reforged to your Applications folder (or another folder of yours) to enable one-click updates."; return 1
+    fi
+    rm -rf "$UPDATE_DL"; DL_DIR="$UPDATE_DL"; mkdir -p "$DL_DIR" || { update_fail "its folder could not be created"; return 1; }
+    update_verify "$DL_DIR" "$mine" || { update_fail "$U_WHY"; return 1; }
+    echo "update: signature and manifest ok ($U_NAME, $U_VER, $U_BYTES bytes)"
+    local free_k; free_k=$(df -k "$SUPPORT" | awk 'NR == 2 { print $4 }')
+    [ "$((free_k * 1024))" -lt "$((U_BYTES * 4))" ] && { update_fail "there is not enough free disk space"; return 1; }
+    dl_ui_start "Updating UA Reforged to $U_VER"
+    dl_precheck "$L_UPD_URL" 0 0 "$U_BYTES" || { update_fail "$PC_WHY"; return 1; }
+    f="$DL_DIR/$U_NAME"; DL_WHAT="Downloading the update"; DL_BASE=0; DL_TOTAL="$U_BYTES"; DL_MAXSIZE="$U_BYTES"
+    dl_fetch "$L_UPD_URL" "$f"; rc=$?; DL_MAXSIZE=""
+    if [ $rc -eq 130 ]; then rm -rf "$UPDATE_DL"; dl_ui_close; echo "update: cancelled; the current version starts"; return 1; fi
+    [ $rc -eq 0 ] || { update_fail "$DL_WHY"; return 1; }
+    dl_status 91 "Checking the update..."
+    got=$(stat -f %z "$f" 2>/dev/null || echo 0)
+    [ "$got" = "$U_BYTES" ] || { update_fail "the downloaded file is not the expected size"; return 1; }
+    got="$(/usr/bin/shasum -a 256 "$f" | cut -d' ' -f1)"
+    [ "$got" = "$U_SHA" ] || { update_fail "the downloaded file does not match its signature"; return 1; }
+    dl_status 94 "Unpacking..."
+    work="$parent/.ua-reforged-update.$$"; rm -rf "$work"
+    mkdir "$work" && /usr/bin/ditto -x -k "$f" "$work" </dev/null 2>>"$DL_DIR/curl.err" || { rm -rf "$work"; update_fail "the update does not unpack"; return 1; }
+    found=""
+    while IFS= read -r new; do found="$new"; break; done < <(find "$work" -maxdepth 2 -type d -name '*.app' -prune)
+    if [ -z "$found" ] || [ -L "$found" ]; then rm -rf "$work"; update_fail "the update holds no app"; return 1; fi
+    dl_status 97 "Checking the new app..."
+    if ! /usr/bin/codesign --verify --deep --strict "$found" 2>>"$DL_DIR/curl.err"; then rm -rf "$work"; update_fail "the new app's code signature does not check out"; return 1; fi
+    local nid oid nver
+    nid="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$found/Contents/Info.plist" 2>/dev/null)"
+    oid="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CONTENTS/Info.plist" 2>/dev/null)"
+    nver="$(awk -F'\t' '$1 == "app_version" { print $2; exit }' "$found/Contents/Resources/downloads.txt" 2>/dev/null)"
+    if [ -z "$nid" ] || [ "$nid" != "$oid" ] || [ "$nver" != "$U_VER" ]; then rm -rf "$work"; update_fail "the new app is not UA Reforged $U_VER"; return 1; fi
+    # swap: the old app becomes a hidden backup next to it (removed by the new app once it has started)
+    dl_status 99 "Starting the new version..."
+    bak="$parent/.$(basename "$app" .app)-$mine.update-backup"
+    rm -rf "$bak"
+    if ! mv "$app" "$bak"; then rm -rf "$work"; update_fail "the old app could not be moved aside"; return 1; fi
+    if ! mv "$found" "$app"; then
+        mv "$bak" "$app"; rm -rf "$work"; update_fail "the new app could not be put in place"; return 1
+    fi
+    rm -rf "$work"
+    printf '%s\t%s\t%s\n' "$U_VER" "$app" "$bak" > "$UPDATE_PENDING"
+    echo "update: installed $U_VER, old version kept at $bak until the new one starts"
+    dl_ui_close
+    update_relaunch "$app"
+    # the new app removes the pending file (and the backup) as soon as it starts; wait up to 60 s for that
+    local i=0 n="${UPDATE_START_WAIT:-120}"
+    while [ -f "$UPDATE_PENDING" ] && [ $i -lt "$n" ]; do sleep 0.5; i=$((i + 1)); done
+    if [ ! -f "$UPDATE_PENDING" ]; then
+        rm -rf "$UPDATE_DL"; echo "update: the new version has started; this launcher stops"; exit 0
+    fi
+    # the new app did not start: put the old one back
+    rm -f "$UPDATE_PENDING"
+    local broken="$parent/.ua-reforged-update-failed.$$"
+    if mv "$app" "$broken" && mv "$bak" "$app"; then rm -rf "$broken"; echo "update: the new version did not start; old version restored"
+    else echo "update: the new version did not start and the old one could not be restored (backup at $bak)"; fi
+    update_fail "the new version did not start, so the current one was put back"
+    return 1
+}
+# update_relaunch <app>: start the new app as a new instance (test runs pass their UA_* settings on)
+update_relaunch() {
+    local e=() v
+    for v in $(compgen -e | grep '^UA_'); do e+=(--env "$v=${!v}"); done
+    echo "update: starting $1"
+    /usr/bin/open -n "$1" ${e[@]+"${e[@]}"} 2>/dev/null || /usr/bin/open -n "$1"
+}
+# update_finish: at every start. When an update has just put this app in place, tell the old launcher (it waits for the
+# pending file to go) and remove the old app's backup.
+update_finish() {
+    [ -f "$UPDATE_PENDING" ] || return 0
+    local v app bak me mine
+    IFS=$'\t' read -r v app bak < "$UPDATE_PENDING"
+    me="$(cd "$CONTENTS/.." && pwd)"; mine="$(conf app_version | head -1)"
+    if [ "$v" = "$mine" ] && [ "$app" = "$me" ]; then
+        rm -f "$UPDATE_PENDING"
+        case "$bak" in "$(dirname "$me")"/.*.update-backup) rm -rf "$bak" ;; esac
+        echo "update: now running $mine; the old version was removed"
+    fi
 }
 
 # ---------------------------------------------------------------- progress window + cancel

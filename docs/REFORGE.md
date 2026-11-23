@@ -36,12 +36,25 @@ the moment it knows the game folder (the setup, the pack and the Quest install u
 `github.com/ameliaaura/uareforged` or `uareforged.pages.dev` only (no port, query, `.`/`..` segments). A bad `latest`
 is dropped on its own (logged `latest_ignored`); the rest of the file still counts. Older apps skip the key. When
 the version is newer than the app's own (`app_version`, written into `downloads.txt` by the build script), one
-dialog before the game starts: Download (opens the url) / Later / Don't remind me for this version
-(`update-skip.txt` in the app's support folder; a newer version asks again). Offline, a bad file, a missing field,
+dialog before the game starts: Update now / Later / Don't remind me for this version (`update-skip.txt` in the app's
+support folder; a newer version asks again) / What's new (opens the url). **One-click update:** the entry's optional
+`"update": {"url": "<file on the release page>", "manifest": "<base64>", "sig": "<base64>"}` (made by
+`tools/sign-update.sh`) carries a manifest (`name`, `version`, `platform`, `bytes`, `sha256`) signed with ECDSA P-256 /
+SHA-256. The app checks the signature against `update_key` in `downloads.txt` (`/usr/bin/openssl` on the Mac, .NET
+`ECDsaCng` on Windows), then that the manifest names its platform, a version newer than its own (no downgrade or
+replay) equal to `latest.version`, and the file's name; after the download, size and SHA-256. Mac: the zip is unpacked
+next to the app, `codesign --verify --deep --strict`, same bundle id and version, the apps are swapped (the old one
+kept as a hidden `.<name>-<version>.update-backup` until the new one has started; put back if it does not start
+within 60 s), then `open -n`. A translocated app or a folder it may not write to gets the download page with a short
+explanation. Windows (installed with Setup.exe only; a zip copy gets the download page): `launcher\update.ps1` waits for
+the launcher to close, runs `Setup.exe /S /D=<install folder>` (per-user, no administrator prompt), checks the
+installed version and starts UA Reforged again. Any failure: a short notice, the download page, the current version
+starts. Without `update` the first button is Download. Test-hook builds (`UA_TEST_HOOKS=ON`) also accept the test key
+(`tests/launcher/update-key-test.txt`, as `update_key_test`); release builds refuse to build with it. Offline, a bad file, a missing field,
 the same or an older version, or links.json not read within 2 s of that point: no dialog, the game starts. A start
 with the game and the Reforge pack in place asks for `links.json?start` (the site does not count it as a setup).
-Testing: `UA_LINKS_FILE=<file>` (a local links.json, no request), `UA_UPDATE_AUTO=download|later|skip` (answers the
-dialog, opens no browser); tests `tests/launcher/update_notice_test.sh` (Mac, CI) and `update_notice_test.ps1`
+Testing: `UA_LINKS_FILE=<file>` (a local links.json, no request), `UA_UPDATE_AUTO=update|download|later|skip`
+(answers the dialog, opens no browser); tests `tests/launcher/update_notice_test.sh` (Mac, CI) and `update_notice_test.ps1`
 (Windows PowerShell 5.1).
 
 The campaign map always shows the 1998 picture (the pack carries no campaign-map pictures).

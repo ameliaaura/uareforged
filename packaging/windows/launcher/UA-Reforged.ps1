@@ -29,8 +29,10 @@
 # Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup, UA_CAMPAIGN=base|ghor|taer skips the
 # launcher (and, without UA_STATS_AUTO, the stats question), UA_DATA_DIR=<folder> uses that folder instead of
 # %LOCALAPPDATA%\UA Reforged, UA_LINKS_FILE=<file> reads that file instead of the site's links.json,
-# UA_UPDATE_AUTO=download|later|skip answers the new-version notice (Update-Check in downloads.ps1: when links.json
-# names a newer Windows version, one dialog before the game starts; offline or anything odd: no dialog, no wait).
+# UA_UPDATE_AUTO=update|download|later|skip answers the new-version notice (Update-Check in downloads.ps1: when
+# links.json names a newer Windows version, one dialog before the game starts; Update now downloads the signed installer,
+# checks it and hands over to update.ps1, which installs it silently and starts the new version; offline or anything
+# odd: no dialog, no wait).
 # Arguments go to the engine. "-UaPurge" (used by the uninstaller) removes %LOCALAPPDATA%\UA Reforged safely.
 # "-UaQuest" (the Start menu shortcut "Install UA Reforged VR on my Quest") runs only "Install on my Quest" (quest.ps1);
 # the first-launch dialog and the launcher have an "Install on my Quest" button, a Meta Quest plugged in at launch is
@@ -73,6 +75,8 @@ if ($args.Count -ge 1 -and $args[0] -eq '-UaPurge') {
 try { [void][IO.Directory]::CreateDirectory($RUN) } catch { Log "could not create ${RUN}: $_"; Fail "UA Reforged could not create its data folder. Check that your disk is not full." }
 Log ("=== {0} launch from {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $INST)
 if (-not [IO.File]::Exists($ENGINE)) { Fail "UA Reforged is incomplete (the engine is missing). Please install it again." }
+# just updated by update.ps1: say so in the log
+try { Update-Finish } catch { }
 
 
 # Shift held while starting, or the Start menu shortcut (-UaQuest): "Install on my Quest" this time
@@ -201,6 +205,8 @@ try {
 
 # a newer UA Reforged is out (links.json "latest"): one small notice, then the game starts either way
 try { Update-Check } catch { Log "update check: $_" }
+# Update now: update.ps1 installs the new version once this launcher has closed, then starts it
+if ($script:UPDATE_HANDED) { Log 'update: handed over to the installer; this launcher stops'; exit 0 }
 
 $engineArgs = @($args | Where-Object { $_ -ne '-UaQuest' })
 if ($campaign -eq 'ghor') { $engineArgs = @('-env', 'Ghor_env') + $engineArgs }

@@ -184,6 +184,10 @@ build_app() {
     cp "$PKGDIR/downloads.sh" "$PKGDIR/downloads.txt" "$PKGDIR/progress.js" "$PKGDIR/dialog.js" "$PKGDIR/consent.js" "$PKGDIR/links.js" "$PKGDIR/quest.sh" "$R/"
     # this app's version, for the new-version notice (compared with links.json "latest")
     printf '# this build (written by build-mac.sh; the new-version notice compares it with links.json "latest")\napp_version\t%s\n' "$VERSION" >> "$R/downloads.txt"
+    # test-hook builds only: also accept one-click updates signed with the test key (release builds never carry it)
+    if [ "${UA_TEST_HOOKS:-OFF}" = ON ]; then
+        printf '# TEST BUILD: updates signed with the test key are accepted too\nupdate_key_test\t%s\n' "$(tr -d '\n' < "$ROOT/tests/launcher/update-key-test.txt")" >> "$R/downloads.txt"
+    elif grep -q '^update_key_test' "$R/downloads.txt"; then die "a release build must not accept the test update key"; fi
     sed -e "s/@VERSION@/$VERSION/" -e "s/@BUILD@/$VERSION/" -e "s/@MINOS@/$MINOS/" "$PKGDIR/Info.plist.in" > "$C/Info.plist"
     cp "$PKGDIR/AppIcon.icns" "$R/AppIcon.icns"
     mkdir -p "$R/licenses"

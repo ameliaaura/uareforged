@@ -36,12 +36,13 @@
 #
 # Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup,
 # UA_CAMPAIGN=base|ghor|taer skips the launcher (and, without UA_STATS_AUTO, the stats question),
-# UA_LINKS_FILE=<file> reads that file instead of the site's links.json, UA_UPDATE_AUTO=download|later|skip answers
-# the new-version notice. Arguments go to the engine.
+# UA_LINKS_FILE=<file> reads that file instead of the site's links.json, UA_UPDATE_AUTO=update|download|later|skip|whatsnew
+# answers the new-version notice. Arguments go to the engine.
 #
 # New-version notice (update_check in downloads.sh): when links.json names a newer Mac version than this app, one
-# dialog before the game starts (Download / Later / Don't remind me for this version). Offline or anything odd: no
-# dialog, no wait.
+# dialog before the game starts (Update now / Later / Don't remind me for this version / What's new). Update now
+# downloads the signed update, checks it, swaps the app (the old one stays as a hidden backup until the new one has
+# started) and starts the new version. Offline or anything odd: no dialog, no wait.
 
 CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE="$CONTENTS/MacOS/UA_source"
@@ -80,6 +81,8 @@ GAME="${UA_GAME_DIR:-}"
 . "$CONTENTS/Resources/downloads.sh"
 # "Install on my Quest": UA Reforged VR onto a Meta Quest over USB
 . "$CONTENTS/Resources/quest.sh"
+# just updated: tell the old launcher this version has started and remove the old app's backup
+update_finish
 # the site's links.json, read once per start in the background (the setup, the pack, the Quest install and the
 # new-version notice all use that one read)
 links_prefetch

@@ -99,11 +99,32 @@ function run(argv) {
             if (e === null || typeof e !== 'object' || Array.isArray(e)) why = 'latest.' + plat + ': not an object';
             else if (typeof e.version !== 'string' || !/^[0-9]{1,6}(\.[0-9]{1,6}){1,3}$/.test(e.version)) why = 'latest.' + plat + '.version';
             else if (!releaseUrl(e.url)) why = 'latest.' + plat + '.url';
-            else out.push('latest\t' + e.version + '\t' + e.url);
+            else {
+                out.push('latest\t' + e.version + '\t' + e.url);
+                // update (0.8.5 and later): the signed one-click update for this platform. Only its shape is checked here;
+                // the launcher checks the signature, the manifest and the file. A bad one drops only the update.
+                if (Object.prototype.hasOwnProperty.call(e, 'update')) {
+                    var uw = updateWhy(e.update, local);
+                    if (uw) out.push('latest_update_ignored\tlatest.' + plat + '.update' + uw);
+                    else out.push('latest_update\t' + e.update.url + '\t' + e.update.manifest + '\t' + e.update.sig);
+                }
+            }
         }
         if (why) out.push('latest_ignored\t' + why);
     }
     return out.join('\n');
+}
+
+// "update": {"url": "<file>", "manifest": "<base64>", "sig": "<base64>"}: the file on the release page (or on
+// http://127.0.0.1 in test runs), the signed manifest and its signature. Returns '' when the shape is fine.
+function updateWhy(u, local) {
+    if (u === null || typeof u !== 'object' || Array.isArray(u)) return ': not an object';
+    var ok = releaseUrl(u.url) && /\/[A-Za-z0-9._-]+\.(zip|exe)$/.test(u.url);
+    if (!ok && local && typeof u.url === 'string') ok = /^http:\/\/127\.0\.0\.1:[0-9]{1,5}(\/[A-Za-z0-9._~-]+)+\.(zip|exe)$/.test(u.url);
+    if (!ok) return '.url';
+    if (typeof u.manifest !== 'string' || !/^[A-Za-z0-9+\/]{20,1024}={0,2}$/.test(u.manifest)) return '.manifest';
+    if (typeof u.sig !== 'string' || !/^[A-Za-z0-9+\/]{20,200}={0,2}$/.test(u.sig)) return '.sig';
+    return '';
 }
 
 // The release page the notice opens: https on github.com/ameliaaura/uareforged or uareforged.pages.dev only, plain
