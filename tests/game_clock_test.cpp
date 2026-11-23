@@ -113,7 +113,9 @@ int main()
     Check(std::fabs(TicksPerSecond(15, MODE_FIXED_RATE) - kWant) * 120.0 <= 1.0, "15 fps: 1084 ticks/s", TicksPerSecond(15, MODE_FIXED_RATE), kWant);
     {
         State st;
-        Check(FrameTicks(st, 2000, MODE_FIXED_RATE) == 2117, "a 2000/1024 s frame = 2117 ticks (1084 per s)", FrameTicks(st, 0, MODE_FIXED_RATE), 2117);
+        // (the value is taken first: argument order is unspecified, and gcc evaluates the last argument first)
+        uint32_t t = FrameTicks(st, 2000, MODE_FIXED_RATE);
+        Check(t == 2117, "a 2000/1024 s frame = 2117 ticks (1084 per s)", t, 2117);
     }
 
     printf("game_clock_test: %d checks, %d failed\n", g_checks, g_failed);

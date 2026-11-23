@@ -281,8 +281,12 @@ int main(int argc, char **argv)
     // single touch after a pause counts in full; same-frame repeat counts nothing
     {
         int32_t last = -100000;
-        Check(RepeatShare(1000, last, false) == 1.0f, "single touch", 0, RepeatShare(5000, last, false), 1);
-        Check(RepeatShare(5000, last, false) == 0.0f, "repeat in the same tick", 0, 0, 0);
+        // (each value is taken before Check: argument order is unspecified, and gcc evaluates the last one first)
+        float first = RepeatShare(1000, last, false);
+        RepeatShare(5000, last, false);
+        float again = RepeatShare(5000, last, false);
+        Check(first == 1.0f, "single touch", 0, first, 1);
+        Check(again == 0.0f, "repeat in the same tick", 0, again, 0);
     }
     // the Quest (per-frame) path is the 1998 code
     {
