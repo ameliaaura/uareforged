@@ -6,7 +6,7 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
-## [0.8.5] - Desktop - not yet released
+## [0.8.5] - Desktop - 2026-11-24
 
 ### Added
 - **Linux edition (new, x86_64)**: an AppImage and a tar.gz folder for desktop Linux with glibc 2.35 or newer
