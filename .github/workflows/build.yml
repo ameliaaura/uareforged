@@ -51,6 +51,9 @@ jobs:
       - name: Launcher tests (new-version notice, no network)
         run: bash tests/launcher/update_notice_test.sh
 
+      - name: Launcher tests (downloads carry on where they stopped, local server only)
+        run: bash tests/launcher/download_resume_test.sh mac
+
       - name: Cache third-party libraries
         uses: actions/cache@v6
         with:
@@ -136,3 +139,6 @@ jobs:
 
       - name: Launcher tests (new-version notice + one-click update, no network)
         run: bash tests/launcher/update_notice_test_linux.sh
+
+      - name: Launcher tests (downloads carry on where they stopped, local server only)
+        run: bash tests/launcher/download_resume_test.sh linux

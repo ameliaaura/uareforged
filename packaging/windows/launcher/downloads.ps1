@@ -12,9 +12,11 @@
 # Downloads use curl.exe, which is part of Windows 10 (1803 and newer) and 11.
 #
 # Failsafe: every link is checked first (a 1 KB ranged GET: must answer 2xx, must not be a web page, must start
-# like a zip, must have a sane size). During a download a stall of 30 s or a dropped connection is retried twice
-# (resuming where the server allows it). Any break cleans up the partial files and shows a plain notice with
-# "Open help page" (the site's help) or another way on; the app is never left half set up.
+# like a zip, must have a sane size). Downloads carry on where they stopped (Dl-Fetch): a dropped connection, a stall
+# or a cut-short transfer is retried automatically, a Cancel, a failed try or a restart of the app keeps the partial
+# download for the next try, and a file is only used once its size (and SHA-256 where known) match. When the
+# connection keeps failing the player gets "Try again" (it carries on); a broken link or a wrong file shows a plain
+# notice with "Open help page" (the site's help) or another way on; the app is never left half set up.
 #
 # First launch is one step ("Set up everything", Setup-First): one dialog for the game + the Reforge pack (or "I
 # already have the game", a checkbox to skip the pack, "Install on my Quest"), then one progress window for both
@@ -30,7 +32,9 @@
 # it); UA_PACK_NOUI=1 shows no progress window. UA_DIALOG_SNAP=<folder> saves every dialog and progress window as a
 # PNG there and answers each dialog with its default button (opens no browser). UA_TEST_CANCEL_MB=<n> presses Cancel
 # once a download passes n MB. UA_LINKS_FILE=<file> reads that file instead of links.json (no request);
-# UA_UPDATE_AUTO=update|download|later|skip answers the new-version notice. A build with test hooks (UA_TEST_HOOKS=ON)
+# UA_UPDATE_AUTO=update|download|later|skip answers the new-version notice. UA_RETRY_AUTO=again (or a number n)
+# answers "Try again" once (n times), then UA_NOTICE_AUTO answers it; UA_DL_WAITS="<s> ..." (waits between tries) and
+# UA_DL_STALL_SECS=<s> (stall time) shorten the download retries. A build with test hooks (UA_TEST_HOOKS=ON)
 # also accepts updates signed with the test key (update_key_test in downloads.txt); release builds never carry it.
 
 # ---------------------------------------------------------------- shared helpers (also used by UA-Reforged.ps1)
@@ -127,6 +131,7 @@ function Is-GameDir([string]$d) {
 $script:DL_CONF = Join-Path $HERE 'downloads.txt'
 $script:PACK_DL = Join-Path $SUPPORT 'reforge-pack-download'
 $script:GAME_DL = Join-Path $SUPPORT 'game-download'
+$script:DL_PARTS = Join-Path $SUPPORT 'partial-downloads'   # downloads in progress (<name>.part + <name>.part.id), kept between tries
 $script:GAME_ORIG = Join-Path $SUPPORT 'game-original'
 $script:PACK_OFF = Join-Path $SUPPORT 'reforge-pack-offer-off'
 $script:DL_UA = 'UA-Reforged (Windows)'
@@ -143,6 +148,7 @@ $script:PACK_ASKED = $false
 $script:L_GAME_URL = ''; $script:L_GAME_MIN = ''; $script:L_GAME_MAX = ''; $script:L_PACK_URL = ''; $script:L_PACK_PARTS = @()
 $script:L_HELP = ''; $script:L_PACK_HELP = ''; $script:L_MESSAGE = ''
 $script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''; $script:DL_WHY = ''; $script:ST_DETAIL = ''
+$script:PC_TAG = ''; $script:PC_NET = 0; $script:DL_NET = 0; $script:DL_BADSUM = 0; $script:DL_AGAIN = ''; $script:PACK_WHY = ''; $script:DL_FILE = ''
 
 function Conf([string]$k) {
     if (-not [IO.File]::Exists($script:DL_CONF)) { return }
@@ -696,7 +702,7 @@ function Update-Apply([string]$mine) {
     if (-not (Dl-Precheck $script:L_UPD_URL 0 0 $u.Bytes $false '4D-5A')) { return (Update-Fail $script:PC_WHY) }
     $f = Join-Path $script:UPDATE_DL $u.Name
     $script:DL_WHAT = 'Downloading the update'; $script:DL_BASE = 0; $script:DL_TOTAL = $u.Bytes; $script:DL_MAXSIZE = $u.Bytes
-    $rc = Dl-Fetch $script:L_UPD_URL $f; $script:DL_MAXSIZE = $null
+    $rc = Dl-Fetch $script:L_UPD_URL $f $u.Bytes $u.Sha; $script:DL_MAXSIZE = $null
     if ($rc -eq 130) { Dl-UiClose; try { Remove-Tree $script:UPDATE_DL } catch { }; Log 'update: cancelled; the current version starts'; return $false }
     if ($rc -ne 0) { return (Update-Fail $script:DL_WHY) }
     Dl-Status 92 'Checking the update...'
@@ -853,10 +859,11 @@ function Dl-Progress {
 }
 
 # ---------------------------------------------------------------- link check: Dl-Precheck <url> <min> <max> <exact>
-# sets PC_SIZE (0 = unknown), PC_RANGES (1/0); on failure returns $false with PC_WHY in plain words
+# sets PC_SIZE (0 = unknown), PC_RANGES (1/0), PC_TAG (the server's ETag or Last-Modified: which version of the file);
+# on failure returns $false with PC_WHY in plain words and PC_NET = 1 when it was the connection or a passing server problem
 function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact = 0, [bool]$quiet = $false, [string]$want = '50-4B-03-04') {
     $h = Join-Path $script:DL_DIR 'check.h'; $b = Join-Path $script:DL_DIR 'check.b'
-    $script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_WHY = ''; $script:ST_DETAIL = ''
+    $script:PC_SIZE = [long]0; $script:PC_RANGES = 0; $script:PC_TAG = ''; $script:PC_WHY = ''; $script:PC_NET = 0; $script:ST_DETAIL = ''
     foreach ($x in @($h, $b)) { if ([IO.File]::Exists($x)) { [IO.File]::Delete($x) } }
     if (-not [IO.File]::Exists($script:CURL)) {
         $script:PC_WHY = 'this version of Windows has no curl.exe (Windows 10 version 1803 or newer is needed)'
@@ -868,7 +875,7 @@ function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact 
     $i = $w.IndexOf("`t")
     if ($i -ge 0) { $code = $w.Substring(0, $i); $type = $w.Substring($i + 1).ToLowerInvariant() } else { $code = $w; $type = '' }
     if ($rc -ne 0) {
-        $script:ST_DETAIL = "$rc"
+        $script:ST_DETAIL = "$rc"; $script:PC_NET = 1
         switch ($rc) {
             6 { $script:PC_WHY = 'the server name could not be found' }
             7 { $script:PC_WHY = 'the server could not be reached' }
@@ -878,21 +885,29 @@ function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact 
         }
         Log "link check: $url -> $($script:PC_WHY)"; return $false
     }
-    if ($code -ne '200' -and $code -ne '206') { $script:ST_DETAIL = "$code"; $script:PC_WHY = "the server answered HTTP $code instead of the file"; Log "link check: $url -> $($script:PC_WHY)"; return $false }
+    if ($code -ne '200' -and $code -ne '206') {
+        if ($code -match '^(408|429|5\d\d)$') { $script:PC_NET = 1 }
+        $script:ST_DETAIL = "$code"; $script:PC_WHY = "the server answered HTTP $code instead of the file"; Log "link check: $url -> $($script:PC_WHY)"; return $false
+    }
     if ($type -like 'text/html*' -or $type -like 'application/xhtml*') { $script:PC_WHY = 'the link now leads to a web page, not to the file'; Log "link check: $url -> $($script:PC_WHY) ($type)"; return $false }
     $magic = ''
     $wn = [int](($want.Length + 1) / 3)
     try { $fs = [IO.File]::OpenRead($b); $buf = New-Object byte[] $wn; $n = $fs.Read($buf, 0, $wn); $fs.Dispose(); if ($n -eq $wn) { $magic = [BitConverter]::ToString($buf) } } catch { }
     if ($magic -ne $want) { $script:PC_WHY = $(if ($want -eq '50-4B-03-04') { 'the link does not lead to a zip file' } else { 'the link does not lead to the expected file' }); Log "link check: $url -> $($script:PC_WHY)"; return $false }
     # the last response's headers (redirects come first)
-    $cr = ''; $cl = ''
+    $cr = ''; $cl = ''; $et = ''; $lm = ''
     if ([IO.File]::Exists($h)) {
         foreach ($line in [IO.File]::ReadAllLines($h)) {
-            if ($line -match '^HTTP/') { $cr = ''; $cl = '' }
+            if ($line -match '^HTTP/') { $cr = ''; $cl = ''; $et = ''; $lm = '' }
             elseif ($line -match '^(?i)content-range:\s*(.*)$') { $cr = $Matches[1].Trim() }
             elseif ($line -match '^(?i)content-length:\s*(.*)$') { $cl = $Matches[1].Trim() }
+            elseif ($line -match '^(?i)etag:\s*(.*)$') { $et = $Matches[1].Trim() }
+            elseif ($line -match '^(?i)last-modified:\s*(.*)$') { $lm = $Matches[1].Trim() }
         }
     }
+    $tg = if ($et) { $et } else { $lm }
+    $tg = $tg -replace '[^A-Za-z0-9 ,:/"._+=-]', ''; if ($tg.Length -gt 120) { $tg = $tg.Substring(0, 120) }
+    $script:PC_TAG = $tg
     $sz = if ($code -eq '206') { $script:PC_RANGES = 1; ($cr -split '/')[-1] } else { $cl }
     $parsed = [long]0
     if ([long]::TryParse($sz, [ref]$parsed)) { $script:PC_SIZE = $parsed } else { $script:PC_SIZE = [long]0 }
@@ -906,40 +921,134 @@ function Dl-Precheck([string]$url, [long]$min = 0, [long]$max = 0, [long]$exact 
     return $true
 }
 
-# ---------------------------------------------------------------- download: Dl-Fetch <url> <file>
-# 2 automatic retries after a stall (no bytes for 30 s) or a dropped connection; resumes when the server allows it.
-# returns 0, 130 (cancelled) or 1 with DL_WHY
-function Dl-Fetch([string]$url, [string]$f) {
-    $try = 0; $script:DL_WHY = ''; $script:DL_FILE = $f; $script:DL_PROGRESS = { Dl-Progress }
+# ---------------------------------------------------------------- download: Dl-Fetch <url> <file> [bytes] [sha256]
+# The file grows in DL_PARTS\<name>.part; <name>.part.id says which file it belongs to (size, SHA-256 and the server's
+# version tag), so a partial download survives a Cancel, a failed try and a restart of the app, and the next try carries
+# on where it stopped (HTTP range request) when the server allows it and the file is still the same version; else it
+# starts over. A dropped connection, a stall (under 1 KB/s for 60 s) or a cut-short transfer is retried at once,
+# carrying on: up to 5 tries in a row that bring nothing new, with waits of 3, 6, 12 and 24 s between them (one
+# connection at a time: polite to the hosts), at most 40 tries in all. A server that ignores the range (200) or refuses
+# it (416) is downloaded from the start. The file is used only when its size (and SHA-256, when given) match; a
+# complete download with the wrong SHA-256 is fetched once more from the start.
+# Returns 0 (the file is at <file>), 130 (cancelled; the partial download stays), or 1 with DL_WHY and DL_NET = 1 when
+# the connection kept failing (the partial download stays: offer Try again), else DL_NET = 0 (DL_BADSUM = 1: wrong SHA-256).
+function Dl-Part([string]$f) { return (Join-Path $script:DL_PARTS ([IO.Path]::GetFileName($f) + '.part')) }
+function Dl-PartId([long]$bytes, [string]$sum) {
+    $t = if ($script:PC_TAG) { $script:PC_TAG } else { '-' }; $h = if ($sum) { $sum } else { '-' }
+    return "bytes=$bytes sha256=$h tag=$t"
+}
+function Del-File([string]$f) { if ([IO.File]::Exists($f)) { [IO.File]::Delete($f) } }
+function Dl-Sleep([int]$secs) { # a wait the Cancel button can end ($false)
+    for ($k = 0; $k -lt $secs * 4; $k++) { if ($script:DL_CANCEL) { return $false }; Pump; Start-Sleep -Milliseconds 250 }
+    return (-not $script:DL_CANCEL)
+}
+function Dl-Fetch([string]$url, [string]$f, [long]$want = 0, [string]$sum = '') {
+    $script:DL_WHY = ''; $script:DL_NET = 0; $script:DL_BADSUM = 0
     $errAll = Join-Path $script:DL_DIR 'curl.err'
+    $waits = @(3, 6, 12, 24); if ($env:UA_DL_WAITS) { $waits = @($env:UA_DL_WAITS -split '\s+' | Where-Object { $_ } | ForEach-Object { [int]$_ }) }
+    $stall = if ($env:UA_DL_STALL_SECS) { [string][int]$env:UA_DL_STALL_SECS } else { '60' }
+    $name = [IO.Path]::GetFileName($f)
+    try { [void][IO.Directory]::CreateDirectory($script:DL_PARTS) } catch { $script:DL_WHY = 'the download folder could not be created'; return 1 }
+    $p = Dl-Part $f; $id = Dl-PartId $want $sum
+    if ([IO.File]::Exists($p)) {
+        $old = ''; try { $old = [IO.File]::ReadAllText("$p.id").Trim() } catch { }
+        if ($want -gt 0 -and $script:PC_RANGES -eq 1 -and $old -eq $id -and (File-Size $p) -le $want) {
+            Log "download: carrying on from $(Human (File-Size $p)) of $(Human $want) ($name)"
+        } else {
+            Log "download: the partial download of $name is for another version of the file or cannot be resumed; starting over"
+            Del-File $p
+        }
+    }
+    [IO.File]::WriteAllText("$p.id", $id + "`n")
+    $script:DL_FILE = $p; $script:DL_PROGRESS = { Dl-Progress }; Dl-Progress
+    $tries = 0; $fails = 0; $redo = $false
     while ($true) {
-        $resume = @()
-        if ($script:PC_RANGES -eq 1 -and (File-Size $f) -gt 0) { $resume = @('-C', '-') }
-        if ($script:PC_RANGES -ne 1 -and [IO.File]::Exists($f)) { [IO.File]::Delete($f) }
-        $a = @('-fL', '-sS', '--connect-timeout', '15', '--speed-limit', '1', '--speed-time', '30', '--max-redirs', '8')
-        if ($script:DL_MAXSIZE) { $a += @('--max-filesize', [string]$script:DL_MAXSIZE) }
-        $a += @('-A', $script:DL_UA) + $resume + @('-o', $f, $url)
-        $p = Start-Curl $a $false
-        $rc = Dl-Wait $p
-        try { if ([IO.File]::Exists($script:CURL_ERR)) { [IO.File]::AppendAllText($errAll, [IO.File]::ReadAllText($script:CURL_ERR)) } } catch { }
-        if ($rc -eq 0) { break }
-        if ($rc -eq 130) { $script:DL_PROGRESS = $null; return 130 }
-        if ($rc -eq 33) { $script:PC_RANGES = 0; if ([IO.File]::Exists($f)) { [IO.File]::Delete($f) } }
+        $have = File-Size $p; $resume = @()
+        if ($have -gt 0 -and $script:PC_RANGES -eq 1) { $resume = @('-C', '-') } elseif ($have -gt 0) { Del-File $p; $have = [long]0 }
+        $code = ''
+        if ($want -gt 0 -and $have -ge $want) { $rc = 0 }
+        else {
+            $a = @('-fL', '-sS', '--connect-timeout', '15', '--speed-limit', '1024', '--speed-time', $stall, '--max-redirs', '8')
+            if ($script:DL_MAXSIZE) { $a += @('--max-filesize', [string]$script:DL_MAXSIZE) }
+            $a += @('-A', $script:DL_UA) + $resume + @('-w', '%{http_code}', '-o', $p, $url)
+            $proc = Start-Curl $a $true
+            $task = $proc.StandardOutput.ReadToEndAsync()
+            $rc = Dl-Wait $proc
+            try { $code = ($task.Result -replace '[^0-9]', '') } catch { }
+            try { if ([IO.File]::Exists($script:CURL_ERR)) { [IO.File]::AppendAllText($errAll, [IO.File]::ReadAllText($script:CURL_ERR)) } } catch { }
+        }
+        if ($rc -eq 130) { $script:DL_PROGRESS = $null; Log "download: stopped at $(Human (File-Size $p)); the partial download stays for next time"; return 130 }
+        $new = File-Size $p
+        # asked to carry on, the server sent the whole file (curl 33) or refused the range (416): start over without ranges
+        if ($rc -eq 33 -or $code -eq '416') {
+            Log "download: the server does not carry on downloads (curl $rc, HTTP $code); starting over"
+            $script:PC_RANGES = 0; Del-File $p; $tries++
+            if ($tries -lt 40) { continue }
+            $script:DL_WHY = 'the server does not carry on downloads'; $script:DL_PROGRESS = $null; return 1
+        }
+        if ($rc -eq 0 -and $want -gt 0 -and $new -lt $want) { $rc = 18 }   # closed early without an error
+        if ($rc -eq 0) {
+            if ($want -gt 0 -and $new -gt $want) { Del-File $p; Del-File "$p.id"; $script:DL_WHY = 'the downloaded file is bigger than expected'; $script:DL_PROGRESS = $null; return 1 }
+            if ($sum) {
+                $script:DL_PROGRESS = $null
+                if ($script:DL_TOTAL -gt 0) { Dl-Status ([int](($script:DL_BASE + $new) * 90 / $script:DL_TOTAL)) "Checking $name..." }
+                $got = Get-Sha256 $p
+                if ($script:DL_CANCEL) { Log "download: stopped while checking; the download stays for next time"; return 130 }
+                if ($got -ne $sum.ToLowerInvariant()) {
+                    Del-File $p
+                    if (-not $redo) { $redo = $true; Log "download: $name is complete but its SHA-256 does not match; downloading it once more from the start"; $script:DL_PROGRESS = { Dl-Progress }; continue }
+                    Del-File "$p.id"; $script:DL_BADSUM = 1; $script:DL_WHY = "a downloaded file is damaged or not the expected file ($name)"; return 1
+                }
+            }
+            try { Del-File $f; [IO.File]::Move($p, $f) } catch { $script:DL_WHY = 'the downloaded file could not be put in place'; $script:DL_PROGRESS = $null; return 1 }
+            Del-File "$p.id"; $script:DL_PROGRESS = $null; return 0
+        }
         $script:ST_DETAIL = "$rc"
         switch ($rc) {
-            28 { $script:DL_WHY = 'the download stalled (no data for 30 seconds)' }
+            28 { $script:DL_WHY = "the download stalled (almost no data for $stall seconds)" }
             { $_ -in 18, 52, 55, 56, 92 } { $script:DL_WHY = 'the connection dropped during the download' }
-            22 { $script:DL_WHY = "the server stopped serving the file ($(Curl-LastError))" }
+            6 { $script:DL_WHY = 'the server name could not be found' }
+            7 { $script:DL_WHY = 'the server could not be reached' }
+            { $_ -in 35, 51, 60 } { $script:DL_WHY = 'the secure connection failed' }
+            22 { $script:DL_WHY = "the server stopped serving the file (HTTP $code)" }
             63 { $script:DL_WHY = 'the file on the server is far too big' }
             default { $script:DL_WHY = "the download failed (curl $rc)" }
         }
-        $try++
-        Log "download: $url -> $($script:DL_WHY) (attempt $try)"
-        if ($try -gt 2) { $script:DL_PROGRESS = $null; return 1 }
-        if ($rc -eq 22 -and (File-Size $f) -eq 0) { $script:DL_PROGRESS = $null; return 1 }
-        for ($k = 0; $k -lt 8; $k++) { Pump; Start-Sleep -Milliseconds 250 }
+        if ($rc -eq 63) { Del-File $p; Del-File "$p.id"; $script:DL_PROGRESS = $null; return 1 }
+        $tries++
+        if ($new - $have -ge 65536) { $fails = 0 } else { $fails++ }
+        Log "download: $url -> $($script:DL_WHY) at $(Human $new) (try $tries)"
+        # "not found", "forbidden" and the like are not the connection: no point asking again (the partial stays)
+        if ($rc -eq 22 -and $code -notmatch '^(408|429|5\d\d)$') { $script:DL_PROGRESS = $null; return 1 }
+        if ($fails -ge 5 -or $tries -ge 40) { $script:DL_NET = 1; $script:DL_PROGRESS = $null; return 1 }
+        $w = if ($fails -eq 0) { $waits[0] } elseif ($fails - 1 -lt $waits.Count) { $waits[$fails - 1] } else { $waits[-1] }
+        $now = $script:DL_BASE + $new
+        if ($script:DL_TOTAL -gt 0) { Dl-Status ([int]($now * 90 / $script:DL_TOTAL)) ("{0}: {1} of {2} - it stopped, carrying on in {3} s..." -f $script:DL_WHAT, (Human $now), (Human $script:DL_TOTAL), $w) }
+        else { Dl-Status 5 ("{0}: {1} - it stopped, carrying on in {2} s..." -f $script:DL_WHAT, (Human $now), $w) }
+        if (-not (Dl-Sleep $w)) { $script:DL_PROGRESS = $null; Log 'download: stopped while waiting; the partial download stays for next time'; return 130 }
     }
-    $script:DL_PROGRESS = $null; return 0
+}
+
+# Dl-Again <what went wrong> <bytes already here> <bytes in all> [stats code]: the connection kept failing; the partial
+# download stays. Asks the player; sets DL_AGAIN = again (Try again: carries on), help (Open help page) or later
+# (Not now / closed). Testing: UA_RETRY_AUTO=again (or a number n) answers Try again once (n times); then
+# UA_NOTICE_AUTO answers (help, later; folder = later).
+function Dl-Again([string]$why, [long]$have, [long]$total, [string]$code = '') {
+    Dl-UiClose
+    if ($code) { Stats-Error $code $script:ST_DETAIL }
+    if ($have -gt 0) {
+        $msg = 'The download keeps stopping. Check your connection and press Try again; it will carry on where it stopped'
+        if ($total -gt 0) { $msg += " ($(Human $have) of $(Human $total) are already downloaded)." } else { $msg += '.' }
+    } else { $msg = 'The download could not get going. Check your connection and press Try again.' }
+    $msg += "`r`n`r`nWhat went wrong: $(No-Paths $why)."
+    Log ('notice: ' + ($msg -replace '\s+', ' '))
+    $n = 0
+    if ($env:UA_RETRY_AUTO -eq 'again') { $n = 1 } elseif ($env:UA_RETRY_AUTO -match '^\d+$') { $n = [int]$env:UA_RETRY_AUTO }
+    if ($n -gt 0) { $env:UA_RETRY_AUTO = $(if ($n -gt 1) { [string]($n - 1) } else { '' }); $b = 'Try again' }
+    elseif ($env:UA_NOTICE_AUTO) { $b = '' + $env:UA_NOTICE_AUTO }
+    else { $b = Ask $msg 'Try again' @('Not now', 'Open help page', 'Try again') }
+    $script:DL_AGAIN = switch ($b) { { $_ -in 'Try again', 'again' } { 'again' } { $_ -in 'help', 'Open help page' } { 'help' } default { 'later' } }
+    Log "again: $($script:DL_AGAIN)"
 }
 
 # ---------------------------------------------------------------- SHA-256 + unzip (the window keeps answering)
@@ -1078,13 +1187,26 @@ function Game-Get {
     $script:DL_DIR = $script:GAME_DL
     try { [void][IO.Directory]::CreateDirectory($script:DL_DIR) } catch { return 1 }
     if ((Free-Bytes $SUPPORT) -lt 1500000000) { return (Game-Broken 'there is not enough free disk space (it needs about 1.5 GB)') }
-    Dl-UiStart 'Urban Assault (from the Metropolis Dawn community)'
-    if (-not (Dl-Precheck $url $min $max 0)) { return (Game-Broken $script:PC_WHY) }
     $f = Join-Path $script:DL_DIR 'openua-package.zip'
-    $script:DL_WHAT = 'Downloading the game'; $script:DL_BASE = [long]0; $script:DL_TOTAL = $script:PC_SIZE; $script:DL_MAXSIZE = $max
-    $rc = Dl-Fetch $url $f; $script:DL_MAXSIZE = $null
-    if ($rc -eq 130) { Dl-UiClose; Log 'get the game: cancelled (the part stays for a resume)'; return 1 }
-    if ($rc -ne 0) { return (Game-Broken $script:DL_WHY) }
+    while ($true) {
+        Dl-UiStart 'Urban Assault (from the Metropolis Dawn community)'
+        if (-not (Dl-Precheck $url $min $max 0)) {
+            if ($script:PC_NET -ne 1) { return (Game-Broken $script:PC_WHY) }
+            $script:DL_WHY = $script:PC_WHY
+        } else {
+            # a complete download kept from a try that was stopped while unpacking
+            if ($script:PC_SIZE -gt 0 -and (File-Size $f) -eq $script:PC_SIZE) { Log 'get the game: the download is already here'; break }
+            $script:DL_WHAT = 'Downloading the game'; $script:DL_BASE = [long]0; $script:DL_TOTAL = $script:PC_SIZE; $script:DL_MAXSIZE = $max
+            $rc = Dl-Fetch $url $f $script:PC_SIZE; $script:DL_MAXSIZE = $null
+            if ($rc -eq 130) { Dl-UiClose; Log 'get the game: cancelled (the partial download stays for next time)'; return 1 }
+            if ($rc -eq 0) { break }
+            if ($script:DL_NET -ne 1) { return (Game-Broken $script:DL_WHY) }
+        }
+        # the connection keeps failing: Try again carries on where it stopped
+        Dl-Again $script:DL_WHY (File-Size (Dl-Part $f)) $script:PC_SIZE 'game_download_failed'
+        if ($script:DL_AGAIN -eq 'help') { Open-Help $(if ($script:L_HELP) { $script:L_HELP } else { 'https://uareforged.pages.dev/downloads/#nogame-h' }); return 2 }
+        if ($script:DL_AGAIN -ne 'again') { Log 'get the game: not now (the partial download stays for next time)'; return 1 }
+    }
     $got = File-Size $f
     if ($got -lt $min) { return (Game-Broken "the downloaded file is far too small ($(Human $got))") }
     Dl-Status 92 'Unpacking the game...'
@@ -1135,6 +1257,18 @@ function Pack-Parts {
 }
 function Pack-Total { $t = [long]0; foreach ($p in @(Pack-Parts)) { $t += $p.Bytes }; return $t }
 
+# Pack-Fail <why> <1 = the connection>: the connection kept failing -> 75 (Pack-Get offers Try again; the parts stay),
+# else the notice (Pack-Broken)
+function Pack-Fail([string]$why, [int]$net) { if ($net -eq 1) { $script:PACK_WHY = $why; Dl-UiClose; return 75 }; return (Pack-Broken $why) }
+function Pack-Have { # bytes of the pack already here: checked parts + partial downloads (also an older version's partial part)
+    $t = [long]0
+    foreach ($p in @(Pack-Parts)) {
+        $f = Join-Path $script:PACK_DL $p.Name
+        if ([IO.File]::Exists($f + '.ok') -and [IO.File]::Exists($f)) { $t += $p.Bytes } else { $t += (File-Size (Dl-Part $f)) + (File-Size $f) }
+    }
+    return $t
+}
+
 function Pack-Download {
     $total = Pack-Total; $done = [long]0; $script:ST_DETAIL = ''; $part = 0
     $script:DL_DIR = $script:PACK_DL
@@ -1145,25 +1279,27 @@ function Pack-Download {
     # 1. check every link first, then download + check every part (a checked part is not fetched again)
     foreach ($p in $parts) {
         if ([IO.File]::Exists((Join-Path $script:DL_DIR ($p.Name + '.ok')))) { continue }
-        if (-not (Dl-Precheck ($script:L_PACK_URL + $p.Name) 0 0 $p.Bytes)) { return (Pack-Broken $script:PC_WHY) }
+        if (-not (Dl-Precheck ($script:L_PACK_URL + $p.Name) 0 0 $p.Bytes)) { return (Pack-Fail $script:PC_WHY $script:PC_NET) }
         if ($script:DL_CANCEL) { Dl-UiClose; return 130 }
     }
     foreach ($p in $parts) {
         $f = Join-Path $script:DL_DIR $p.Name; $part++
         if ([IO.File]::Exists($f + '.ok') -and [IO.File]::Exists($f)) { $done += $p.Bytes; continue }
-        if ((File-Size $f) -gt $p.Bytes) { [IO.File]::Delete($f) }
         Log "reforge pack: downloading $($script:L_PACK_URL)$($p.Name)"
-        if (-not (Dl-Precheck ($script:L_PACK_URL + $p.Name) 0 0 $p.Bytes $true)) { return (Pack-Broken $script:PC_WHY) }
-        $script:DL_WHAT = 'Downloading the Reforge pack'; $script:DL_BASE = $done; $script:DL_TOTAL = $total
-        if ((File-Size $f) -lt $p.Bytes) {
-            $rc = Dl-Fetch ($script:L_PACK_URL + $p.Name) $f
-            if ($rc -eq 130) { Dl-UiClose; return 130 }
-            if ($rc -ne 0) { return (Pack-Broken $script:DL_WHY) }
+        if (-not (Dl-Precheck ($script:L_PACK_URL + $p.Name) 0 0 $p.Bytes $true)) { return (Pack-Fail $script:PC_WHY $script:PC_NET) }
+        # a part an older version of the app stopped (it kept it in this folder) carries on from here
+        $pp = Dl-Part $f
+        if ([IO.File]::Exists($f) -and -not [IO.File]::Exists($pp) -and (File-Size $f) -le $p.Bytes) {
+            try { [void][IO.Directory]::CreateDirectory($script:DL_PARTS); [IO.File]::Move($f, $pp); [IO.File]::WriteAllText("$pp.id", (Dl-PartId $p.Bytes $p.Sum) + "`n") } catch { }
         }
-        Dl-Status ([int](($done + $p.Bytes) * 90 / $total)) "Checking $($p.Name)..."
-        $got = Get-Sha256 $f
-        if ($script:DL_CANCEL) { Dl-UiClose; return 130 }
-        if ($got -ne $p.Sum) { return (Pack-Broken "a downloaded part is damaged or not the expected file ($($p.Name))" 'pack_checksum_mismatch' "$part") }
+        Del-File $f; Del-File ($f + '.ok')
+        $script:DL_WHAT = 'Downloading the Reforge pack'; $script:DL_BASE = $done; $script:DL_TOTAL = $total
+        $rc = Dl-Fetch ($script:L_PACK_URL + $p.Name) $f $p.Bytes $p.Sum
+        if ($rc -eq 130) { Dl-UiClose; return 130 }
+        if ($rc -ne 0) {
+            if ($script:DL_BADSUM -eq 1) { return (Pack-Broken $script:DL_WHY 'pack_checksum_mismatch' "$part") }
+            return (Pack-Fail $script:DL_WHY $script:DL_NET)
+        }
         [IO.File]::WriteAllText($f + '.ok', ''); $done += $p.Bytes
     }
     # 2. unpack next to the download, rebuild the shared files and check them, then move into place
@@ -1200,8 +1336,7 @@ function Pack-Offer {
     if ([IO.File]::Exists($script:PACK_OFF) -and -not $env:UA_PACK_AUTO) { return }
     if (-not $script:LINKS_DONE) { Links-Load }
     if (-not $script:L_PACK_URL -or $script:L_PACK_URL -like '*PACK-URL-NOT-SET*') { Log 'reforge pack: none installed; this build has no download address'; return }
-    $total = Pack-Total; $have = [long]0
-    foreach ($p in @(Pack-Parts)) { $have += File-Size (Join-Path $script:PACK_DL $p.Name) }
+    $total = Pack-Total; $have = Pack-Have
     $answer = '' + $env:UA_PACK_AUTO
     if (-not $answer) {
         $verb = 'Download'
@@ -1223,7 +1358,15 @@ function Pack-Offer {
 function Pack-Get {
     $script:PACK_ASKED = $true
     if ([IO.File]::Exists($script:PACK_OFF)) { [IO.File]::Delete($script:PACK_OFF) }
-    $rc = Pack-Download
+    while ($true) {
+        $rc = Pack-Download
+        if ($rc -ne 75) { break }
+        # the connection keeps failing: Try again carries on where it stopped
+        Dl-Again $script:PACK_WHY (Pack-Have) (Pack-Total) 'pack_download_failed'; $rc = 1
+        if ($script:DL_AGAIN -eq 'again') { continue }
+        if ($script:DL_AGAIN -eq 'help') { Open-Help $(if ($script:L_PACK_HELP) { $script:L_PACK_HELP } else { 'https://uareforged.pages.dev/downloads/#install-h' }) }
+        Log 'reforge pack: not now (the partial download stays for next time)'; break
+    }
     if ($rc -eq 130) {
         Log 'reforge pack: download cancelled (the parts stay for a resume)'
         if (-not "$env:UA_PACK_AUTO$env:UA_SETUP_AUTO$env:UA_PLAY_AUTO$env:UA_GAME_AUTO") { [void](Ask 'Download stopped. The game starts with the 1998 look; next time UA Reforged offers to resume the download.' 'OK' @('OK')) }
@@ -1348,7 +1491,7 @@ function Play-Menu {
         $canPack = -not [IO.Directory]::Exists((Join-Path $PACK 'hd-models')) -and (Pack-Ready)
         $have = [long]0; $pbtn = 'Get the Reforge pack...'
         if ($canPack) {
-            foreach ($p in @(Pack-Parts)) { $have += File-Size (Join-Path $script:PACK_DL $p.Name) }
+            $have = Pack-Have
             if ($have -gt 0) { $pbtn = 'Resume the Reforge pack...' }
         }
         $idx = $sel

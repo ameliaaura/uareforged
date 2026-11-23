@@ -113,6 +113,28 @@ function Q-Broken([string]$why) {
     return 1
 }
 
+# Q-Fetch <window title> <progress text> <what, for Q_WHY> <url> <file> <bytes> <sha256>: check the link and download
+# (carries on where an earlier try stopped; downloads.ps1 Dl-Fetch). When the connection keeps failing the player gets
+# Try again. Returns 0, 130 (cancelled or Not now; the partial download stays) or 1 with Q_WHY.
+function Q-Fetch([string]$title, [string]$what, [string]$label, [string]$url, [string]$f, [long]$bytes, [string]$sum) {
+    while ($true) {
+        Dl-UiStart $title
+        if (-not (Dl-Precheck $url 0 0 $bytes)) {
+            if ($script:PC_NET -ne 1) { $script:Q_WHY = "${label}: $($script:PC_WHY)"; return 1 }
+            $script:DL_WHY = $script:PC_WHY
+        } else {
+            $script:DL_WHAT = $what; $script:DL_BASE = [long]0; $script:DL_TOTAL = $bytes; $script:DL_MAXSIZE = $bytes
+            $rc = Dl-Fetch $url $f $bytes $sum; $script:DL_MAXSIZE = $null
+            if ($rc -eq 130) { Dl-UiEnd; $script:Q_WHY = 'cancelled'; return 130 }
+            if ($rc -eq 0) { return 0 }
+            if ($script:DL_NET -ne 1) { $script:Q_WHY = "${label}: $($script:DL_WHY)"; return 1 }
+        }
+        Dl-Again $script:DL_WHY (File-Size (Dl-Part $f)) $bytes
+        if ($script:DL_AGAIN -eq 'help') { Open-Help $script:Q_HELP; $script:Q_WHY = 'cancelled'; return 130 }
+        if ($script:DL_AGAIN -ne 'again') { $script:Q_WHY = 'cancelled'; return 130 }
+    }
+}
+
 # ---------------------------------------------------------------- adb: Google's own zip, downloaded on first use
 function Q-AdbReady {
     if ($env:UA_QUEST_ADB) { $script:ADB = $env:UA_QUEST_ADB; return [int](-not [IO.File]::Exists($script:ADB)) }
@@ -123,13 +145,9 @@ function Q-AdbReady {
     $script:DL_DIR = $script:Q_PT + '.download'
     if (Test-Path -LiteralPath $script:DL_DIR) { Remove-Tree $script:DL_DIR }
     [void][IO.Directory]::CreateDirectory($script:DL_DIR)
-    Dl-UiStart "Google's Android platform tools (adb)"
-    if (-not (Dl-Precheck $script:Q_ADB_URL 0 0 $script:Q_ADB_BYTES)) { $script:Q_WHY = "Google's platform tools download: $($script:PC_WHY)"; Remove-Tree $script:DL_DIR; return 1 }
     $f = Join-Path $script:DL_DIR 'platform-tools.zip'
-    $script:DL_WHAT = "Downloading Google's platform tools"; $script:DL_BASE = [long]0; $script:DL_TOTAL = $script:Q_ADB_BYTES; $script:DL_MAXSIZE = $script:Q_ADB_BYTES
-    $rc = Dl-Fetch $script:Q_ADB_URL $f; $script:DL_MAXSIZE = $null
-    if ($rc -eq 130) { Dl-UiEnd; Remove-Tree $script:DL_DIR; $script:Q_WHY = 'cancelled'; return 130 }
-    if ($rc -ne 0) { $script:Q_WHY = "Google's platform tools download: $($script:DL_WHY)"; Remove-Tree $script:DL_DIR; return 1 }
+    $rc = Q-Fetch "Google's Android platform tools (adb)" "Downloading Google's platform tools" "Google's platform tools download" $script:Q_ADB_URL $f $script:Q_ADB_BYTES $script:Q_ADB_SHA
+    if ($rc -ne 0) { Remove-Tree $script:DL_DIR; return $rc }
     Dl-Status 95 "Checking Google's platform tools..."
     $got = Get-Sha256 $f
     if ($got -ne $script:Q_ADB_SHA) { Log "quest: platform tools sha256 $got"; $script:Q_WHY = 'the downloaded platform tools are not the expected file'; Remove-Tree $script:DL_DIR; return 1 }
@@ -203,13 +221,9 @@ function Q-Apk {
     $script:DL_DIR = Join-Path $script:Q_DIR 'download'
     if (Test-Path -LiteralPath $script:DL_DIR) { Remove-Tree $script:DL_DIR }
     [void][IO.Directory]::CreateDirectory($script:DL_DIR)
-    Dl-UiStart 'UA Reforged VR (for Meta Quest)'
-    if (-not (Dl-Precheck $script:Q_APK_URL 0 0 $script:Q_APK_BYTES)) { $script:Q_WHY = "the VR app download: $($script:PC_WHY)"; Remove-Tree $script:DL_DIR; return 1 }
     $f = Join-Path $script:DL_DIR $script:Q_APK_NAME
-    $script:DL_WHAT = 'Downloading UA Reforged VR'; $script:DL_BASE = [long]0; $script:DL_TOTAL = $script:Q_APK_BYTES; $script:DL_MAXSIZE = $script:Q_APK_BYTES
-    $rc = Dl-Fetch $script:Q_APK_URL $f; $script:DL_MAXSIZE = $null
-    if ($rc -eq 130) { Dl-UiEnd; Remove-Tree $script:DL_DIR; $script:Q_WHY = 'cancelled'; return 130 }
-    if ($rc -ne 0) { $script:Q_WHY = "the VR app download: $($script:DL_WHY)"; Remove-Tree $script:DL_DIR; return 1 }
+    $rc = Q-Fetch 'UA Reforged VR (for Meta Quest)' 'Downloading UA Reforged VR' 'the VR app download' $script:Q_APK_URL $f $script:Q_APK_BYTES $want
+    if ($rc -ne 0) { Remove-Tree $script:DL_DIR; return $rc }
     $got = Get-Sha256 $f
     if ($got -ne $want) { Log "quest: APK sha256 $got"; $script:Q_WHY = 'the downloaded VR app is damaged or not the expected file'; Remove-Tree $script:DL_DIR; return 1 }
     foreach ($x in @($script:Q_APK, $ok)) { if ([IO.File]::Exists($x)) { [IO.File]::Delete($x) } }

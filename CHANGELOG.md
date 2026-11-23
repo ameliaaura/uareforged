@@ -40,6 +40,11 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 - **No more crash drawing the map's lines** (seen on Windows after a long session).
 - **The main menu's buttons no longer lose their labels** after the first-start graphics benchmark (or any level
   started straight from the title screen) until the game is restarted.
+- **Downloads carry on where they stopped.** When the game download (from the Metropolis Dawn community), the
+  Reforge pack or the VR app is cut short, stalls or the connection drops, the app now carries on from where it
+  stopped instead of reporting the download as broken and starting again: automatically a few times, then with a
+  Try again button, and also after Cancel or the next time the app starts. A file is only used once its size (and
+  checksum, where known) are right; a partial download of an older version of a file is never used.
 
 ## [0.8.4] - Desktop - 2026-11-22
 
