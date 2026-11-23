@@ -52,6 +52,8 @@
 #include "obj3d.h"
 #include "aituning.h"
 #include "gfxsettings.h"
+#include "game_clock.h"
+#include "test_probes.h"
 #include "usage_stats.h"
 #include <atomic>
 #include "version.h"
@@ -348,6 +350,8 @@ void StatsStart()
     const char *app = "desktop", *platform = "mac";
 #elif defined(_WIN32)
     const char *app = "desktop", *platform = "windows";
+#elif defined(__linux__)
+    const char *app = "desktop", *platform = "linux";
 #else
     return; // other platforms never send
 #endif
@@ -586,15 +590,14 @@ int ProcessGameplayFrame()
             // only enabled in STATE_MENU (GameShellUiHandleInput), so the main
             // menu showed no options at all. The normal path (Single-Player ->
             // map) never returns to the title with a level state.
-            // It is also the flat "captions gone after a level" bug (same cause), but
-            // the flat game is kept exactly as released: VR builds only for now.
-#ifdef UA_VR_ENABLED
+            // It is also the flat "captions gone after a level" bug (same cause), which
+            // the desktop first-start graphics benchmark hits on every new install (level
+            // 75 runs straight from the title), so it applies to every build.
             if ( userdata.EnvMode == ENVMODE_TITLE )
             {
                 ypaworld->_levelInfo.State = TLevelInfo::STATE_MENU;
                 printf("UA: back to the title after a level: state -> MENU (title buttons enabled)\n");
             }
-#endif
 
             if (!v0)
                 return 0;
@@ -1085,6 +1088,10 @@ int ProcessMenuFrame()
 }
 
 
+#ifdef UA_TEST_HOOKS
+uint32_t g_testFrameMeasured = 0; // TEST ONLY: the speed probe's real-time base
+#endif
+
 int ProcessNextFrame()
 {
 #ifdef UA_VR_ENABLED
@@ -1100,11 +1107,24 @@ int ProcessNextFrame()
 #endif
     if ( userdata.ResetInputPeriod )
     {
-        input_states.Period = 1;
+        input_states.Period = 2; // (= 1 + the old per-frame tick)
         userdata.ResetInputPeriod = false;
+        GameClock::Reset();
     }
-
-    input_states.Period++;
+    else
+    {
+#ifdef __ANDROID__
+        // Quest: unchanged (VR::TickMs below sets the tick from the display clock).
+        input_states.Period++;
+#else
+        // Desktop: the same game speed at every frame rate (game_clock.h).
+#ifdef UA_TEST_HOOKS
+        g_testFrameMeasured = input_states.Period;
+        TestProbe::Frame(input_states.Period);
+#endif
+        input_states.Period = GameClock::FrameTicks(input_states.Period);
+#endif
+    }
 
 #ifdef UA_VR_ENABLED
     {
@@ -1528,7 +1548,9 @@ int main(int argc, char *argv[])
     // anonymous usage stats (opt-in): the answer, the crash handler, "launch"
     StatsStart();
 
+#ifdef __ANDROID__
     uint32_t ticks = 0;
+#endif
     
     Gui::Root::Instance.SetHwCompose(true);
     ypaworld->LoadGuiFonts();
@@ -1575,12 +1597,59 @@ int main(int argc, char *argv[])
 
         if (GFX::Engine.FpsMaxTicks == 0)
         {
+#ifndef __ANDROID__
+            const uint64_t frameStart = SDL_GetPerformanceCounter();
+#endif
             if ( !ProcessNextFrame() )
                 break;
 
             if ( System::ProcessEvents() )
                 break;
+#ifndef __ANDROID__
+            // Uncapped still means at most kMaxFps (1000): every frame must be worth at least one
+            // game tick or the game clock would run fast (game_clock.h).
+            const uint64_t minFrame = SDL_GetPerformanceFrequency() / GameClock::kMaxFps;
+            while ( SDL_GetPerformanceCounter() - frameStart < minFrame )
+                SDL_Delay(0);
+#endif
         }
+#ifndef __ANDROID__
+        else
+        {
+            // Desktop frame cap on the performance counter (sub-millisecond): exactly FpsMaxHz
+            // frames per second (the whole-ms FpsMaxTicks gave 166 fps for 144 Hz, 125 for 120).
+            // Deadlines advance by one period, so short and long frames average out; more than a
+            // frame behind (a hitch, a load) starts afresh instead of running fast to catch up.
+            if ( !ProcessNextFrame() )
+                break;
+
+            if ( System::ProcessEvents() )
+                break;
+
+            static uint64_t nextFrame = 0;
+            const uint64_t freq = SDL_GetPerformanceFrequency();
+            const uint64_t hz = GFX::Engine.FpsMaxHz ? GFX::Engine.FpsMaxHz : 60;
+            const uint64_t period = freq / hz;
+            uint64_t now = SDL_GetPerformanceCounter();
+            nextFrame += period;
+            if ( now >= nextFrame + period || nextFrame > now + 2 * period )
+                nextFrame = now;              // behind by a frame or more (or a stale deadline)
+            else
+            {
+                // sleep in whole ms while more than 2 ms remain, then yield to the deadline
+                const uint64_t spin = freq / 500;
+                while ( now < nextFrame )
+                {
+                    const uint64_t left = nextFrame - now;
+                    if ( left > spin )
+                        SDL_Delay((uint32_t)((left - spin) * 1000 / freq));
+                    else
+                        SDL_Delay(0);
+                    now = SDL_GetPerformanceCounter();
+                }
+            }
+        }
+#else
         else
         {
             uint32_t curTick = SDL_GetTicks();
@@ -1607,6 +1676,7 @@ int main(int argc, char *argv[])
             else
                 SDL_Delay(1);
         }
+#endif
 
 //        fps++;
 //        if (SDL_GetTicks() > fpstick)

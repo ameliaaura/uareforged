@@ -10,6 +10,7 @@
 #include "yw.h"
 #include "reforge_marks.h"
 #include "ypabact.h"
+#include "frame_rate.h"
 #include "yparobo.h"
 #include "ypamissile.h"
 #include "yw_net.h"
@@ -3908,7 +3909,9 @@ size_t NC_STACK_ypabact::CrashOrLand(bact_arg86 *arg)
 
                         if ( arg->field_one & 1 )
                         {
-                            _energy -= fabs(_fly_dir_length) * 10.0;
+                            // per touch; touching on every frame costs per second what it did at
+                            // 60 fps (frame_rate.h), a single touch the same as always
+                            _energy -= fabs(_fly_dir_length) * 10.0 * FrameRate::RepeatShare(_clock, _crashTouchClock);
 
                             if ( _energy <= 0 || (GetVP() == _vp_dead && _status == BACT_STATUS_DEAD) )
                             {
@@ -3997,7 +4000,9 @@ size_t NC_STACK_ypabact::CrashOrLand(bact_arg86 *arg)
 
                         if ( arg->field_one & 1 )
                         {
-                            _energy -= fabs(_fly_dir_length) * 10.0;
+                            // per touch; touching on every frame costs per second what it did at
+                            // 60 fps (frame_rate.h), a single touch the same as always
+                            _energy -= fabs(_fly_dir_length) * 10.0 * FrameRate::RepeatShare(_clock, _crashTouchClock);
 
                             if ( _energy <= 0 || (GetVP() == _vp_dead && _status == BACT_STATUS_DEAD) )
                             {
@@ -4945,7 +4950,7 @@ void NC_STACK_ypabact::HandBrake(update_msg *arg)
         }
     }
 
-    _fly_dir_length *= 0.8;
+    _fly_dir_length *= FrameRate::Damp(0.8, arg->frameTime); // 0.8 per 60 fps frame while held
 }
 
 void NC_STACK_ypabact::ypabact_func98(IDVPair *arg)

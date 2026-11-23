@@ -7,6 +7,8 @@
 #include <string.h>
 #include "yw.h"
 #include "ypaufo.h"
+#include "frame_rate.h"
+#include "test_probes.h"
 #include "log.h"
 
 #include <math.h>
@@ -121,10 +123,16 @@ void NC_STACK_ypaufo::AI_layer3(update_msg *arg)
                     if ( fabs(_fly_dir_length * _fly_dir.x) >= 0.1 || fabs(_fly_dir_length * _fly_dir.z) >= 0.1 )
                     {
                         _thraction = 0;
-                        _fly_dir_length *= 0.8;
+#ifdef UA_TEST_HOOKS
+                        TestProbe::Damp("ufo", this, _fly_dir_length, _position);
+#endif
+                        _fly_dir_length *= FrameRate::Damp(0.8, arg->frameTime); // 0.8 per 60 fps frame
                     }
                     else
                     {
+#ifdef UA_TEST_HOOKS
+                        TestProbe::DampStop("ufo", this, _position);
+#endif
                         if ( _ufoFlags & 8 )
                         {
                             float v17 = _maxrot * v110;
@@ -616,7 +624,7 @@ void NC_STACK_ypaufo::User_layer(update_msg *arg)
 
             _ufoBoost = _mass * 9.80665;
 
-            _fly_dir_length *= 0.7;
+            _fly_dir_length *= FrameRate::Damp(0.7, arg->frameTime); // brake: 0.7 per 60 fps frame
 
             if ( _fly_dir_length < 0.1 )
                 _fly_dir_length = 0;
@@ -678,7 +686,7 @@ void NC_STACK_ypaufo::User_layer(update_msg *arg)
                 _thraction = 0;
 
                 if ( arg->inpt->Sliders[2] == 0.0 )
-                    _fly_dir_length *= 0.6;
+                    _fly_dir_length *= FrameRate::Damp(0.6, arg->frameTime); // 0.6 per 60 fps frame
 
                 if ( _fly_dir_length < 0.1 )
                     _fly_dir_length = 0;
@@ -689,7 +697,7 @@ void NC_STACK_ypaufo::User_layer(update_msg *arg)
             _thraction = 0;
 
             if ( fabs(_fly_dir.x * _fly_dir_length) > 0.1 || fabs(_fly_dir.z * _fly_dir_length) > 0.1 )
-                _fly_dir_length *= 0.6;
+                _fly_dir_length *= FrameRate::Damp(0.6, arg->frameTime); // 0.6 per 60 fps frame
 
             if ( _fly_dir_length < 0.1 )
                 _fly_dir_length = 0;

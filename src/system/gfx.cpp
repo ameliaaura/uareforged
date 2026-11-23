@@ -24,6 +24,7 @@
 #include <condition_variable>
 #include <atomic>
 #include "gfx.h"
+#include "../game_clock.h"
 #include "gfx_glow.h"
 #include "atmos.h"
 #include "../utils.h"
@@ -50,6 +51,8 @@ int GFXEngine::can_srcblend;
 int GFXEngine::can_destblend;
 int GFXEngine::can_stippling;
 uint32_t GFXEngine::FpsMaxTicks = 1000/60;
+uint32_t GFXEngine::FpsMaxHz = 60;
+bool GFXEngine::FpsCapFollowsDisplay = false;
 
 SDL_PixelFormat *GFXEngine::_pixfmt = NULL;
 GLint GFXEngine::_glPixfmt, GFXEngine::_glPixtype;
@@ -2923,6 +2926,16 @@ void GFXEngine::EndFrame()
         Perf::Scope perfSwap(Perf::SWAP);
         System::Flip();
     }
+    // Desktop: fence + rotate the UBO ring once per presented frame (VR does it in VR::Present).
+    // The first draw of the next frame must write its constants into the NEW segment: if the
+    // states did not change, the binding would still point into the segment just fenced, and the
+    // GPU could still be reading it when the CPU rewrites that segment kUboRingSegs frames later.
+    if (!_vrMode)
+    {
+        VRFrameBoundary();
+        if (_uboRingMode > 0)
+            _vboStatesChanged = true;
+    }
 
     LogFrameTime();
 }
@@ -3519,12 +3532,50 @@ void GFXEngine::BenchUncap(bool on)
 
 void GFXEngine::fpsLimitter(int value)
 {
+#ifndef __ANDROID__
+    // Desktop: the game speed no longer depends on the frame rate (game_clock.h), so the
+    // frame cap follows the screen. gfx.maxfps = 60 (the old default, in the game package's
+    // NUCLEUS.INI) or -1 = the display's refresh rate (vsync paces it); other values are kept;
+    // never above GameClock::kMaxFps. UA_MAXFPS (tests) is taken as given, within that limit.
+    if ( value == 60 && !getenv("UA_MAXFPS") )
+        value = -1;
+    FpsCapFollowsDisplay = value < 0;
+    if ( value < 0 )
+    {
+        SDL_DisplayMode dm;
+        int disp = 0;
+        if ( SDL_Window *w = SDL_GL_GetCurrentWindow() )
+            disp = std::max(0, SDL_GetWindowDisplayIndex(w));
+        const int refresh = (SDL_GetCurrentDisplayMode(disp, &dm) == 0 && dm.refresh_rate > 0) ? dm.refresh_rate : 60;
+        // With vsync the swap paces the frames; the cap sits one above the refresh rate as a
+        // backstop. Displays report whole Hz (Windows says 59 for 59.94 Hz, 143 for 143.98):
+        // a cap exactly at that number would fall just below the real refresh and drop a
+        // frame about once a second.
+        const bool vsync = SDL_GL_GetSwapInterval() != 0;
+        value = vsync ? refresh + 1 : refresh;
+        fmt::printf("gfx: frame cap %d fps (display refresh %d Hz%s)\n", value, refresh, vsync ? ", vsync paces" : "");
+    }
+    if ( value > (int)GameClock::kMaxFps )
+        value = GameClock::kMaxFps;
+#endif
     if (value > 1000)
         FpsMaxTicks = 0;
     else if (value <= 0)
         FpsMaxTicks = 0;
     else
         FpsMaxTicks = 1000/value;
+    // The desktop main loop paces frames on the performance counter at exactly this rate
+    // (FpsMaxTicks, whole ms, made 144 Hz 166 fps and 120 Hz 125 fps).
+    FpsMaxHz = FpsMaxTicks ? (uint32_t)value : 0;
+}
+
+void GFXEngine::DisplayChanged()
+{
+#ifndef __ANDROID__
+    // The window moved to another display: a cap that follows the refresh rate follows it there.
+    if ( FpsCapFollowsDisplay && !_vrMode && !GfxSettings::BenchRunning() )
+        fpsLimitter(-1);
+#endif
 }
 
 
@@ -4644,130 +4695,74 @@ SDL_Surface *GFXEngine::Screen()
 
 
 // Draw line Bresenham's algorithm
+// Every pixel is bounds-checked against the surface it is written to (the walk tracks x/y
+// instead of only a pointer). Field crash F (0.8.3, Windows 7, after 101 min on level 33):
+// an access violation inside this loop from the robo map's lines; with both end points
+// checked the 1998 walk cannot leave the surface by itself, so the bad line came in through
+// state the walk cannot see. A pixel outside the surface is now skipped instead of written.
 void GFXEngine::DrawLine(SDL_Surface *surface, const Common::Line &line, uint8_t cr, uint8_t cg, uint8_t cb )
 {
+    if ( !surface || !surface->pixels || !surface->format )
+        return;
+
     if ((line.Width() == 0 && line.Height() == 0) || 
          !Common::Rect(surface->w, surface->h).IsIn(line.P1()) ||
          !Common::Rect(surface->w, surface->h).IsIn(line.P2()) )
         return;
-    
-    int rilWidth = surface->pitch / surface->format->BytesPerPixel;
 
-    int xCount = line.Width();
-    int yCount = line.Height();
+    const int bpp = surface->format->BytesPerPixel;
+    if ( bpp != 1 && bpp != 2 && bpp != 4 )
+        return;
 
-    uint32_t color = SDL_MapRGBA(surface->format, cr, cg, cb, 255);
+    const int xCount = line.Width();
+    const int yCount = line.Height();
+    const uint32_t color = SDL_MapRGBA(surface->format, cr, cg, cb, 255);
 
-    int stepAdd, stepOdd;
-    int steps, subSteps;
+    const int sx = (line.x2 <= line.x1) ? -1 : 1;
+    const int sy = (line.y2 <= line.y1) ? -1 : 1;
+    const bool yMajor = xCount <= yCount;
+    // A line inside the surface has at most w + h steps; anything longer is garbage
+    // coordinates (and could spin for 2^31 steps): skip it.
+    const int steps = yMajor ? yCount : xCount;
+    if ( steps < 0 || steps > surface->w + surface->h )
+        return;
+    const int subSteps = yMajor ? xCount : yCount;
 
-    if ( xCount <= yCount )
-    {
-        if ( line.y2 <= line.y1 )
-            stepAdd = -rilWidth;
-        else
-            stepAdd = rilWidth;
-
-        if ( line.x2 <= line.x1 )
-            stepOdd = -1;
-        else
-            stepOdd = 1;
-
-        steps = yCount;
-        subSteps = xCount;
-    }
-    else
-    {
-        if ( line.x2 <= line.x1 )
-            stepAdd = -1;
-        else
-            stepAdd = 1;
-
-        if ( line.y2 <= line.y1 )
-            stepOdd = -rilWidth;
-        else
-            stepOdd = rilWidth;
-        
-        steps = xCount;
-        subSteps = yCount;
-    }
-
-    int incr1 = 2 * subSteps;
+    const int incr1 = 2 * subSteps;
+    const int incr2 = 2 * (subSteps - steps);
     int t = 2 * subSteps - steps;
-    int incr2 = 2 * (subSteps - steps);
-    
+
     SDL_LockSurface(surface);
-    
-    void *surfPos = (void *) ((uint8_t *) surface->pixels 
-                    + line.y1 * surface->pitch 
-                    + line.x1 * surface->format->BytesPerPixel );
 
-    switch(surface->format->BytesPerPixel)
+    uint8_t *pixels = (uint8_t *)surface->pixels;
+    const int pitch = surface->pitch;
+    const int w = surface->w, h = surface->h;
+    int x = line.x1, y = line.y1;
+
+    for (int i = 0; i <= steps; i++)
     {
-        case 1:
+        if ( x >= 0 && y >= 0 && x < w && y < h )
         {
-            uint8_t *surf = (uint8_t *)surfPos;
-
-            for (int i = 0; i <= steps; i++) // Verify i bound
+            uint8_t *p = pixels + (size_t)y * pitch + (size_t)x * bpp;
+            switch ( bpp )
             {
-                *surf = color;
-                if ( t > 0 )
-                {
-                    t += incr2;
-                    surf += stepOdd;
-                }
-                else
-                    t += incr1;
-
-                surf += stepAdd;
+                case 1: *p = (uint8_t)color; break;
+                case 2: *(uint16_t *)p = (uint16_t)color; break;
+                default: *(uint32_t *)p = color; break;
             }
         }
-        break;
-        
-        case 2:
+
+        if ( t > 0 )
         {
-            uint16_t *surf = (uint16_t *)surfPos;
-
-            for (int i = 0; i <= steps; i++) // Verify i bound
-            {
-                *surf = color;
-                if ( t > 0 )
-                {
-                    t += incr2;
-                    surf += stepOdd;
-                }
-                else
-                    t += incr1;
-
-                surf += stepAdd;
-            }
+            t += incr2;
+            if ( yMajor ) x += sx; else y += sy;
         }
-        break;
-        
-        case 4:
-        {
-            uint32_t *surf = (uint32_t *)surfPos;
+        else
+            t += incr1;
 
-            for (int i = 0; i <= steps; i++) // Verify i bound
-            {
-                *surf = color;
-                if ( t > 0 )
-                {
-                    t += incr2;
-                    surf += stepOdd;
-                }
-                else
-                    t += incr1;
-
-                surf += stepAdd;
-            }
-        }
-        break;
-        
-        default:
-        break;
+        if ( yMajor ) y += sy; else x += sx;
     }
-    
+
     SDL_UnlockSurface(surface);
 }
 
@@ -7292,14 +7287,37 @@ bool HasGLExtension(const char *name)
 void GFXEngine::UboRingSetup()
 {
     _uboRingMode = 0;
-    if (!_vbo || !_vrMode)
+    if (!_vbo)
         return;
+    // Desktop too (perf): without the ring every draw re-specifies the uniform buffer
+    // twice (orphan + upload, CommitUBOParameters), ~1,000-4,000 times a frame. On the
+    // Quest that path cost ~8 ms per eye (P4 perf notes); Windows / NVIDIA players saw
+    // 17-31 fps on every preset. Apple's GL handles it cheaply, so macOS keeps the old
+    // path unless asked. Linux (not a shipped build) runs it as Windows does: same drivers.
+    // Desktop default: the persistent map only (ARB/EXT_buffer_storage); without it the old
+    // path, not the unsynchronized map (driver-dependent). UA_UBO_RING=0 off / 1 map
+    // unsynchronized / 2 persistent (A/B).
     int want = 2;
-    if (const char *v = getenv("UA_VR_UBO_RING"))
-        want = atoi(v);
+    bool explicitWant = _vrMode;
+    if (_vrMode)
+    {
+        if (const char *v = getenv("UA_VR_UBO_RING"))
+            want = atoi(v);
+    }
+    else
+    {
+#ifdef __APPLE__
+        want = 0;
+#endif
+        if (const char *v = getenv("UA_UBO_RING"))
+        {
+            want = atoi(v);
+            explicitWant = true;
+        }
+    }
     if (want <= 0)
     {
-        printf("gfx: VR UBO ring off (UA_VR_UBO_RING=0): per-draw glBufferData\n");
+        printf("gfx: %s UBO ring off: per-draw glBufferData\n", _vrMode ? "VR" : "desktop");
         return;
     }
     g_ring.BindBufferRange = (PfnBindBufferRange)UA_GL_GetProcAddress("glBindBufferRange");
@@ -7310,7 +7328,7 @@ void GFXEngine::UboRingSetup()
     if (!g_ring.BindBufferRange || !g_ring.FenceSync || !g_ring.ClientWaitSync || !g_ring.DeleteSync ||
         !g_ring.UnmapBuffer || !Glext::GLMapBufferRange)
     {
-        printf("gfx: VR UBO ring unavailable (entry points missing)\n");
+        printf("gfx: UBO ring unavailable (entry points missing)\n");
         return;
     }
     if (want >= 2)
@@ -7346,6 +7364,15 @@ void GFXEngine::UboRingSetup()
             Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _uboRing);
         }
     }
+    if (_uboRingMode != 2 && !explicitWant)
+    {
+        // desktop default without buffer storage: the old per-draw path
+        Glext::GLDeleteBuffers(1, &_uboRing);
+        _uboRing = 0;
+        Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _vboParams);
+        printf("gfx: desktop UBO ring off (no buffer storage): per-draw glBufferData\n");
+        return;
+    }
     if (_uboRingMode != 2)
     {
         Glext::GLBufferData(GL_UNIFORM_BUFFER, total, NULL, GL_DYNAMIC_DRAW);
@@ -7357,7 +7384,7 @@ void GFXEngine::UboRingSetup()
         _uboRing = 0;
     }
     Glext::GLBindBuffer(GL_UNIFORM_BUFFER, _vboParams);
-    printf("gfx: VR UBO ring mode %d (%s), stride %d, %d x %d KB\n", _uboRingMode,
+    printf("gfx: %s UBO ring mode %d (%s), stride %d, %d x %d KB\n", _vrMode ? "VR" : "desktop", _uboRingMode,
            _uboRingMode == 2 ? "persistent map" : (_uboRingMode == 1 ? "map unsynchronized" : "off"),
            _uboRingStride, kUboRingSegs, kUboRingSegSize >> 10);
 }

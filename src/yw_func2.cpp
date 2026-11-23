@@ -56,6 +56,18 @@ extern int buttonsSpace;
 extern int dword_5A50B6;
 extern int dword_5A50B6_h;
 
+// Briefing model turntable: degrees for this frame. "frameTime / 5" per frame was 3 degrees
+// per 18-tick frame at the 60 fps cap but nothing above ~200 fps; the same 1 degree per
+// 6 ticks, with the remainder carried, turns at the 60 fps speed at any frame rate.
+static int BriefTurnDegrees(int frameTime)
+{
+    static int rest = 0;
+    rest += frameTime;
+    const int deg = rest / 6;
+    rest -= deg * 6;
+    return deg;
+}
+
 void sb_0x4eb94c__sub0(NC_STACK_ypaworld *yw, bool clockwise, int a3, vec3d *pos, baseRender_msg *arg)
 {
     //brf_obj *brobj = &yw->brief.brf_objs + obj_id; // Only one object
@@ -70,13 +82,13 @@ void sb_0x4eb94c__sub0(NC_STACK_ypaworld *yw, bool clockwise, int a3, vec3d *pos
 
     if (clockwise)
     {
-        yw->_briefScreen.ViewingObjectAngle += (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle += BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle >= 360 )
             yw->_briefScreen.ViewingObjectAngle -= 360;
     }
     else
     {
-        yw->_briefScreen.ViewingObjectAngle -= (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle -= BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle < 0 )
             yw->_briefScreen.ViewingObjectAngle += 360;
     }
@@ -97,13 +109,13 @@ void sb_0x4eb94c__sub1(NC_STACK_ypaworld *yw, bool clockwise, int rot, vec3d *po
 
     if (clockwise)
     {
-        yw->_briefScreen.ViewingObjectAngle += (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle += BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle >= 360 )
             yw->_briefScreen.ViewingObjectAngle -= 360;
     }
     else
     {
-        yw->_briefScreen.ViewingObjectAngle -= (arg->frameTime / 5);
+        yw->_briefScreen.ViewingObjectAngle -= BriefTurnDegrees(arg->frameTime);
         if ( yw->_briefScreen.ViewingObjectAngle < 0 )
             yw->_briefScreen.ViewingObjectAngle += 360;
     }
@@ -3780,44 +3792,46 @@ void UserData::GameShellUiHandleInput()
                 }
                 else if ( Input->KbdLastHit == Input::KC_RETURN )
                 {
-                                printf("Line = %d\n", __LINE__);
-
-                    switch ( diskScreenMode )
+//                                printf("Line = %d\n", __LINE__);
+                    if (CheckValidUsername(userNameDir))
                     {
-                    case 1:
-                        if ( diskListActiveElement )
+                        switch ( diskScreenMode )
                         {
-                            ShowConfirmDialog(3, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
-                                        , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
-                        }
-                        else if (userNameDir.size() > 0)
-                        {
-                            sb_0x46ca74();
-                        }
-                        break;
+                        case 1:
+                            if ( diskListActiveElement )
+                            {
+                                ShowConfirmDialog(3, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
+                                            , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
+                            }
+                            else if (userNameDir.size() > 0)
+                            {
+                                sb_0x46ca74();
+                            }
+                            break;
 
-                    case 2:
-                        sub_46C914();
-                        break;
+                        case 2:
+                            sub_46C914();
+                            break;
 
-                    case 3:
-                        if ( diskListActiveElement )
-                        {
-                            ShowConfirmDialog(6, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
-                                        , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
+                        case 3:
+                            if ( diskListActiveElement )
+                            {
+                                ShowConfirmDialog(6, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
+                                            , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
+                            }
+                            else if (userNameDir.size() > 0)
+                            {
+                                sb_0x46cdf8();
+                            }
+                            break;
+
+                        case 4:
+                            sub_46C748();
+                            break;
+
+                        default:
+                            break;
                         }
-                        else if (userNameDir.size() > 0)
-                        {
-                            sb_0x46cdf8();
-                        }
-                        break;
-
-                    case 4:
-                        sub_46C748();
-                        break;
-
-                    default:
-                        break;
                     }
                 }
                 else if ( Input->KbdLastHit == Input::KC_ESCAPE )
@@ -3929,7 +3943,7 @@ void UserData::GameShellUiHandleInput()
             {
                 if ( !StriCmp(tmp, it->name.substr(0, tmp.size())) )
                 {
-                    int n = std::stoi( it->name.substr(tmp.size()) );
+                    int n = ProfileNumberSuffix( it->name.substr(tmp.size()) );
 
                     if ( n > maxN )
                         maxN = n;
@@ -3956,38 +3970,41 @@ void UserData::GameShellUiHandleInput()
         }
         else if ( r.code == 1164)
         {
-            switch ( diskScreenMode )
+            if (CheckValidUsername(userNameDir))
             {
-            case 1:
-                if ( diskListActiveElement )
+                switch ( diskScreenMode )
                 {
-                    ShowConfirmDialog(3, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
-                                , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
+                case 1:
+                    if ( diskListActiveElement )
+                    {
+                        ShowConfirmDialog(3, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
+                                    , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
+                    }
+                    else
+                    {
+                        sb_0x46ca74();
+                    }
+                    break;
+                case 2:
+                    sub_46C914();
+                    break;
+                case 3:
+                    if ( diskListActiveElement )
+                    {
+                        ShowConfirmDialog(6, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
+                                    , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
+                    }
+                    else
+                    {
+                        sb_0x46cdf8();
+                    }
+                    break;
+                case 4:
+                    sub_46C748();
+                    break;
+                default:
+                    break;
                 }
-                else
-                {
-                    sb_0x46ca74();
-                }
-                break;
-            case 2:
-                sub_46C914();
-                break;
-            case 3:
-                if ( diskListActiveElement )
-                {
-                    ShowConfirmDialog(6, Locale::Text::Advanced(Locale::ADV_WANTOVERWRITE)
-                                , Locale::Text::Advanced(Locale::ADV_EXISTSAVEDGAME), 0);
-                }
-                else
-                {
-                    sb_0x46cdf8();
-                }
-                break;
-            case 4:
-                sub_46C748();
-                break;
-            default:
-                break;
             }
         }
         else if (r.code == 1165)
@@ -5359,12 +5376,12 @@ void UserData::GameShellUiHandleInput()
 
         for (size_t i = 0; i < World::CVMaxNetPlayers; i++)
         {
-            int v370;
+            int v370 = 0;
             TDPPlayerData pData;
             bool v304 = p_YW->_netDriver->GetPlayerData(i, &pData);
 
             std::string name = " ";
-            int btID;
+            int btID = 0;
 
             switch ( i )
             {

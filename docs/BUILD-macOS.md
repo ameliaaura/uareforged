@@ -68,7 +68,6 @@ Option key while opening the app (or `--quest`) still works.
 - `build-mac.sh` reads the desktop version from `src/version.h` (the last `PortVersion` line; the first one
   belongs to the Quest app).
 - The Windows build is also made on a Mac: see [BUILD-Windows.md](BUILD-Windows.md). The Quest app:
-  [BUILD-quest.md](BUILD-quest.md). Linux builds follow upstream OpenUA (`make nix`, see
-  [UPSTREAM-README.md](UPSTREAM-README.md)) and are untested with the Reforged changes.
+  [BUILD-quest.md](BUILD-quest.md). The Linux edition (new in 0.8.4): [BUILD-Linux.md](BUILD-Linux.md).
 - CI builds the app on every push and pull request (`.github/workflows/build.yml`).
 - The app is signed ad hoc, not notarised: on first open, players use *Open Anyway* (see [INSTALL.md](INSTALL.md#macos)).

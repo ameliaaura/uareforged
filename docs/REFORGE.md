@@ -28,6 +28,39 @@ the `allow_host` list of `downloads.txt`); one bad value rejects the whole file 
 values are used. Testing: `UA_LINKS_URL`, `UA_GAME_URL`, `UA_PACK_URL` (other addresses),
 `UA_GAME_AUTO=get`, `UA_PACK_AUTO=yes|no`, `UA_NOTICE_AUTO=help|folder|later`, `UA_PACK_NOUI=1`.
 
+**New-version notice (desktop, from 0.8.5).** The app reads links.json once per start, in the background from
+the moment it knows the game folder (the setup, the pack and the Quest install use that same read). Its optional
+`latest` field names the newest version per platform:
+`"latest": {"mac": {"version": "0.8.5", "url": "https://uareforged.pages.dev/downloads/"}, "windows": {...}, "linux": {...}}`.
+`version` = 2 to 4 numbers (`0.8.5`, `0.8.4.1`; compared part by part, missing parts = 0), `url` = https on
+`github.com/ameliaaura/uareforged` or `uareforged.pages.dev` only (no port, query, `.`/`..` segments). A bad `latest`
+is dropped on its own (logged `latest_ignored`); the rest of the file still counts. Older apps skip the key. When
+the version is newer than the app's own (`app_version`, written into `downloads.txt` by the build script), one
+dialog before the game starts: Update now / Later / Don't remind me for this version (`update-skip.txt` in the app's
+support folder; a newer version asks again) / What's new (opens the url). **One-click update:** the entry's optional
+`"update": {"url": "<file on the release page>", "manifest": "<base64>", "sig": "<base64>"}` (made by
+`tools/sign-update.sh`) carries a manifest (`name`, `version`, `platform`, `bytes`, `sha256`) signed with ECDSA P-256 /
+SHA-256. The app checks the signature against `update_key` in `downloads.txt` (`/usr/bin/openssl` on the Mac, .NET
+`ECDsaCng` on Windows, the system's `openssl` on Linux), then that the manifest names its platform, a version newer than its own (no downgrade or
+replay) equal to `latest.version`, and the file's name; after the download, size and SHA-256. Mac: the zip is unpacked
+next to the app, `codesign --verify --deep --strict`, same bundle id and version, the apps are swapped (the old one
+kept as a hidden `.<name>-<version>.update-backup` until the new one has started; put back if it does not start
+within 60 s), then `open -n`. A translocated app or a folder it may not write to gets the download page with a short
+explanation. Windows (installed with Setup.exe only; a zip copy gets the download page): `launcher\update.ps1` waits for
+the launcher to close, runs `Setup.exe /S /D=<install folder>` (per-user, no administrator prompt), checks the
+installed version and starts UA Reforged again. Linux (the AppImage only; the tar.gz folder, a system without
+`openssl` or an AppImage in a folder it may not write to gets the download page): the downloaded AppImage (ELF with
+the AppImage magic) is copied next to the running one and renamed over it in one step, the old file kept as a hidden
+`.<name>-<version>.update-backup` until the new one has started (put back if it does not confirm within 60 s); the
+file keeps its name and place, so menu entries and Steam shortcuts still work. Any failure: a short notice, the download page, the current version
+starts. Without `update` the first button is Download. Test-hook builds (`UA_TEST_HOOKS=ON`) also accept the test key
+(`tests/launcher/update-key-test.txt`, as `update_key_test`); release builds refuse to build with it. Offline, a bad file, a missing field,
+the same or an older version, or links.json not read within 2 s of that point: no dialog, the game starts. A start
+with the game and the Reforge pack in place asks for `links.json?start` (the site does not count it as a setup).
+Testing: `UA_LINKS_FILE=<file>` (a local links.json, no request), `UA_UPDATE_AUTO=update|download|later|skip`
+(answers the dialog, opens no browser); tests `tests/launcher/update_notice_test.sh` (Mac, CI) and `update_notice_test.ps1`
+(Windows PowerShell 5.1).
+
 The campaign map always shows the 1998 picture (the pack carries no campaign-map pictures).
 
 ## Graphics presets
@@ -66,6 +99,22 @@ The engine runs the 1998 enemy commander unless an `ai-tuning.txt` sits in the g
 folder. `docs/ai-tuning.example.txt` documents every key; with no file present the
 behaviour is the original one.
 
+## Frame rate and game speed (desktop, since 0.8.5)
+
+The game speed no longer depends on the frame rate: the world advances 1084 game ticks per real second at any
+frame rate, which is exactly the old speed at the 60 fps cap (the engine used to add one tick per frame, so it ran
+about 8 % faster at 144 fps and 2x at 1000 fps). The frame cap therefore follows the screen: `gfx.maxfps = 60`
+(the value in the game package's `NUCLEUS.INI`) or `-1` caps at the display's refresh rate, with vsync; any
+other value is used as given; `0` is uncapped. The cap is paced on the performance counter (144 Hz = 144 fps) and
+follows the window to another display. The engine never runs above 1000 fps. The Quest app keeps its own
+display-clock timing.
+
+Code from 1998 that did something once per frame does it per 60 fps frame of time instead (`src/frame_rate.h`):
+steering keys, sticks, hats and the mouse ramp up and let go in the same real time; brakes and drift (UFOs, host
+stations, the hand brake) stop in the same distance; AI host stations scan the map at the same pace; ground
+scraping costs the same energy per second; aircraft bank for their turn rate. `tests/frame_rate_test.cpp` checks
+each at 20 to 1000 fps against the 1998 code at 60 fps.
+
 ## Useful variables
 
 | Variable | Effect |
@@ -74,5 +123,7 @@ behaviour is the original one.
 | `UA_SKY_DIR` | remastered sky folder |
 | `UA_GFX_DEFAULT`, `UA_GFX_BENCH` | default preset, first-launch benchmark on/off |
 | `UA_WINDOW_SIZE=WxH` | window size |
-| `UA_MAXFPS` | frame cap |
+| `UA_MAXFPS` | frame cap for this run (0 = uncapped, at most 1000) |
+| `UA_GAME_CLOCK=1998` | the old game clock: one extra game tick per frame, so the game runs faster the higher the frame rate (comparison only) |
+| `UA_UBO_RING=0/1/2` | Windows/Linux uniform-buffer ring off / mapped / persistent (default 2 with ARB/EXT_buffer_storage, otherwise off; macOS default 0) |
 | `UA_AUTOSTART_LEVEL=<n>` | jump straight into level n (testing) |

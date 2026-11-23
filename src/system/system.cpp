@@ -10,6 +10,7 @@
 #include "system.h"
 #include "fsmgr.h"
 #include "inivals.h"
+#include "gfx.h"
 #include "../utils.h"
 #include "../version.h"
 
@@ -487,6 +488,12 @@ bool ProcessEvents()
 
             case SDL_WINDOWEVENT_CLOSE:
                 return true;
+
+#if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(__ANDROID__)
+            case SDL_WINDOWEVENT_DISPLAY_CHANGED:
+                GFX::Engine.DisplayChanged();
+                break;
+#endif
 
             default:
                 break;

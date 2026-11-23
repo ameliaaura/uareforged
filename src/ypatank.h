@@ -74,7 +74,7 @@ public:
 
 protected:
     uint8_t _tankFlags;
-    int     _tankWaitCount;
+    int     _tankWaitCount; // dodge time left, in ticks
     vec3d   _tankCollisionVector;
     float   _tankCollisionAngle;
     float   _tankCollisionWay;

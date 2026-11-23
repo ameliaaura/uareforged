@@ -82,6 +82,32 @@ What went wrong: $(no_paths "$1")."
     return 1
 }
 
+# q_fetch <window title> <progress text> <what, for Q_WHY> <url> <file> <bytes> <sha256>: check the link and download
+# (carries on where an earlier try stopped; downloads.sh dl_fetch). When the connection keeps failing the player gets
+# Try again. Returns 0, 130 (cancelled or Not now; the partial download stays) or 1 with Q_WHY.
+q_fetch() {
+    local title="$1" what="$2" label="$3" url="$4" f="$5" bytes="$6" sum="$7" rc
+    while :; do
+        dl_ui_start "$title"
+        if ! dl_precheck "$url" 0 0 "$bytes"; then
+            [ "$PC_NET" = 1 ] || { Q_WHY="$label: $PC_WHY"; return 1; }
+            DL_WHY="$PC_WHY"
+        else
+            DL_WHAT="$what"; DL_BASE=0; DL_TOTAL="$bytes"; DL_MAXSIZE="$bytes"
+            dl_fetch "$url" "$f" "$bytes" "$sum"; rc=$?; DL_MAXSIZE=""
+            [ $rc -eq 130 ] && { dl_ui_end; Q_WHY="cancelled"; return 130; }
+            [ $rc -eq 0 ] && return 0
+            [ "$DL_NET" = 1 ] || { Q_WHY="$label: $DL_WHY"; return 1; }
+        fi
+        dl_again "$DL_WHY" "$(fsize "$(dl_part "$f")")" "$bytes"
+        case "$DL_AGAIN" in
+            again) ;;
+            help) open_help "$Q_HELP"; Q_WHY="cancelled"; return 130 ;;
+            *) Q_WHY="cancelled"; return 130 ;;
+        esac
+    done
+}
+
 # ---------------------------------------------------------------- adb: Google's own zip, downloaded on first use
 q_adb_ready() {
     if [ -n "${UA_QUEST_ADB:-}" ]; then ADB="$UA_QUEST_ADB"; [ -x "$ADB" ]; return; fi
@@ -89,13 +115,10 @@ q_adb_ready() {
     [ -x "$ADB" ] && [ "$(cat "$Q_PT/.zip-sha256" 2>/dev/null)" = "$Q_ADB_SHA" ] && return 0
     [ -n "$Q_ADB_URL" ] || { Q_WHY="this build has no download address for Google's platform tools"; return 1; }
     DL_DIR="$Q_PT.download"; mkdir -p "$DL_DIR" || { Q_WHY="the folder for Google's platform tools could not be created"; return 1; }
-    dl_ui_start "Google's Android platform tools (adb)"
-    dl_precheck "$Q_ADB_URL" 0 0 "$Q_ADB_BYTES" || { Q_WHY="Google's platform tools download: $PC_WHY"; rm -rf "$DL_DIR"; return 1; }
     local f="$DL_DIR/platform-tools.zip" rc
-    DL_WHAT="Downloading Google's platform tools"; DL_BASE=0; DL_TOTAL="$Q_ADB_BYTES"; DL_MAXSIZE="$Q_ADB_BYTES"
-    dl_fetch "$Q_ADB_URL" "$f"; rc=$?; DL_MAXSIZE=""
-    [ $rc -eq 130 ] && { dl_ui_end; rm -rf "$DL_DIR"; Q_WHY="cancelled"; return 130; }
-    [ $rc -eq 0 ] || { Q_WHY="Google's platform tools download: $DL_WHY"; rm -rf "$DL_DIR"; return 1; }
+    q_fetch "Google's Android platform tools (adb)" "Downloading Google's platform tools" "Google's platform tools download" \
+        "$Q_ADB_URL" "$f" "$Q_ADB_BYTES" "$Q_ADB_SHA"; rc=$?
+    [ $rc -eq 0 ] || { rm -rf "$DL_DIR"; return $rc; }
     dl_status 95 "Checking Google's platform tools..."
     local got; got="$(/usr/bin/shasum -a 256 "$f" | cut -d' ' -f1)"
     [ "$got" = "$Q_ADB_SHA" ] || { echo "quest: platform tools sha256 $got"; Q_WHY="the downloaded platform tools are not the expected file"; rm -rf "$DL_DIR"; return 1; }
@@ -166,13 +189,10 @@ q_apk() {
     if [ -f "$Q_APK" ] && [ "$(cat "$Q_APK.ok" 2>/dev/null)" = "$want" ]; then echo "quest: cached APK ok"; return 0; fi
     case "$Q_APK_URL" in ''|*APK-URL-NOT-SET*) Q_WHY="this version of UA Reforged has no download address for the VR app yet"; return 1 ;; esac
     DL_DIR="$Q_DIR/download"; mkdir -p "$DL_DIR"
-    dl_ui_start "UA Reforged VR (for Meta Quest)"
-    dl_precheck "$Q_APK_URL" 0 0 "$Q_APK_BYTES" || { Q_WHY="the VR app download: $PC_WHY"; rm -rf "$DL_DIR"; return 1; }
     local f="$DL_DIR/$Q_APK_NAME" rc
-    DL_WHAT="Downloading UA Reforged VR"; DL_BASE=0; DL_TOTAL="$Q_APK_BYTES"; DL_MAXSIZE="$Q_APK_BYTES"
-    dl_fetch "$Q_APK_URL" "$f"; rc=$?; DL_MAXSIZE=""
-    [ $rc -eq 130 ] && { dl_ui_end; rm -rf "$DL_DIR"; Q_WHY="cancelled"; return 130; }
-    [ $rc -eq 0 ] || { Q_WHY="the VR app download: $DL_WHY"; rm -rf "$DL_DIR"; return 1; }
+    q_fetch "UA Reforged VR (for Meta Quest)" "Downloading UA Reforged VR" "the VR app download" \
+        "$Q_APK_URL" "$f" "$Q_APK_BYTES" "$want"; rc=$?
+    [ $rc -eq 0 ] || { rm -rf "$DL_DIR"; return $rc; }
     got="$(/usr/bin/shasum -a 256 "$f" | cut -d' ' -f1)"
     [ "$got" = "$want" ] || { echo "quest: APK sha256 $got"; Q_WHY="the downloaded VR app is damaged or not the expected file"; rm -rf "$DL_DIR"; return 1; }
     rm -f "$Q_APK" "$Q_APK.ok"; mv "$f" "$Q_APK" && printf '%s\n' "$got" > "$Q_APK.ok"

@@ -6,6 +6,52 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 
 ## [Unreleased]
 
+## [0.8.5] - Desktop - 2026-11-24
+
+### Added
+- **Linux edition (new, x86_64)**: an AppImage and a tar.gz folder for desktop Linux with glibc 2.35 or newer
+  (Ubuntu 22.04+, Mint 21+, Debian 12+, Fedora 36+, SteamOS 3.5+). The same one-step setup as on Mac and Windows
+  (the game from the Metropolis Dawn community, the checked Reforge pack download), the first-start benchmark,
+  the usage stats question and *Report a bug*. Its dialogs work with a game controller. No *Install on my Quest*.
+- **Desktop: a short notice when a new version is out, with one-click Update now.** At start-up the app checks the
+  small links file it already reads from the UA Reforged site; when a newer version is listed there, one dialog says
+  so before the game starts: Update now, Later, Don't remind me for this version, and What's new. Update now
+  downloads the new version, checks its signature (every update is signed with the UA Reforged update key, so the
+  site alone can never push one) and installs it: on a Mac it swaps the app (the old one is kept until the new one has
+  started), on Windows it runs the installer silently into the same folder, on Linux the AppImage replaces itself
+  (the tar.gz folder gets the download page). Then the new version starts. If anything goes wrong the app says so,
+  opens the download page and your current version starts as usual. Offline or anything unexpected: no notice and
+  no wait. The check sends nothing about you or your game.
+
+### Changed
+- **Desktop: the game speed no longer depends on the frame rate.** The game used to run faster the higher the
+  frame rate (about 8 % at 144 fps, 17 % at 240 fps, twice as fast at 1000 fps), which is why it was held at
+  60 fps. It now runs at exactly its old 60 fps speed at any frame rate, from 20 fps to 1000. Aircraft bank as
+  they did at 60 fps, guns no longer recharge slower and tanks still dodge at high frame rates; steering (keys,
+  sticks, mouse), brakes, drifting host stations and the AI's map scans also behave as at 60 fps.
+- **Desktop: 120 Hz and 144 Hz screens now get their full frame rate.** The frame cap follows the screen's
+  refresh rate (with vsync) instead of 60, exactly (144 Hz = 144 fps), and follows the window to another screen.
+- **Desktop: faster.** The Mac and Windows engines are now built with the compiler's optimiser, as the Quest
+  app always was.
+
+### Fixed
+- **No more crash when holding the mouse on Yes or No in the in-mission confirm box** and dragging off it
+  (seen on Windows).
+- **No more crash drawing the map's lines** (seen on Windows after a long session).
+- **The main menu's buttons no longer lose their labels** after the first-start graphics benchmark (or any level
+  started straight from the title screen) until the game is restarted.
+- **Downloads carry on where they stopped.** When the game download (from the Metropolis Dawn community), the
+  Reforge pack or the VR app is cut short, stalls or the connection drops, the app now carries on from where it
+  stopped instead of reporting the download as broken and starting again: automatically a few times, then with a
+  Try again button, and also after Cancel or the next time the app starts. A file is only used once its size (and
+  checksum, where known) are right; a partial download of an older version of a file is never used.
+- **Russian and Japanese menus no longer show empty boxes with the modern menu style** (High, Ultra or
+  *STYLE: MODERN*). The modern style's font has Latin letters only; a language it cannot write now keeps its own
+  font in the modern menus. English, German and French keep the modern font.
+- **No more crash pressing New on the save screen** when a profile is named just "UNNAMED" (no number after it).
+- **"." and ".." are no longer accepted as a profile name** (they saved outside the save folder).
+  Both fixes come from upstream OpenUA (Marisa-Chan).
+
 ## [0.8.4] - Desktop - 2026-11-22
 
 ### Fixed
@@ -133,7 +179,8 @@ The first public release of the desktop apps.
   SmartScreen needs *Run anyway*.
 - Intel Macs and Linux are not supported in this release.
 
-[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/ameliaaura/uareforged/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.5
 [0.8.4]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.4
 [0.8.3]: https://github.com/ameliaaura/uareforged/releases/tag/v0.8.3
 [0.9.2]: https://github.com/ameliaaura/uareforged/releases/tag/v0.9.2

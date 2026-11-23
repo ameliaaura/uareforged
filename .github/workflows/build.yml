@@ -1,6 +1,7 @@
 # Builds the desktop apps with the same scripts a release uses.
 #   macOS:   packaging/macos/build-mac.sh        (Apple Silicon app + zip)
 #   Windows: packaging/windows/build-windows.sh  (cross-built on macOS with mingw-w64: installer + zip)
+#   Linux:   unit tests and the launcher tests only (the AppImage is built on Ubuntu 22.04, docs/BUILD-Linux.md)
 # The third-party libraries are cached between runs; a cold run builds them from source and takes longer.
 # No game data is used or needed: these jobs only check that everything compiles and packages.
 name: Build
@@ -39,9 +40,23 @@ jobs:
           (cd "$RUNNER_TEMP" && ./tex_cleanup_test)
           c++ -std=c++17 -Wall tests/gl_texture_init_test.cpp -o "$RUNNER_TEMP/gl_texture_init_test"
           "$RUNNER_TEMP/gl_texture_init_test" src
+          c++ -std=c++14 -Wall -Isrc tests/game_clock_test.cpp src/game_clock.cpp -o "$RUNNER_TEMP/game_clock_test"
+          "$RUNNER_TEMP/game_clock_test"
+          c++ -std=c++14 -Wall -Isrc tests/frame_rate_test.cpp src/game_clock.cpp -o "$RUNNER_TEMP/frame_rate_test"
+          "$RUNNER_TEMP/frame_rate_test" -v
+          c++ -std=c++14 -Wall -Isrc tests/ui_font_cover_test.cpp -o "$RUNNER_TEMP/ui_font_cover_test"
+          "$RUNNER_TEMP/ui_font_cover_test" locale
+          c++ -std=c++17 -Wall -Isrc tests/profile_name_test.cpp -o "$RUNNER_TEMP/profile_name_test"
+          "$RUNNER_TEMP/profile_name_test"
           c++ -std=c++14 -Wall -DUA_TEST_HOOKS -Isrc tests/usage_stats_test.cpp src/usage_stats.cpp src/usage_stats_platform.cpp \
               src/usage_stats_crash.cpp src/usage_stats_net_apple.mm -framework Foundation -o "$RUNNER_TEMP/usage_stats_test"
           (cd "$RUNNER_TEMP" && ./usage_stats_test)
+
+      - name: Launcher tests (new-version notice, no network)
+        run: bash tests/launcher/update_notice_test.sh
+
+      - name: Launcher tests (downloads carry on where they stopped, local server only)
+        run: bash tests/launcher/download_resume_test.sh mac
 
       - name: Cache third-party libraries
         uses: actions/cache@v6
@@ -100,3 +115,38 @@ jobs:
             build/windows/*.zip
             build/windows/*.sha256
           retention-days: 14
+
+  linux:
+    name: Linux (tests)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Unit tests (no game data)
+        run: |
+          c++ -std=c++14 -Wall -Isrc tests/controller_settings_test.cpp src/profile_patch.cpp -o "$RUNNER_TEMP/controller_settings_test"
+          (cd "$RUNNER_TEMP" && ./controller_settings_test)
+          c++ -std=c++14 -Wall -Isrc tests/pad_remap_test.cpp src/pad_remap.cpp src/profile_patch.cpp -o "$RUNNER_TEMP/pad_remap_test"
+          (cd "$RUNNER_TEMP" && ./pad_remap_test)
+          c++ -std=c++14 -Wall -Isrc tests/tex_cleanup_test.cpp src/tex_cleanup.cpp -o "$RUNNER_TEMP/tex_cleanup_test"
+          (cd "$RUNNER_TEMP" && ./tex_cleanup_test)
+          c++ -std=c++17 -Wall tests/gl_texture_init_test.cpp -o "$RUNNER_TEMP/gl_texture_init_test"
+          "$RUNNER_TEMP/gl_texture_init_test" src
+          c++ -std=c++14 -Wall -Isrc tests/game_clock_test.cpp src/game_clock.cpp -o "$RUNNER_TEMP/game_clock_test"
+          "$RUNNER_TEMP/game_clock_test"
+          c++ -std=c++14 -Wall -Isrc tests/frame_rate_test.cpp src/game_clock.cpp -o "$RUNNER_TEMP/frame_rate_test"
+          "$RUNNER_TEMP/frame_rate_test" -v
+          c++ -std=c++14 -Wall -Isrc tests/ui_font_cover_test.cpp -o "$RUNNER_TEMP/ui_font_cover_test"
+          "$RUNNER_TEMP/ui_font_cover_test" locale
+          c++ -std=c++17 -Wall -Isrc tests/profile_name_test.cpp -o "$RUNNER_TEMP/profile_name_test"
+          "$RUNNER_TEMP/profile_name_test"
+          c++ -std=c++14 -Wall -DUA_TEST_HOOKS -Isrc tests/usage_stats_test.cpp src/usage_stats.cpp src/usage_stats_platform.cpp \
+              src/usage_stats_crash.cpp -o "$RUNNER_TEMP/usage_stats_test"
+          (cd "$RUNNER_TEMP" && ./usage_stats_test)
+
+      - name: Launcher tests (new-version notice + one-click update, no network)
+        run: bash tests/launcher/update_notice_test_linux.sh
+
+      - name: Launcher tests (downloads carry on where they stopped, local server only)
+        run: bash tests/launcher/download_resume_test.sh linux

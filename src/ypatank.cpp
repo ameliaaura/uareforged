@@ -718,19 +718,21 @@ void NC_STACK_ypatank::AI_layer3(update_msg *arg)
         {
             _fly_dir_length = 0;
 
-            if ( _tankWaitCount )
+            if ( _tankWaitCount > 0 )
             {
                 if ( _status_flg & BACT_STFLAG_DODGE_LEFT )
                     _rotation = mat3x3::RotateY(v244 * 0.33333334) * _rotation;
                 else if ( _status_flg & BACT_STFLAG_DODGE_RIGHT )
                     _rotation = mat3x3::RotateY(-v244 * 0.33333334) * _rotation;
 
-                _tankWaitCount--;
+                _tankWaitCount -= arg->frameTime;
             }
             else
             {
                 _status_flg &= ~(BACT_STFLAG_DODGE_LEFT | BACT_STFLAG_DODGE_RIGHT);
-                _tankWaitCount = arg->frameTime / 5;
+                // Dodge for 54 ticks = what "frameTime / 5 frames" gave at the 60 fps cap
+                // (3 frames of 18); as a frame count it shrank to nothing above ~200 fps.
+                _tankWaitCount = 54;
 
                 if ( _tankFlags & FLAG_TANK_ROTWAIT )
                 {

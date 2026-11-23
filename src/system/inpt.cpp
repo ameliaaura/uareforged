@@ -276,6 +276,28 @@ void INPEngine::QueryInput(TInputState *state)
     if ( fixedPeriod > 0 )
         state->Period = fixedPeriod;
 
+#ifdef UA_TEST_HOOKS
+    // TEST ONLY: UA_SIM_FPS=<f> feeds the measured frame times of a steady f fps (1/1024 s,
+    // fraction carried exactly as the real timer does), without waiting: speed-invariance tests.
+    static double simFps = -1.0;
+    static uint64_t simFrame = 0;
+    if ( simFps < 0.0 )
+    {
+        const char *v = getenv("UA_SIM_FPS");
+        simFps = (v && v[0]) ? atof(v) : 0.0;
+    }
+    if ( simFps > 0.0 )
+    {
+        const uint64_t a = (uint64_t)(simFrame * 1024.0 / simFps);
+        simFrame++;
+        const uint64_t b = (uint64_t)(simFrame * 1024.0 / simFps);
+        state->Period = (uint32_t)(b - a);
+    }
+#endif
+
+    // the steering sliders scale their per-frame steps by this frame's time (frame_rate.h)
+    NC_STACK_winp::SetFrameMeasured(state->Period);
+
     if ( !_wimp.HasFocus || _wimp.HasFocus() )
     {
         if ( _keyboard.KeyboardQuery )

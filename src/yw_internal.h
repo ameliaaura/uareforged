@@ -331,6 +331,10 @@ void sb_0x4d7c08__sub0__sub2(NC_STACK_ypaworld *yw);
 
 void ypaworld_func64__sub6(NC_STACK_ypaworld *yw);
 void ypaworld_EmitAiStats(NC_STACK_ypaworld *yw, uint32_t timeStamp); // UA_AI_STATS telemetry
+#ifdef UA_TEST_HOOKS
+void ypaworld_SpeedProbe(NC_STACK_ypaworld *yw); // TEST ONLY: UA_SPEED_PROBE
+void ypaworld_SaveLoadProbe(NC_STACK_ypaworld *yw); // TEST ONLY: UA_TEST_SAVELOAD
+#endif
 
 void ypaworld_func64__sub21(NC_STACK_ypaworld *yw, TInputState *arg);
 

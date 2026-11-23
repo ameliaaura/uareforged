@@ -117,6 +117,8 @@ set(SOURCES
 	reforge_trails.cpp
 	reforge_marks.cpp
 	gfxsettings.cpp
+	game_clock.cpp
+	test_probes.cpp
 	yw_func2.cpp
 	yw_game.cpp
 	yw_game_ui.cpp
@@ -303,6 +305,7 @@ if(UA_VR AND UA_VR_NEWLOOK)
 	target_compile_definitions(${UA_TARGET} PUBLIC UA_VR_NEWLOOK=1)
 endif()
 
+option(UA_DESKTOP_O0 "Desktop: build the engine at -O0 (the flags before 0.8.5)" OFF)
 if(CMAKE_BUILD_TYPE MATCHES [dD][eE][bB][uU][gG])
    target_compile_options(${UA_TARGET} PUBLIC "-g" "-O0")
    
@@ -313,14 +316,26 @@ if(CMAKE_BUILD_TYPE MATCHES [dD][eE][bB][uU][gG])
 elseif(ANDROID AND NOT CMAKE_BUILD_TYPE STREQUAL "")
 	# Quest: Release / RelWithDebInfo / MinSizeRel honour CMake's per-config flags (-O3 / -O2 -g / -Os);
 	# the headset needs the optimiser for its frame budget.
+elseif(NOT CMAKE_BUILD_TYPE STREQUAL "" AND NOT UA_DESKTOP_O0)
+	# Desktop release builds (Mac, Windows, Linux): optimised, like the Quest. Until 0.8.4 the
+	# desktop appended "-g -O0" here. The engine is 1998-derived code, so the optimiser must not
+	# assume what that code never promised:
+	#   -fno-strict-aliasing  the loaders and the renderer reinterpret buffers through other types
+	#   -fwrapv               signed overflow wraps, as it did at -O0 (timers, hashes, packed maths)
+	# _GLIBCXX_ASSERTIONS: GCC's libstdc++ enables its bounds checks only at -O0; the Windows build
+	# keeps them, so an out-of-range index still ends in a crash report instead of silent corruption.
+	# UA_DESKTOP_O0=ON restores the old -O0 build for debugging.
+	target_compile_options(${UA_TARGET} PUBLIC "-g" "-O2" "-fno-strict-aliasing" "-fwrapv")
+	if(WIN32)
+		target_compile_definitions(${UA_TARGET} PUBLIC _GLIBCXX_ASSERTIONS=1)
+	endif()
 else()
-	# Desktop (and no build type): the engine's historical flags, unchanged.
+	# No build type (or UA_DESKTOP_O0): the engine's historical flags.
 	target_compile_options(${UA_TARGET} PUBLIC "-g" "-O0")
-	#target_compile_options(${UA_TARGET} PUBLIC "-O2" "-s")
 endif()
 
-# Reforge atmos night windows: the window detector runs at level load on night maps; the engine
-# builds at -O0 (above), this pure-CPU file at -O2 (~45 ms -> ~6 ms per trim). Last -O wins on clang.
+# Reforge atmos night windows: the window detector runs at level load on night maps; this
+# pure-CPU file is always built at -O2 (~45 ms -> ~6 ms per trim at -O0). Last -O wins on clang.
 set_source_files_properties(system/atmos_winmask.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 
 # anonymous usage stats: platform parts (system libraries only)

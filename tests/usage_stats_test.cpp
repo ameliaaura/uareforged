@@ -147,10 +147,14 @@ static void TestBodies()
     b = BuildBody(kId, c, Rec({{"event", "level_start"}, {"version", "0.8.0"}, {"preset", "low"}, {"level", "1"}}));
     CHECK(b.find("\"version\":\"0.8.0\"") != std::string::npos);
 
+    // the Linux edition (desktop)
+    b = BuildBody(kId, Common{"desktop", "linux", "0.8.4"}, Rec({{"event", "level_start"}, {"preset", "high"}, {"level", "1"}}));
+    CHECK(b.find("\"platform\":\"linux\"") != std::string::npos);
+
     // every rule refuses
     CHECK(BuildBody("nope", c, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, Common{"phone", "mac", "1"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
-    CHECK(BuildBody(kId, Common{"desktop", "linux", "1"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
+    CHECK(BuildBody(kId, Common{"desktop", "freebsd", "1"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, Common{"desktop", "mac", "0.8.1 beta"}, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, c, Rec({{"event", "level_start"}, {"preset", "vr"}, {"level", "1"}})).empty());
     CHECK(BuildBody(kId, c, Rec({{"event", "level_start"}, {"preset", "low"}, {"level", "10000"}})).empty());
@@ -737,7 +741,12 @@ static void TestCrashChild(const std::string &dir)
         CHECK(r.Get("signal") == (strcmp(how, "segv") ? "SIGABRT" : "SIGSEGV") || (r.Get("signal") == "SIGBUS"));
         CHECK(r.Get("preset") == "medium" && r.Get("level") == "9" && r.Get("build") == "test" && r.Get("version") == "0.8.1");
         CHECK(line.find('/') == std::string::npos && line.find('\\') == std::string::npos); // no paths
+#ifdef __linux__
+        // glibc's abort() has no frame pointers, so the walk ends inside libc; a SIGSEGV in our code walks into it
+        CHECK(strcmp(how, "abort") == 0 ? !r.Get("frames").empty() : r.Get("frames").find("usage_stats_test") != std::string::npos);
+#else
         CHECK(r.Get("frames").find("usage_stats_test") != std::string::npos);
+#endif
         CHECK(!BuildBody(kId, Common{"desktop", "mac", "0.8.1"}, r).empty());
         printf("crash line (%s): %s", how, line.c_str());
     }

@@ -615,7 +615,19 @@ void NC_STACK_ypagun::EnergyInteract(update_msg *arg)
     if ( _status != BACT_STATUS_DEAD )
     {
         if ( _pSector->owner == _owner )
-            _energy += _energy_max * (arg->frameTime / 1000.0) * _pSector->energy_power / 40000.0;
+        {
+            // Recharge in steps of one 60 fps frame (18 ticks), each rounded down exactly as a
+            // frame at the 60 fps cap always was: the same rate at any frame rate (per frame,
+            // a 240 fps frame's share rounded down to nothing).
+            _energyStepTime += arg->frameTime;
+            const int step = 18;
+            const int perStep = _energy_max * (step / 1000.0) * _pSector->energy_power / 40000.0;
+            while ( _energyStepTime >= step )
+            {
+                _energy += perStep;
+                _energyStepTime -= step;
+            }
+        }
 
         if ( _energy > _energy_max )
             _energy = _energy_max;

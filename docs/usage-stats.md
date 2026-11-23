@@ -39,7 +39,7 @@ headers beyond what it needs to answer).
 | `v` | integer | `3` (the server still accepts `2` from older builds, with the v2 events and fields only) |
 | `install` | string | 32 lowercase hex digits (`^[0-9a-f]{32}$`): 128 random bits from the OS's secure random source, made when stats are turned on, deleted when they are turned off (a new one each time they are turned on again). Never derived from the hardware. |
 | `app` | string | `desktop` or `vr` |
-| `platform` | string | `mac`, `windows` or `quest` |
+| `platform` | string | `mac`, `windows`, `linux` or `quest` |
 | `version` | string | app version, `^[0-9A-Za-z.+-]{1,32}$` (e.g. `0.8.1`, `0.9.1`) |
 | `event` | string | `launch`, `level_start`, `level_end`, `perf`, `session_end`, `crash`, `error` or `bug_report` |
 
@@ -59,7 +59,7 @@ it. Unknown keys: `400`. Missing required keys: `400`.
 | Field | Type | Req. | Rule |
 |---|---|---|---|
 | `preset` | string | yes | see above |
-| `os` | string | yes | `^[0-9A-Za-z .()_+-]{1,40}$`; name + version only, e.g. `macOS 15.2`, `Windows 11 23H2`, `Windows 10 22H2`, `Quest OS 74` (`Quest OS (Android 14)` when the Horizon OS version can't be read) |
+| `os` | string | yes | `^[0-9A-Za-z .()_+-]{1,40}$`; name + version only, e.g. `macOS 15.2`, `Windows 11 23H2`, `Windows 10 22H2`, `Ubuntu 24.04` (Linux: the distribution name + version from os-release), `Quest OS 74` (`Quest OS (Android 14)` when the Horizon OS version can't be read) |
 | `gpu` | string | yes | `^[0-9A-Za-z .()_+-]{1,64}$`; the graphics driver's renderer name, coarse: anything after the first `/` cut, `(TM)` / `(R)` removed, spaces collapsed; e.g. `Apple M2`, `NVIDIA GeForce RTX 3070`, `Adreno 740`; `unknown` when none |
 | `ram_gb` | integer | no | memory, rounded down to one of `2`, `4`, `8`, `16`, `32`, `64` (`64` = 64 GB or more; under 4 GB = `2`); absent when the system doesn't say |
 | `cpu_cores` | integer | no | logical processor cores, rounded down to one of `1`, `2`, `4`, `6`, `8`, `12`, `16`, `24`, `32` (`32` = 32 or more) |
@@ -268,8 +268,9 @@ deleted after 400 days, mission results, loading times, session summaries and bu
 ## Libraries
 
 No new dependency. HTTPS goes through what the platform already has: NSURLSession (Foundation, macOS),
-WinHTTP (Windows), `java.net.HttpURLConnection` (Quest, through JNI, as the start screens' downloads already do).
-Random bytes: `getentropy` (macOS), `BCryptGenRandom` (Windows), `arc4random_buf` (Android).
+WinHTTP (Windows), `java.net.HttpURLConnection` (Quest, through JNI, as the start screens' downloads already do),
+curl as a child process (Linux: the system's, else the copy in the package; no cookies, no config files).
+Random bytes: `getentropy` (macOS), `BCryptGenRandom` (Windows), `arc4random_buf` (Android), `getrandom` (Linux).
 
 ## Version history
 

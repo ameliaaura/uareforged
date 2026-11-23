@@ -375,6 +375,8 @@ public:
     cellArea *_roboConqCell;  //For AI
     int _roboConqCellID;  //For AI
     int _roboConqCellIndex;
+    float _roboScanAcc[6] = {};
+    float _roboEnemyDivAcc = 0.0f; // the enemy sweep (_roboEnemyDiv), likewise   // AI map scans: cells carried to the next frame (frame_rate.h)
     int _roboConqTime;
     int _roboConqDelay; //??
 

@@ -55,6 +55,13 @@ VIAddVersionKey "LegalCopyright" "Engine: GPL-2.0 (OpenUA / UA_source)"
 
 !include "${GEN}\uninstall-list.nsh"
 
+; a silent run (the launcher's one-click update: "Setup.exe /S /D=<the install folder>") over an existing install keeps
+; the desktop as the player left it (no desktop shortcut comes back after they removed it)
+Var WASINSTALLED
+Function .onInit
+  ReadRegStr $WASINSTALLED HKCU "${UNINSTKEY}" "InstallLocation"
+FunctionEnd
+
 Function LaunchGame
   SetOutPath "$INSTDIR"
   Exec '"$INSTDIR\${STUB}"'
@@ -88,8 +95,12 @@ Section "${APPNAME} (required)" SecMain
 SectionEnd
 
 Section "Desktop shortcut" SecDesktop
-  SetOutPath "$INSTDIR"
-  CreateShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${STUB}" "" "$INSTDIR\${STUB}" 0
+  ${IfNot} ${Silent}
+  ${OrIf} $WASINSTALLED == ""
+  ${OrIf} ${FileExists} "$DESKTOP\${APPNAME}.lnk"
+    SetOutPath "$INSTDIR"
+    CreateShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${STUB}" "" "$INSTDIR\${STUB}" 0
+  ${EndIf}
 SectionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN

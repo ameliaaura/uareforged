@@ -6,6 +6,7 @@
 #include "idev.h"
 #include "utils.h"
 #include "system/inpt.h"
+#include "frame_rate.h"
 
 // Joystick/pad diagnostic log: env/sdlInputLog.txt in the data dir, mirrored
 // to stderr as "[UA_JOY] ..." when UA_JOY_DEBUG=1.
@@ -100,10 +101,17 @@ protected:
 public:
     int16_t _bindedKey = -1;
     int32_t _sliderPos = 0;
+    FrameRate::Slider _slider;   // desktop: the time-scaled slider (frame_rate.h)
+
+    // The measured time (1/1024 s) of the frame being processed: INPEngine::QueryInput sets it
+    // once per frame before the sliders are read.
+    static void SetFrameMeasured(uint32_t measured);
+    static float FrameMeasured() { return _frameMeasured; }
     
     static std::map<int16_t, int16_t> KBDMapping;
     
 protected:
+    static float _frameMeasured;
     static int _kbdLastDown;
     static int _kbdLastHit;
     static std::queue<int32_t> _inputText;

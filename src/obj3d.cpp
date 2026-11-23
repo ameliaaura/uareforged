@@ -487,8 +487,12 @@ bool NC_STACK_Obj3D::ParseMtlStream(FSMgr::FileHandle *filp, const std::string &
                     fr.ms = std::max(1, atoi(f[1].c_str()));
                     if (f.size() >= 3)
                     {
-                        fr.mirU = f[2].find_first_of("hH") != std::string::npos;
-                        fr.mirV = f[2].find_first_of("vV") != std::string::npos;
+                        const size_t r = f[2].find_first_of("rR");
+                        const std::string mir = f[2].substr(0, r);
+                        fr.mirU = mir.find_first_of("hH") != std::string::npos;
+                        fr.mirV = mir.find_first_of("vV") != std::string::npos;
+                        if (r != std::string::npos)
+                            fr.rot = (float)atof(f[2].c_str() + r + 1);
                     }
                     seq.push_back(fr);
                 }
@@ -766,6 +770,14 @@ void ReforgeFlipbook::Bind(GFX::TMesh *mesh)
             }
             float u = f->mirU ? 1.0f - lu : lu;
             float v = f->mirV ? 1.0f - lv : lv;
+            if (f->rot != 0.0f)
+            {
+                // Turn the picture: sample the point the inverse turn takes this corner to.
+                const float a = -f->rot * 3.14159265f / 180.0f, c = cosf(a), sn = sinf(a);
+                const float du = u - 0.5f, dv = v - 0.5f;
+                u = 0.5f + du * c - dv * sn;
+                v = 0.5f + du * sn + dv * c;
+            }
             _outlines[t][j] = tUtV((f->cell % _cols + u) * cw, (f->cell / _cols + v) * ch);
         }
         vx.TexCoordId = j;

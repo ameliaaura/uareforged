@@ -737,10 +737,43 @@ bool NC_STACK_winp::GetState()
     return false;
 }
 
+float NC_STACK_winp::_frameMeasured = FrameRate::kRefMeasured;
+
+void NC_STACK_winp::SetFrameMeasured(uint32_t measured)
+{
+    _frameMeasured = (float)measured;
+}
+
 float NC_STACK_winp::GetSlider()
 {
     if ( _bindedKey < 0 )
         return 0.0;
+
+#ifndef __ANDROID__
+    // Desktop: the 1998 per-frame steps below, scaled by this frame's measured time so steering
+    // ramps up, slews and lets go in the same real time at any frame rate (frame_rate.h; the
+    // frame cap follows the display since 0.8.5). The Quest keeps the per-frame code below.
+    {
+        const float dt = _frameMeasured;
+        float r;
+        switch ( _bindedKey )
+        {
+        case Input::KC_MOUSEX:      r = FrameRate::SliderMouse(_slider, _mMove.x, dt); break;
+        case Input::KC_MOUSEY:      r = FrameRate::SliderMouse(_slider, _mMove.y, dt); break;
+        case Input::KC_JOYX:        r = FrameRate::SliderSlew(_slider, _joyXYpos.x, dt); break;
+        case Input::KC_JOYY:        r = FrameRate::SliderSlew(_slider, _joyXYpos.y, dt); break;
+        case Input::KC_JOYTHROTTLE: r = FrameRate::SliderSlew(_slider, -_joyZRZpos.x, dt); break;
+        case Input::KC_JOYHATX:     r = FrameRate::SliderSlew(_slider, _joyPov.x, dt); break;
+        case Input::KC_JOYHATY:     r = FrameRate::SliderSlew(_slider, _joyPov.y, dt); break;
+        case Input::KC_JOYRUDDER:   r = FrameRate::SliderSlew(_slider, _joyZRZpos.y, dt); break;
+        default:
+            r = FrameRate::SliderKey(_slider, Input::Engine.KeyMatrix.at( _bindedKey ).down, dt);
+            break;
+        }
+        _sliderPos = (int32_t)_slider.pos;
+        return r;
+    }
+#endif
 
     int v6 = 1;
 
@@ -952,6 +985,7 @@ bool NC_STACK_winp::BindKey(const std::string &keyName)
 void NC_STACK_winp::ResetSlider()
 {
     _sliderPos = 0;
+    _slider = FrameRate::Slider();
 }
 
 

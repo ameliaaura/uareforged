@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=UA Reforged
+GenericName=Real-time strategy / action game
+Comment=Urban Assault (1998) on the open-source OpenUA engine, with modern graphics
+Exec=ua-reforged
+Icon=ua-reforged
+Terminal=false
+Categories=Game;StrategyGame;ActionGame;
+Keywords=Urban Assault;OpenUA;strategy;
+StartupWMClass=ua-reforged

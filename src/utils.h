@@ -164,6 +164,33 @@ std::string correctSeparatorAndExt(std::string str);
 int StriCmp(const std::string &a, const std::string &b);
 bool StrGetBool(const std::string &str);
 
+inline bool StrIsDigitsOnly(const std::string &s)
+{
+    for (auto a: s)
+    {
+        if (a < '0' || a > '9')
+            return false;
+    }
+    return true;
+}
+
+// The number after "UNNAMED" in a profile name ("UNNAMED12" -> 12), or -1 when the rest is
+// not 1-9 digits ("UNNAMED", "UNNAMEDx", a number too long for int): New on the save screen
+// must never throw on a profile the player named by hand.
+inline int ProfileNumberSuffix(const std::string &suffix)
+{
+    if (suffix.empty() || suffix.size() > 9 || !StrIsDigitsOnly(suffix))
+        return -1;
+    return std::stoi(suffix);
+}
+
+inline bool CheckValidUsername(const std::string &s)
+{
+    if (s == "." || s == "..")
+        return false;
+    return true;
+}
+
 
 
 

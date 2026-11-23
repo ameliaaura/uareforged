@@ -752,7 +752,10 @@ void GuiList::InputHandle(NC_STACK_ypaworld *yw, TInputState *struc)
         {
             listFlags &= ~GLIST_FLAG_IN_SELECT;
         }
-        else if ( !(listFlags & GLIST_FLAG_NO_SCROLL) )
+        // Drag-scroll needs the entry rows 8 .. shownEntries + 7. Windows that reuse the list for
+        // their own buttons (the in-mission yes/no box: 3 rows shown, buttons resized to 10) have
+        // fewer: holding the mouse on Yes/No and dragging off read buttons[10] (the 0.8.3 crash E).
+        else if ( !(listFlags & GLIST_FLAG_NO_SCROLL) && shownEntries > 0 && (size_t)shownEntries + 8 <= buttons.size() )
         {
             ButtonBox &v40 = buttons[8];
             ButtonBox &v27 = buttons[shownEntries + 7];
