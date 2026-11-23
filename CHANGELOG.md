@@ -18,9 +18,10 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
   so before the game starts: Update now, Later, Don't remind me for this version, and What's new. Update now
   downloads the new version, checks its signature (every update is signed with the UA Reforged update key, so the
   site alone can never push one) and installs it: on a Mac it swaps the app (the old one is kept until the new one has
-  started), on Windows it runs the installer silently into the same folder. Then the new version starts. If anything
-  goes wrong the app says so, opens the download page and your current version starts as usual. Offline or anything
-  unexpected: no notice and no wait. The check sends nothing about you or your game.
+  started), on Windows it runs the installer silently into the same folder, on Linux the AppImage replaces itself
+  (the tar.gz folder gets the download page). Then the new version starts. If anything goes wrong the app says so,
+  opens the download page and your current version starts as usual. Offline or anything unexpected: no notice and
+  no wait. The check sends nothing about you or your game.
 
 ### Changed
 - **Desktop: the game speed no longer depends on the frame rate.** The game used to run faster the higher the

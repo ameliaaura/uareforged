@@ -1,7 +1,7 @@
 #!/bin/bash
 # UA Reforged - sign a release file for the launchers' one-click update (release time, on the release machine only).
 #
-#   tools/sign-update.sh --key-cmd '<command that prints the PEM private key>' <file> <version> <mac|windows> <url>
+#   tools/sign-update.sh --key-cmd '<command that prints the PEM private key>' <file> <version> <mac|windows|linux> <url>
 #
 # Writes a small manifest (name, version, platform, bytes, sha256) and an ECDSA P-256 / SHA-256 signature over it, and
 # prints the "update" object for links.json "latest.<platform>":
@@ -17,14 +17,14 @@ KEYCMD=""
 FILE="$1" VER="$2" PLAT="$3" URL="$4"
 [ -f "$FILE" ] || { echo "no such file: $FILE" >&2; exit 2; }
 [[ "$VER" =~ ^[0-9]{1,6}(\.[0-9]{1,6}){1,3}$ ]] || { echo "bad version: $VER" >&2; exit 2; }
-case "$PLAT" in mac) ext=zip ;; windows) ext=exe ;; *) echo "platform must be mac or windows" >&2; exit 2 ;; esac
+case "$PLAT" in mac) ext=zip ;; windows) ext=exe ;; linux) ext=AppImage ;; *) echo "platform must be mac, windows or linux" >&2; exit 2 ;; esac
 NAME="$(basename "$FILE")"
 [[ "$NAME" =~ ^[A-Za-z0-9._-]{1,100}$ ]] && [ "${NAME##*.}" = "$ext" ] || { echo "file name must be plain and end in .$ext" >&2; exit 2; }
 [ "${URL##*/}" = "$NAME" ] || { echo "the url must end in /$NAME" >&2; exit 2; }
 OSSL=/usr/bin/openssl; command -v "$OSSL" >/dev/null || OSSL=openssl
 T="$(mktemp -d "${TMPDIR:-/tmp}/ua-sign.XXXXXX")"; trap 'rm -rf "$T"' EXIT
 BYTES=$(wc -c < "$FILE" | tr -d ' ')
-SHA=$(shasum -a 256 "$FILE" | cut -d' ' -f1)
+SHA=$( (shasum -a 256 "$FILE" 2>/dev/null || sha256sum "$FILE") | cut -d' ' -f1)
 printf 'UA Reforged update 1\nname\t%s\nversion\t%s\nplatform\t%s\nbytes\t%s\nsha256\t%s\n' "$NAME" "$VER" "$PLAT" "$BYTES" "$SHA" > "$T/manifest"
 # the key goes from the command straight into openssl (stdin)
 bash -c "$KEYCMD" | "$OSSL" dgst -sha256 -sign /dev/stdin -out "$T/sig" "$T/manifest"

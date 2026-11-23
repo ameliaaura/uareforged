@@ -41,14 +41,18 @@ support folder; a newer version asks again) / What's new (opens the url). **One-
 `"update": {"url": "<file on the release page>", "manifest": "<base64>", "sig": "<base64>"}` (made by
 `tools/sign-update.sh`) carries a manifest (`name`, `version`, `platform`, `bytes`, `sha256`) signed with ECDSA P-256 /
 SHA-256. The app checks the signature against `update_key` in `downloads.txt` (`/usr/bin/openssl` on the Mac, .NET
-`ECDsaCng` on Windows), then that the manifest names its platform, a version newer than its own (no downgrade or
+`ECDsaCng` on Windows, the system's `openssl` on Linux), then that the manifest names its platform, a version newer than its own (no downgrade or
 replay) equal to `latest.version`, and the file's name; after the download, size and SHA-256. Mac: the zip is unpacked
 next to the app, `codesign --verify --deep --strict`, same bundle id and version, the apps are swapped (the old one
 kept as a hidden `.<name>-<version>.update-backup` until the new one has started; put back if it does not start
 within 60 s), then `open -n`. A translocated app or a folder it may not write to gets the download page with a short
 explanation. Windows (installed with Setup.exe only; a zip copy gets the download page): `launcher\update.ps1` waits for
 the launcher to close, runs `Setup.exe /S /D=<install folder>` (per-user, no administrator prompt), checks the
-installed version and starts UA Reforged again. Any failure: a short notice, the download page, the current version
+installed version and starts UA Reforged again. Linux (the AppImage only; the tar.gz folder, a system without
+`openssl` or an AppImage in a folder it may not write to gets the download page): the downloaded AppImage (ELF with
+the AppImage magic) is copied next to the running one and renamed over it in one step, the old file kept as a hidden
+`.<name>-<version>.update-backup` until the new one has started (put back if it does not confirm within 60 s); the
+file keeps its name and place, so menu entries and Steam shortcuts still work. Any failure: a short notice, the download page, the current version
 starts. Without `update` the first button is Download. Test-hook builds (`UA_TEST_HOOKS=ON`) also accept the test key
 (`tests/launcher/update-key-test.txt`, as `update_key_test`); release builds refuse to build with it. Offline, a bad file, a missing field,
 the same or an older version, or links.json not read within 2 s of that point: no dialog, the game starts. A start

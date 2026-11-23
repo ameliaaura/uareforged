@@ -30,6 +30,11 @@
 # desktop's application menu; --help. Everything else goes to the engine.
 # Environment (for testing): UA_GAME_DIR=<folder> skips the first-launch setup, UA_CAMPAIGN=base|ghor|taer skips the
 # launcher (and, without UA_STATS_AUTO, the stats question); the switches listed in downloads.sh answer the dialogs.
+#
+# New-version notice (update_check in downloads.sh): when links.json names a newer Linux version than this app, one
+# dialog before the game starts (Update now / Later / Don't remind me for this version / What's new). Update now
+# (AppImage only) downloads the signed update, checks it, puts it in place of this AppImage (the old file stays as a
+# hidden backup until the new one has started) and starts the new version. Offline or anything odd: no dialog, no wait.
 
 if [ -n "${APPDIR:-}" ] && [ -x "$APPDIR/usr/bin/UA_source" ]; then HERE="$APPDIR"
 else HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"; fi
@@ -115,6 +120,11 @@ fi
 [ -z "$GAME" ] && [ -f "$CONF" ] && GAME="$(cat "$CONF")"
 # downloads the app can make: "Get the game" (from the Metropolis Dawn community) and the Reforge pack
 . "$SHARE/downloads.sh"
+# just updated: tell the old launcher this version has started and remove the old AppImage's backup
+update_finish
+# the site's links.json, read once per start in the background (the setup, the pack and the new-version notice all
+# use that one read)
+links_prefetch
 # no game folder yet: "Set up UA Reforged" (the game + the Reforge pack in one step, or your own folder)
 setup_first
 [ -n "${UA_GAME_DIR:-}" ] || printf '%s\n' "$GAME" > "$CONF"
@@ -180,6 +190,9 @@ esac
 
 # no network side features in this build
 unset UA_RADIO UA_RADIO_LLM
+
+# a newer UA Reforged is out (links.json "latest"): one small notice, then the game starts either way
+update_check
 
 cd "$RUN" || fail "UA Reforged could not open its game folder."
 echo "campaign=$campaign"

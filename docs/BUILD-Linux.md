@@ -1,4 +1,4 @@
-# Building the Linux edition (new in 0.8.4)
+# Building the Linux edition (new in 0.8.5)
 
 The Linux edition is an x86_64 AppImage plus a tar.gz with the same files. It is built in a container, so any
 machine with Docker can build it:

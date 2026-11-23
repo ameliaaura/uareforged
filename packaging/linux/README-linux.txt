@@ -1,4 +1,4 @@
-UA REFORGED - for Linux PCs (x86_64), NEW in 0.8.4
+UA REFORGED - for Linux PCs (x86_64), NEW in 0.8.5
 ====================================================
 
 The 1998 game Urban Assault on the open-source OpenUA engine, with modern
@@ -31,15 +31,15 @@ WHAT YOU NEED
 INSTALLING
 ----------
 AppImage (one file):
-1. Make it executable: right-click UA-Reforged-0.8.4-Linux-x86_64.AppImage >
+1. Make it executable: right-click UA-Reforged-0.8.5-Linux-x86_64.AppImage >
    Properties > Permissions > "Allow executing file as program", or in a
-   terminal:  chmod +x UA-Reforged-0.8.4-Linux-x86_64.AppImage
-2. Double-click it (or run ./UA-Reforged-0.8.4-Linux-x86_64.AppImage).
+   terminal:  chmod +x UA-Reforged-0.8.5-Linux-x86_64.AppImage
+2. Double-click it (or run ./UA-Reforged-0.8.5-Linux-x86_64.AppImage).
    It needs FUSE, which every current desktop has. If it says FUSE is
    missing, use the tar.gz instead, or run it with --appimage-extract-and-run.
 
 tar.gz (a folder, no FUSE needed):
-1. Unpack it anywhere:  tar xzf UA-Reforged-0.8.4-Linux-x86_64.tar.gz
+1. Unpack it anywhere:  tar xzf UA-Reforged-0.8.5-Linux-x86_64.tar.gz
 2. Run ./ua-reforged inside the folder.
 
 Then set up UA Reforged. The first start shows one dialog. Choose "Set up
@@ -50,7 +50,7 @@ Already have the game? Choose "I already have the game" and pick its folder
 (the one that contains DATA and LEVELS). Untick "Include the Reforge pack" to
 keep the 1998 look for now. The folder picker needs zenity or kdialog (most
 desktops have one); without them, start once from a terminal with
-    ./UA-Reforged-0.8.4-Linux-x86_64.AppImage --game-dir /path/to/your/game
+    ./UA-Reforged-0.8.5-Linux-x86_64.AppImage --game-dir /path/to/your/game
 UA Reforged only reads your game folder; your saves and settings are kept in
 UA Reforged's own folder (~/.local/share/UA Reforged).
 
@@ -61,6 +61,13 @@ pick the AppImage (or the ua-reforged file of the tar.gz folder).
 The first time a mission starts with the Reforge pack, the game runs a short
 graphics test (about 20 seconds, a camera tour) and picks the graphics preset
 that suits your PC. Options > Graphics changes it at any time.
+
+New versions: when one is out, a short notice says so before the game starts.
+"Update now" (AppImage only) downloads it, checks its signature and puts it in
+place of your AppImage (same file name and place, so menu entries and Steam
+shortcuts keep working), then starts it. It needs openssl (installed on most
+desktops) and an AppImage in a folder of yours. The tar.gz folder, or anything
+unexpected, opens the download page instead.
 
 
 YOUR GAME FILES

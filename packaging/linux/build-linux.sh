@@ -209,6 +209,12 @@ build_appdir() {
     install -m 755 "$PKGDIR/launcher.sh" "$APPDIR/AppRun"
     cp "$PKGDIR/downloads.sh" "$PKGDIR/links.py" "$S/"
     cp "$ROOT/packaging/macos/downloads.txt" "$S/downloads.txt"   # the same addresses and pack checksums as the Mac app
+    # this build's version, for the new-version notice (compared with links.json "latest")
+    printf '# this build (written by build-linux.sh; the new-version notice compares it with links.json "latest")\napp_version\t%s\n' "$VERSION" >> "$S/downloads.txt"
+    # test-hook builds only: also accept one-click updates signed with the test key (release builds never carry it)
+    if [ "${UA_TEST_HOOKS:-OFF}" = ON ]; then
+        printf '# TEST BUILD: updates signed with the test key are accepted too\nupdate_key_test\t%s\n' "$(tr -d '\n' < "$ROOT/tests/launcher/update-key-test.txt")" >> "$S/downloads.txt"
+    elif grep -q '^update_key_test' "$S/downloads.txt"; then die "a release build must not accept the test update key"; fi
     cp "$PKGDIR/ua-reforged.desktop" "$APPDIR/ua-reforged.desktop"
     cp "$PKGDIR/ua-reforged.png" "$APPDIR/ua-reforged.png"; cp "$PKGDIR/ua-reforged.png" "$APPDIR/.DirIcon"
     mkdir -p "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"

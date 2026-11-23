@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """UA Reforged - strict check of the site's links.json (the Linux twin of packaging/macos/links.js).
-    python3 -I links.py <file> "<allowed host> ..." <allow local http 0|1>
+    python3 -I links.py <file> "<allowed host> ..." <allow local http 0|1> [platform for "latest", linux]
 Only reads and checks data: json.loads, types, lengths, https URLs on an allowlist of hosts. Nothing in the file is
 ever run. Prints "key<TAB>value" lines (parts as "part<TAB>name<TAB>bytes<TAB>sha256"); any problem rejects the
 WHOLE file (exit 1, the reason on stderr) and the launcher uses its built-in links."""
@@ -22,6 +22,7 @@ def main():
     path = sys.argv[1]
     hosts = [h.lower() for h in (sys.argv[2] if len(sys.argv) > 2 else '').split() if h]
     local = len(sys.argv) > 3 and sys.argv[3] == '1'
+    plat = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else 'linux'
     try:
         with open(path, 'rb') as f:
             data = f.read(16385)
@@ -115,7 +116,67 @@ def main():
             fail(k + '.bytes')
         if not isinstance(a.get('sha256'), str) or not sha.match(a['sha256']):
             fail(k + '.sha256')
+    # latest: the newest version per platform, for the "new version" notice at start-up:
+    #   "latest": {"linux": {"version": "0.8.5", "url": "https://uareforged.pages.dev/downloads/"}, ...}
+    # Checked as strictly as the rest, but on its own: a problem here drops only this field (one "latest_ignored" line
+    # with the reason), the links above still count. The same rules as the Mac and Windows apps.
+    if 'latest' in j:
+        why, lv = '', j['latest']
+        if not isinstance(lv, dict):
+            why = 'latest: not an object'
+        elif plat in lv:
+            e = lv[plat]
+            if not isinstance(e, dict):
+                why = 'latest.' + plat + ': not an object'
+            elif not isinstance(e.get('version'), str) or not VERSION.fullmatch(e['version']):
+                why = 'latest.' + plat + '.version'
+            elif not release_url(e.get('url')):
+                why = 'latest.' + plat + '.url'
+            else:
+                out.append('latest\t' + e['version'] + '\t' + e['url'])
+                # update (0.8.5 and later): the signed one-click update for this platform. Only its shape is checked
+                # here; the launcher checks the signature, the manifest and the file. A bad one drops only the update.
+                if 'update' in e:
+                    uw = update_why(e['update'], local)
+                    if uw:
+                        out.append('latest_update_ignored\tlatest.' + plat + '.update' + uw)
+                    else:
+                        u = e['update']
+                        out.append('latest_update\t' + u['url'] + '\t' + u['manifest'] + '\t' + u['sig'])
+        if why:
+            out.append('latest_ignored\t' + why)
     print('\n'.join(out))
+
+
+VERSION = re.compile(r'[0-9]{1,6}(\.[0-9]{1,6}){1,3}')
+RELEASE = re.compile(r'https://(github\.com/ameliaaura/uareforged|uareforged\.pages\.dev)((/[A-Za-z0-9._~-]*)*)(#[A-Za-z0-9_-]*)?')
+
+
+def release_url(u):
+    """The release page the notice opens: https on github.com/ameliaaura/uareforged or uareforged.pages.dev only,
+    plain path characters, no "." or ".." segments, no query, no port."""
+    if not isinstance(u, str) or len(u) > 300:
+        return False
+    m = RELEASE.fullmatch(u)
+    return bool(m) and not re.search(r'/\.{1,2}(/|$)', m.group(2))
+
+
+def update_why(u, local):
+    """"update": {"url": "<file>", "manifest": "<base64>", "sig": "<base64>"}: the file on the release page (or on
+    http://127.0.0.1 in test runs), the signed manifest and its signature. Returns '' when the shape is fine."""
+    if not isinstance(u, dict):
+        return ': not an object'
+    url = u.get('url')
+    ok = release_url(url) and re.search(r'/[A-Za-z0-9._-]+\.(zip|exe|AppImage)\Z', url) is not None
+    if not ok and local and isinstance(url, str):
+        ok = re.fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}(/[A-Za-z0-9._~-]+)+\.(zip|exe|AppImage)', url) is not None
+    if not ok:
+        return '.url'
+    if not isinstance(u.get('manifest'), str) or not re.fullmatch(r'[A-Za-z0-9+/]{20,1024}={0,2}', u['manifest']):
+        return '.manifest'
+    if not isinstance(u.get('sig'), str) or not re.fullmatch(r'[A-Za-z0-9+/]{20,200}={0,2}', u['sig']):
+        return '.sig'
+    return ''
 
 
 main()

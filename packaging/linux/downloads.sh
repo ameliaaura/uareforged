@@ -8,7 +8,7 @@
 # python3 (whichever exists); downloads use the system's curl, else the copy in the package. No "Install on my
 # Quest" here (use the Mac or Windows app, or SideQuest).
 #
-# Where from: usr/share/ua-reforged/downloads.txt (built-in values). Before a download the app reads a small
+# Where from: usr/share/ua-reforged/downloads.txt (built-in values). At start-up the app reads a small
 # links.json from the UA Reforged site (links_url) so a broken link can be fixed without a new app. That file is
 # only parsed (links.py: strict types, https only, an allowlist of hosts); it can never run anything. If it is
 # missing or invalid the built-in values are used.
@@ -29,6 +29,9 @@
 # answers the folder picker); UA_PACK_AUTO=yes|no answers the pack offer; UA_NOTICE_AUTO=help|folder|later answers
 # the notices (and opens no browser); UA_PLAY_AUTO=play|pack|quit answers the launcher once (UA_CAMPAIGN skips
 # it); UA_PACK_NOUI=1 shows no progress window; UA_STATS_AUTO=yes|no|dismiss answers the usage stats question.
+# UA_LINKS_FILE=<file> reads that file instead of links.json (no request); UA_UPDATE_AUTO=update|download|later|skip|
+# whatsnew answers the new-version notice. A build with test hooks (UA_TEST_HOOKS=ON) also accepts updates signed with
+# the test key (update_key_test in downloads.txt); release builds never carry that line.
 
 DL_CONF="$SHARE/downloads.txt"
 PACK_DL="$SUPPORT/reforge-pack-download"
@@ -98,26 +101,67 @@ open_help() {
 }
 
 # ---------------------------------------------------------------- links: built-in values, then the site's links.json
+# One read of links.json per start at most. The launcher starts it in the background (links_prefetch) as soon as it
+# knows the game folder; the setup, the pack and the new-version notice all use that one read. A start with the game
+# and the Reforge pack in place says so with "?start" on the address, which the site does not count as a setup
+# (docs/usage-stats.md).
+links_src() { printf '%s' "${UA_LINKS_URL:-$(conf links_url | head -1)}"; }
+links_curl() { # links_curl <url> <file>: the one request (the same limits as always)
+    local proto="=https"; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && proto="=https,http"
+    ${LINKS_EXEC:+exec} "$CURL" -fsSL --proto "$proto" --proto-redir "$proto" --max-time 8 --connect-timeout 5 \
+        --max-filesize 16384 -A "$DL_UA" -o "$2" "$1" </dev/null 2>/dev/null
+}
+links_prefetch() {
+    [ -n "${LINKS_DONE:-}${LINKS_PRE_SRC:-}" ] && return 0
+    [ -f "$DL_CONF" ] || return 0
+    [ -n "${UA_LINKS_FILE:-}" ] && return 0   # test runs: a local file, read by links_load
+    local src; src="$(links_src)"; [ -n "$src" ] || return 0
+    if is_game_dir "$GAME" && [ -d "$PACK/hd-models" ]; then
+        case "$src" in *\?*) src="$src&start" ;; *) src="$src?start" ;; esac
+    fi
+    LINKS_PRE_SRC="$src"
+    mkdir -p "$SUPPORT"; rm -f "$SUPPORT/links.json.pre"
+    ( LINKS_EXEC=1 links_curl "$src" "$SUPPORT/links.json.pre" ) &   # (exec: the job is curl itself)
+    LINKS_PRE_PID=$!
+}
+links_pre_wait() { # the background read is over (or this waits for it): LINKS_PRE_RC = curl's exit code
+    [ -n "${LINKS_PRE_PID:-}" ] || return 0
+    wait "$LINKS_PRE_PID" 2>/dev/null; LINKS_PRE_RC=$?; LINKS_PRE_PID=""
+}
 links_load() {
     L_GAME_URL="$(conf game_url | head -1)"; L_GAME_MIN="$(conf game_min_bytes | head -1)"
     L_GAME_MAX="$(conf game_max_bytes | head -1)"
     L_PACK_URL="$(conf url | head -1)"; L_PACK_PARTS="$(conf part)"
     L_HELP="$(conf help_url | head -1)"; L_PACK_HELP="$(conf pack_help_url | head -1)"; L_MESSAGE=""
-    local src="${UA_LINKS_URL:-$(conf links_url | head -1)}" tmp="$SUPPORT/links.json.tmp" out proto="=https"
+    L_LATEST=""; L_LATEST_URL=""; L_UPD_URL=""; L_UPD_MAN=""; L_UPD_SIG=""
+    local src tmp="$SUPPORT/links.json.tmp" out ok=1
     local allow; allow="$(conf allow_host | tr '\n' ' ')"
-    local loc=0; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && { loc=1; proto="=https,http"; }
+    local loc=0; [ -n "${UA_LINKS_ALLOW_LOCAL:-}" ] && loc=1
     rm -f "$tmp"
-    if [ -n "$src" ] && "$CURL" -fsSL --proto "$proto" --proto-redir "$proto" --max-time 8 --connect-timeout 5 \
-            --max-filesize 16384 -A "$DL_UA" -o "$tmp" "$src" </dev/null 2>/dev/null; then
+    if [ -n "${UA_LINKS_FILE:-}" ]; then
+        src="$UA_LINKS_FILE (test file)"; cp "$UA_LINKS_FILE" "$tmp" 2>/dev/null && ok=0
+    elif [ -n "${LINKS_PRE_SRC:-}" ]; then
+        src="$LINKS_PRE_SRC"; links_pre_wait
+        [ "${LINKS_PRE_RC:-1}" = 0 ] && [ -f "$SUPPORT/links.json.pre" ] && mv -f "$SUPPORT/links.json.pre" "$tmp" && ok=0
+        rm -f "$SUPPORT/links.json.pre"
+    else
+        src="$(links_src)"; [ -n "$src" ] && links_curl "$src" "$tmp" && ok=0
+    fi
+    if [ $ok = 0 ]; then
         if ! command -v python3 >/dev/null 2>&1; then
-            out="links.json: python3 is not installed"; false
-        elif out="$(python3 -I "$SHARE/links.py" "$tmp" "$allow" "$loc" 2>&1)"; then
-            local k v parts=""
-            while IFS="$(printf '\t')" read -r k v; do
+            echo "links: $src not checked (python3 is not installed); built-in links used"
+        elif out="$(python3 -I "$SHARE/links.py" "$tmp" "$allow" "$loc" linux 2>&1)"; then
+            local k v w parts=""
+            while IFS="$(printf '\t')" read -r k v w; do
+                [ -n "$w" ] && [ "$k" != latest ] && [ "$k" != latest_update ] && v="$v"$'\t'"$w"
                 case "$k" in
                     game_url) L_GAME_URL="$v" ;; game_min_bytes) L_GAME_MIN="$v" ;; pack_url) L_PACK_URL="$v" ;;
                     help_url) L_HELP="$v" ;; pack_help_url) L_PACK_HELP="$v" ;; message) L_MESSAGE="$v" ;;
                     part) parts="$parts$v"$'\n' ;;
+                    latest) L_LATEST="$v"; L_LATEST_URL="$w" ;;
+                    latest_ignored) echo "links: $v (ignored; no new-version notice)" ;;
+                    latest_update) L_UPD_URL="$v"; L_UPD_MAN="${w%%$'\t'*}"; L_UPD_SIG="${w#*$'\t'}" ;;
+                    latest_update_ignored) echo "links: $v (ignored; no one-click update)" ;;
                 esac
             done <<< "$out"
             [ -n "$parts" ] && L_PACK_PARTS="${parts%$'\n'}"
@@ -134,6 +178,210 @@ links_load() {
     [ -n "${UA_PACK_URL:-}" ] && L_PACK_URL="$UA_PACK_URL"
     case "$L_PACK_URL" in */) ;; *) L_PACK_URL="$L_PACK_URL/" ;; esac
     LINKS_DONE=1
+}
+
+# ---------------------------------------------------------------- the new-version notice (every start)
+# ver_cmp <a> <b>: prints -1, 0 or 1. Up to four numeric parts, missing parts count as 0 (0.8.4 = 0.8.4.0 < 0.8.4.1 < 0.8.5).
+ver_cmp() {
+    awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, "."); r = 0
+        for (i = 1; i <= 4; i++) { p = (i <= n) ? x[i] + 0 : 0; q = (i <= m) ? y[i] + 0 : 0
+            if (p < q) { r = -1; break } if (p > q) { r = 1; break } }
+        print r }'
+}
+# update_check: just before the game starts. When links.json names a newer Linux version than this app (app_version in
+# downloads.txt, written by build-linux.sh), one dialog: Update now / Later / Don't remind me for this version (kept in
+# update-skip.txt; a newer version asks again) / What's new (opens the release page, then the dialog comes back). Without
+# a one-click update in links.json the first button is Download (opens the release page). Anything missing, late
+# (links.json not read within 2 s of this point), invalid or not newer: no dialog, no delay, the game starts.
+# Test runs: UA_UPDATE_AUTO=update|download|later|skip|whatsnew answers the dialog (and opens no browser).
+UPDATE_SKIP="$SUPPORT/update-skip.txt"
+update_check() {
+    local mine; mine="$(conf app_version | head -1)"
+    case "$mine" in ''|*[!0-9.]*) echo "update check: this build has no version"; return 0 ;; esac
+    if [ -z "${LINKS_DONE:-}" ] && [ -n "${LINKS_PRE_PID:-}" ]; then
+        # at most 2 s more for the background read: a watchdog stops it after that
+        ( sleep 2; kill "$LINKS_PRE_PID" 2>/dev/null ) & local dog=$!
+        links_pre_wait
+        kill "$dog" 2>/dev/null; wait "$dog" 2>/dev/null
+        if [ "${LINKS_PRE_RC:-0}" -gt 128 ]; then
+            rm -f "$SUPPORT/links.json.pre"; LINKS_PRE_SRC=""
+            echo "update check: links.json is slow to answer; skipped"; return 0
+        fi
+    fi
+    [ -n "${LINKS_DONE:-}" ] || links_load
+    [ -n "${L_LATEST:-}" ] || { echo "update check: no version information"; return 0; }
+    if [ "$(ver_cmp "$L_LATEST" "$mine")" != 1 ]; then echo "update check: $mine is up to date (latest $L_LATEST)"; return 0; fi
+    local skip; skip="$(head -1 "$UPDATE_SKIP" 2>/dev/null)"
+    case "$skip" in ''|*[!0-9.]*) skip="" ;; esac
+    if [ -n "$skip" ] && [ "$(ver_cmp "$L_LATEST" "$skip")" != 1 ]; then echo "update check: $L_LATEST is out; not reminding (skipped)"; return 0; fi
+    local b="${UA_UPDATE_AUTO:-}" up="Update now" dl="Download" later="Later" never="Don't remind me for this version" news="What's new"
+    local first="$up" how="Update now downloads it, checks it and starts the new version."
+    [ -n "$L_UPD_URL" ] || { first="$dl"; how="Download opens the download page in your browser."; }
+    if [ -n "$b" ]; then
+        echo "update check: $L_LATEST is out (this app $mine); test answer $b"
+        [ "$b" = whatsnew ] && { echo "update page: $L_LATEST_URL (test run: not opened)"; b=later; }
+    else
+        while :; do
+            b="$(dlg "A new version of UA Reforged ($L_LATEST) is out." "You have version $mine. $how Later starts the game now." "" 0 0 "$first" "$later" "$never" "$news")"
+            b="${b%%$'\t'*}"
+            echo "update check: $L_LATEST is out (this app $mine); chose [${b:-closed}]"
+            [ "$b" = "$news" ] || break
+            echo "update page: $L_LATEST_URL"; open_with_desktop "$L_LATEST_URL"
+        done
+    fi
+    case "$b" in
+        "$up"|update)
+            if [ -n "$L_UPD_URL" ]; then update_apply "$mine"; else update_page; fi ;;
+        "$dl"|download) update_page ;;
+        "$never"|skip) printf '%s\n' "$L_LATEST" > "$UPDATE_SKIP"; echo "update check: no reminder for $L_LATEST" ;;
+    esac
+    return 0
+}
+update_page() {
+    if [ -n "${UA_UPDATE_AUTO:-}" ]; then echo "update page: $L_LATEST_URL (test run: not opened)"
+    else echo "update page: $L_LATEST_URL"; open_with_desktop "$L_LATEST_URL"; fi
+}
+# update_fail <what went wrong> [extra sentence]: a short notice, then the download page; the current version starts
+update_fail() {
+    echo "update: not installed - $1"
+    rm -rf "$UPDATE_DL"; dl_ui_close
+    local msg="UA Reforged could not update itself: $(no_paths "$1").${2:+ $2}
+
+The download page opens now, so you can get the new version there. Your current version starts as usual."
+    echo "notice: $msg" | tr '\n' ' '; echo
+    [ -n "${UA_UPDATE_AUTO:-}" ] || ask "$msg" "OK" "OK" >/dev/null
+    update_page
+    return 1
+}
+
+# ---------------------------------------------------------------- one-click update (signed, AppImage only)
+# links.json "latest.linux.update" = the AppImage's address, a small manifest (name, version, platform, bytes, sha256)
+# and an ECDSA P-256 / SHA-256 signature over that manifest, made at release time with the UA Reforged update key (the
+# same key as the Mac and Windows apps). Only its public half is in the app (downloads.txt update_key; a build with test
+# hooks also takes update_key_test). The app refuses an update whose signature does not check out with one of those
+# keys, whose manifest names another platform or a version that is not newer than this app (no downgrade, no replay of
+# an old update), or whose file differs from the manifest in size or SHA-256 (the site alone can never push an update).
+# Checked with the system's openssl. Without openssl, from the tar.gz folder, or when the AppImage file or its folder
+# may not be changed: a short notice and the download page instead.
+UPDATE_DL="$SUPPORT/update-download"
+UPDATE_PENDING="$SUPPORT/update-pending.txt"
+# update_verify <work dir> <this version>: checks the signature and the manifest; sets U_NAME U_VER U_BYTES U_SHA or
+# returns 1 with U_WHY
+update_verify() {
+    local d="$1" mine="$2" k ok=1 line key val n=0 seen=" "
+    U_WHY=""; U_NAME=""; U_VER=""; U_PLAT=""; U_BYTES=""; U_SHA=""
+    printf '%s' "$L_UPD_MAN" | openssl base64 -d -A > "$d/manifest" 2>/dev/null
+    printf '%s' "$L_UPD_SIG" | openssl base64 -d -A > "$d/manifest.sig" 2>/dev/null
+    [ -s "$d/manifest" ] && [ -s "$d/manifest.sig" ] || { U_WHY="the update's signature is missing"; return 1; }
+    while IFS= read -r k; do
+        [ -n "$k" ] || continue
+        { echo '-----BEGIN PUBLIC KEY-----'; printf '%s\n' "$k" | fold -w 64; echo '-----END PUBLIC KEY-----'; } > "$d/key.pem"
+        if openssl dgst -sha256 -verify "$d/key.pem" -signature "$d/manifest.sig" "$d/manifest" >/dev/null 2>&1; then ok=0; break; fi
+    done < <(conf update_key; conf update_key_test)
+    rm -f "$d/key.pem"
+    [ $ok = 0 ] || { U_WHY="the update's signature is not valid"; return 1; }
+    while IFS= read -r line || [ -n "$line" ]; do
+        n=$((n + 1))
+        if [ $n = 1 ]; then [ "$line" = "UA Reforged update 1" ] || { U_WHY="the update's manifest is not readable"; return 1; }; continue; fi
+        key="${line%%$'\t'*}"; val="${line#*$'\t'}"
+        case "$seen" in *" $key "*) U_WHY="the update's manifest is not readable"; return 1 ;; esac
+        seen="$seen$key "
+        case "$key" in name) U_NAME="$val" ;; version) U_VER="$val" ;; platform) U_PLAT="$val" ;; bytes) U_BYTES="$val" ;; sha256) U_SHA="$val" ;; esac
+    done < "$d/manifest"
+    if ! [[ "$U_NAME" =~ ^[A-Za-z0-9._-]{1,100}$ && "$U_VER" =~ ^[0-9]{1,6}(\.[0-9]{1,6}){1,3}$ && "$U_BYTES" =~ ^[0-9]{1,11}$ && "$U_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+        U_WHY="the update's manifest is not readable"; return 1
+    fi
+    [ "$U_PLAT" = linux ] || { U_WHY="the update is for another system ($U_PLAT)"; return 1; }
+    case "$U_NAME" in *.AppImage) ;; *) U_WHY="the update is not an AppImage"; return 1 ;; esac
+    [ "$(ver_cmp "$U_VER" "$mine")" = 1 ] || { U_WHY="the update ($U_VER) is not newer than this version ($mine)"; return 1; }
+    [ "$U_VER" = "$L_LATEST" ] || { U_WHY="the update ($U_VER) is not the version the site names ($L_LATEST)"; return 1; }
+    [ "${L_UPD_URL##*/}" = "$U_NAME" ] || { U_WHY="the update's address does not match its manifest"; return 1; }
+    return 0
+}
+
+# update_apply <this version>: download, check, put the new AppImage in place of this one (atomic rename; the old file
+# stays as a hidden backup next to it until the new one has started), start the new one. Any problem: a short notice,
+# the download page, and the current version starts (returns 1). On success this launcher exits.
+update_apply() {
+    local mine="$1" img dir f rc got tmp bak
+    echo "update: $mine -> $L_LATEST from $L_UPD_URL (AppImage ${APPIMAGE:-none})"
+    if [ -z "${APPIMAGE:-}" ]; then
+        update_fail "this copy was unpacked from the tar.gz" "The AppImage edition can update itself; the tar.gz folder is updated by hand."; return 1
+    fi
+    img="$(readlink -f "$APPIMAGE" 2>/dev/null)"
+    if [ -z "$img" ] || [ ! -f "$img" ]; then update_fail "the AppImage is not where UA Reforged expects it"; return 1; fi
+    dir="$(dirname "$img")"
+    if [ ! -w "$dir" ] || [ ! -w "$img" ] || [ ! -O "$img" ]; then
+        update_fail "it may not change the AppImage file or the folder it is in" "Keep the AppImage in a folder of yours (for example your home folder) to enable one-click updates."; return 1
+    fi
+    command -v openssl >/dev/null 2>&1 || { update_fail "openssl is not installed, so the update's signature cannot be checked"; return 1; }
+    rm -rf "$UPDATE_DL"; DL_DIR="$UPDATE_DL"; mkdir -p "$DL_DIR" || { update_fail "its folder could not be created"; return 1; }
+    update_verify "$DL_DIR" "$mine" || { update_fail "$U_WHY"; return 1; }
+    echo "update: signature and manifest ok ($U_NAME, $U_VER, $U_BYTES bytes)"
+    local free_s free_d; free_s=$(df -Pk "$SUPPORT" | awk 'NR == 2 { print $4 }'); free_d=$(df -Pk "$dir" | awk 'NR == 2 { print $4 }')
+    if [ "$((${free_s:-0} * 1024))" -lt "$((U_BYTES * 2))" ] || [ "$((${free_d:-0} * 1024))" -lt "$((U_BYTES * 2))" ]; then
+        update_fail "there is not enough free disk space"; return 1
+    fi
+    dl_ui_start "Updating UA Reforged to $U_VER"
+    DL_MAGIC=7f454c46 dl_precheck "$L_UPD_URL" 0 0 "$U_BYTES" || { update_fail "$PC_WHY"; return 1; }
+    f="$DL_DIR/$U_NAME"; DL_WHAT="Downloading the update"; DL_BASE=0; DL_TOTAL="$U_BYTES"; DL_MAXSIZE="$U_BYTES"
+    dl_fetch "$L_UPD_URL" "$f"; rc=$?; DL_MAXSIZE=""
+    if [ $rc -eq 130 ]; then rm -rf "$UPDATE_DL"; dl_ui_close; echo "update: cancelled; the current version starts"; return 1; fi
+    [ $rc -eq 0 ] || { update_fail "$DL_WHY"; return 1; }
+    dl_status 91 "Checking the update..."
+    got=$(fsize "$f")
+    [ "$got" = "$U_BYTES" ] || { update_fail "the downloaded file is not the expected size"; return 1; }
+    got="$(sha256 "$f")"
+    [ "$got" = "$U_SHA" ] || { update_fail "the downloaded file does not match its signature"; return 1; }
+    # an AppImage (type 2): an ELF program with "AI" 2 at byte 8
+    local hdr; hdr="$(head -c 11 "$f" | od -An -tx1 | tr -d ' \n')"
+    [ "${hdr:0:8}" = 7f454c46 ] && [ "${hdr:16:6}" = 414902 ] || { update_fail "the update is not an AppImage"; return 1; }
+    # swap: the new file goes next to this one under a hidden name, then replaces it in one rename; the old file stays
+    # as a hidden backup (removed by the new version once it has started)
+    dl_status 97 "Putting the new version in place..."
+    tmp="$dir/.$(basename "$img").update.$$"; bak="$dir/.$(basename "$img")-$mine.update-backup"
+    rm -f "$tmp" "$bak"
+    if ! cp "$f" "$tmp" 2>>"$DL_DIR/curl.err" || ! chmod 755 "$tmp"; then rm -f "$tmp"; update_fail "the new version could not be put next to this one"; return 1; fi
+    [ "$(sha256 "$tmp")" = "$U_SHA" ] || { rm -f "$tmp"; update_fail "the new version could not be put next to this one"; return 1; }
+    if ! ln "$img" "$bak" 2>/dev/null && ! cp -p "$img" "$bak" 2>>"$DL_DIR/curl.err"; then
+        rm -f "$tmp" "$bak"; update_fail "the old version could not be kept aside"; return 1
+    fi
+    if ! mv -f "$tmp" "$img"; then rm -f "$tmp" "$bak"; update_fail "the new version could not be put in place"; return 1; fi
+    rm -rf "$UPDATE_DL"
+    printf '%s\t%s\t%s\n' "$U_VER" "$img" "$bak" > "$UPDATE_PENDING"
+    echo "update: installed $U_VER, old version kept at $bak until the new one starts"
+    dl_ui_close
+    update_relaunch "$img"
+    # the new version removes the pending file (and the backup) as soon as it starts; wait up to 60 s for that
+    local i=0 n="${UPDATE_START_WAIT:-120}"
+    while [ -f "$UPDATE_PENDING" ] && [ $i -lt "$n" ]; do sleep 0.5; i=$((i + 1)); done
+    if [ ! -f "$UPDATE_PENDING" ]; then echo "update: the new version has started; this launcher stops"; exit 0; fi
+    # the new version did not start: put the old one back
+    rm -f "$UPDATE_PENDING"
+    if mv -f "$bak" "$img"; then echo "update: the new version did not start; old version restored"
+    else echo "update: the new version did not start and the old one could not be restored (backup at $bak)"; fi
+    update_fail "the new version did not start, so the current one was put back"
+    return 1
+}
+# update_relaunch <AppImage>: start the new AppImage on its own (it gets this environment, so test runs keep their UA_*
+# settings; the AppImage runtime sets its own APPDIR / APPIMAGE)
+update_relaunch() {
+    echo "update: starting $1"
+    ( cd "$HOME" 2>/dev/null; exec env -u APPDIR -u APPIMAGE -u ARGV0 -u OWD $(command -v setsid) "$1" </dev/null >/dev/null 2>&1 ) &
+    disown $! 2>/dev/null
+}
+# update_finish: at every start. When an update has just put this AppImage in place, tell the old launcher (it waits for
+# the pending file to go) and remove the old version's backup.
+update_finish() {
+    [ -f "$UPDATE_PENDING" ] || return 0
+    local v app bak me mine
+    IFS=$'\t' read -r v app bak < "$UPDATE_PENDING"
+    me="$(readlink -f "${APPIMAGE:-/nonexistent}" 2>/dev/null)"; mine="$(conf app_version | head -1)"
+    if [ "$v" = "$mine" ] && [ -n "$me" ] && [ "$app" = "$me" ]; then
+        rm -f "$UPDATE_PENDING"
+        case "$bak" in "$(dirname "$me")"/.*.update-backup) rm -f "$bak" ;; esac
+        echo "update: now running $mine; the old version was removed"
+    fi
 }
 
 # ---------------------------------------------------------------- progress window + cancel
@@ -190,8 +438,8 @@ dl_precheck() {
     fi
     case "$code" in 200|206) ;; *) ST_DETAIL="$code"; PC_WHY="the server answered HTTP $code instead of the file"; echo "link check: $url -> $PC_WHY"; return 1 ;; esac
     case "$type" in text/html*|application/xhtml*) PC_WHY="the link now leads to a web page, not to the file"; echo "link check: $url -> $PC_WHY ($type)"; return 1 ;; esac
-    if [ "$(head -c 4 "$b" | od -An -tx1 | tr -d ' \n')" != "504b0304" ]; then
-        PC_WHY="the link does not lead to a zip file"; echo "link check: $url -> $PC_WHY"; return 1
+    if [ "$(head -c 4 "$b" | od -An -tx1 | tr -d ' \n')" != "${DL_MAGIC:-504b0304}" ]; then
+        PC_WHY="the link does not lead to a ${DL_MAGIC:+program}${DL_MAGIC:-zip} file"; echo "link check: $url -> $PC_WHY"; return 1
     fi
     # the last response's headers (redirects come first)
     local cr cl; cr="$(awk '/^HTTP\//{r=""} tolower($1)=="content-range:"{r=$2" "$3} END{print r}' "$h" | tr -d '\r')"
