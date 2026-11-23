@@ -3943,14 +3943,10 @@ void UserData::GameShellUiHandleInput()
             {
                 if ( !StriCmp(tmp, it->name.substr(0, tmp.size())) )
                 {
-                    std::string suffix = it->name.substr(tmp.size());
-                    if (!suffix.empty() && suffix.size() <= 9 && StrIsDigitsOnly(suffix))
-                    {
-                        int n = std::stoi( suffix );
+                    int n = ProfileNumberSuffix( it->name.substr(tmp.size()) );
 
-                        if ( n > maxN )
-                            maxN = n;
-                    }
+                    if ( n > maxN )
+                        maxN = n;
                 }
             }
 

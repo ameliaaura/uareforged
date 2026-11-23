@@ -48,6 +48,9 @@ Desktop apps (macOS, Windows) and the Quest app have their own version numbers.
 - **Russian and Japanese menus no longer show empty boxes with the modern menu style** (High, Ultra or
   *STYLE: MODERN*). The modern style's font has Latin letters only; a language it cannot write now keeps its own
   font in the modern menus. English, German and French keep the modern font.
+- **No more crash pressing New on the save screen** when a profile is named just "UNNAMED" (no number after it).
+- **"." and ".." are no longer accepted as a profile name** (they saved outside the save folder).
+  Both fixes come from upstream OpenUA (Marisa-Chan).
 
 ## [0.8.4] - Desktop - 2026-11-22
 
